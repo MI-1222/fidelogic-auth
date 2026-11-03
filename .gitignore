@@ -1,0 +1,8 @@
+# rust
+/target
+
+# mac
+.DS_Store
+
+# distribution
+/dist
