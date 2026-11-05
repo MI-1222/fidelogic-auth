@@ -1,0 +1,3 @@
+-Q _build/default/proofs Fidelogic
+-Q proofs Fidelogic
+-arg "-w -deprecated-from-Coq -color no"

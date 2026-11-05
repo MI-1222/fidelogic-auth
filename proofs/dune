@@ -1,0 +1,7 @@
+(include_subdirs qualified)
+
+(rocq.theory
+ (name Fidelogic)
+ (package fidelogic-proofs)
+ (theories Stdlib)
+ (flags :standard -w -deprecated-from-Coq -color no))

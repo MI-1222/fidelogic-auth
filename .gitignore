@@ -6,3 +6,14 @@
 
 # distribution
 /dist
+
+# proof & dune build artifacts
+_build/
+*.vo
+*.vok
+*.vos
+*.glob
+.*.aux
+.lia.cache
+.nia.cache
+.coq-native/

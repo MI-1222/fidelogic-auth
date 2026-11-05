@@ -1,0 +1,15 @@
+FROM rocq/rocq-prover:latest
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+USER rocq
+WORKDIR /workspace
+
+COPY --chown=rocq:rocq . /workspace
+
+# デフォルトで検証ビルドと公理監査を実行
+CMD ["bash", "-c", "eval $(opam env) && ./scripts/audit_axioms.sh --module Fidelogic.Sanity --theorem sanity_add_comm"]
