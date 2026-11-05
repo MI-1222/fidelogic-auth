@@ -1,0 +1,17 @@
+[package]
+name = "fidelogic-wasm"
+description = "WebAssembly bindings for fidelogic-auth"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["std", "profile-lite"]
+std = ["fidelogic-core/std"]
+profile-lite = ["fidelogic-core/profile-lite"]
+profile-vault = ["fidelogic-core/profile-vault"]
+
+[dependencies]
+fidelogic-core = { workspace = true }

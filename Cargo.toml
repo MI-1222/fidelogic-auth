@@ -1,6 +1,14 @@
-[package]
-name = "fidelogic-auth"
+[workspace]
+resolver = "2"
+members = [
+    "crates/fidelogic-cli",
+    "crates/fidelogic-core",
+    "crates/fidelogic-wasm",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+fidelogic-core = { path = "crates/fidelogic-core", default-features = false }

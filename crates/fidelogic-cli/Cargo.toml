@@ -1,0 +1,8 @@
+[package]
+name = "fidelogic-cli"
+description = "Native command-line interface for fidelogic-auth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fidelogic-core = { workspace = true, features = ["profile-vault"] }

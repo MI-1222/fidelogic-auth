@@ -3,5 +3,19 @@
 version = 4
 
 [[package]]
-name = "fidelogic-auth"
+name = "fidelogic-cli"
 version = "0.1.0"
+dependencies = [
+ "fidelogic-core",
+]
+
+[[package]]
+name = "fidelogic-core"
+version = "0.1.0"
+
+[[package]]
+name = "fidelogic-wasm"
+version = "0.1.0"
+dependencies = [
+ "fidelogic-core",
+]
