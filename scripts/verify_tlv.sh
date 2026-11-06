@@ -38,7 +38,7 @@ with open(path, "w") as f:
 echo "==> [3/4] Building Rocq proofs via Dune..."
 "${SCRIPT_DIR}/build_proofs.sh"
 
-echo "==> [4/4] Auditing axioms for TLV soundness theorems..."
+echo "==> [4/4] Auditing axioms for TLV soundness and totality theorems..."
 python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --module Fidelogic.Theories.TlvSoundness \
   --theorem tlv_parse_tlv_header_underflow \
@@ -47,6 +47,31 @@ python3 "${SCRIPT_DIR}/audit_axioms.py" \
 python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --module Fidelogic.Theories.TlvSoundness \
   --theorem tlv_validate_tlv_bounds_implies_header_some \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_header_underflow \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_header_totality \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_record_header_underflow \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_record_underflow \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_record_bounds_violation \
   --allow-aeneas-axioms
 
 echo "==> [SUCCESS] All TLV extraction, proofs, and axiom audits passed cleanly."
