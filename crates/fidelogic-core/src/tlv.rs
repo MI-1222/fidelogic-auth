@@ -50,6 +50,20 @@ pub struct VaultHeader {
     pub suite_id: u8,
 }
 
+/// KEKスロット定義テーブルのエントリを表す固定長レコード。
+///
+/// スロットID, KDF種別, ラップ済みDEKのバイト長を保持する。
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct KekSlotEntry {
+    /// スロット識別子。
+    pub slot_id: u8,
+    /// 鍵導出関数(KDF)の種別。
+    pub kdf_kind: u8,
+    /// ラップ済みDEKのバイト長。
+    pub wrapped_dek_len: u16,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +81,20 @@ mod tests {
             suite_id: 1,
         };
         assert_eq!(header1, header2, "同一パラメータのVaultHeader比較に成功。");
+    }
+
+    #[test]
+    fn test_kek_slot_entry_equality() {
+        let entry1 = KekSlotEntry {
+            slot_id: 0,
+            kdf_kind: 1,
+            wrapped_dek_len: 64,
+        };
+        let entry2 = KekSlotEntry {
+            slot_id: 0,
+            kdf_kind: 1,
+            wrapped_dek_len: 64,
+        };
+        assert_eq!(entry1, entry2, "同一パラメータのKekSlotEntry比較に成功。");
     }
 }
