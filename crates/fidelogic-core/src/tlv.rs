@@ -156,6 +156,38 @@ impl TlvRecord {
     }
 }
 
+/// Vault全体の集約型。
+///
+/// ヘッダー情報、KEKスロット定義テーブル、TLVレコード群を統括する。
+#[cfg(feature = "alloc")]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct Vault {
+    /// Vaultヘッダー情報。
+    pub header: VaultHeader,
+    /// KEKスロット定義テーブル。
+    pub slots: alloc::vec::Vec<KekSlotEntry>,
+    /// TLVレコード群。
+    pub records: alloc::vec::Vec<TlvRecord>,
+}
+
+#[cfg(feature = "alloc")]
+impl Vault {
+    /// 新しいVault構造体を生成する。
+    #[must_use]
+    pub fn new(
+        header: VaultHeader,
+        slots: alloc::vec::Vec<KekSlotEntry>,
+        records: alloc::vec::Vec<TlvRecord>,
+    ) -> Self {
+        Self {
+            header,
+            slots,
+            records,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,5 +258,25 @@ mod tests {
             99,
             "TlvRecord::UnknownTagからのtag取得に成功。"
         );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_vault_equality() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        let slot = KekSlotEntry {
+            slot_id: 0,
+            kdf_kind: 1,
+            wrapped_dek_len: 64,
+        };
+        let payload = TlvPayload::new(alloc::vec![0x01, 0x02], [0xbb; AUTH_TAG_LEN]);
+        let record = TlvRecord::Known { tag: 1, payload };
+        let vault1 = Vault::new(header, alloc::vec![slot], alloc::vec![record.clone()]);
+        let vault2 = Vault::new(header, alloc::vec![slot], alloc::vec![record]);
+        assert_eq!(vault1, vault2, "同一パラメータのVault比較に成功。");
     }
 }
