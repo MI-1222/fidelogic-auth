@@ -6,7 +6,8 @@
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{
     EntryPayload, KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
-    deserialize_slot_entry, serialize, serialize_record, serialize_slot_entry,
+    deserialize_slot_entry, record_serialized_len, serialize, serialize_record,
+    serialize_record_into, serialize_slot_entry, serialize_slot_entry_into,
 };
 pub use crate::tlv::{
     KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TLV_HEADER_LEN, TlvParseError,

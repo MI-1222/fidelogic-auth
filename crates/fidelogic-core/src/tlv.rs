@@ -213,7 +213,10 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
 /// - `wrapped_dek` の実体長と `wrapped_dek_len` が一致しない場合は [`VaultError::InvalidLength`] を返す。
 /// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, VaultError> {
+pub fn serialize_slot_entry_into(
+    entry: &KekSlotEntry,
+    out: &mut alloc::vec::Vec<u8>,
+) -> Result<(), VaultError> {
     if entry.wrapped_dek.len() > u16::MAX as usize {
         return Err(VaultError::InvalidLength);
     }
@@ -221,12 +224,35 @@ pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>,
         return Err(VaultError::InvalidLength);
     }
     let len_bytes = entry.wrapped_dek_len.to_be_bytes();
+    out.reserve(KEK_SLOT_HEADER_LEN + entry.wrapped_dek.len());
+    out.push(entry.slot_id);
+    out.push(entry.kdf_kind);
+    out.push(len_bytes[0]);
+    out.push(len_bytes[1]);
+    out.extend_from_slice(&entry.wrapped_dek);
+    Ok(())
+}
+
+/// `KekSlotEntry` 単体の純粋関数型シリアライザー。
+///
+/// 指定された [`KekSlotEntry`] をバイナリ形式にシリアライズする。
+/// スロットID (1B), KDF種別 (1B), ラップ済みDEK長 (2B, ビッグエンディアン),
+/// および暗号化DEK本体(Wrapped DEK)のバイト列を出力する。
+///
+/// # Errors
+///
+/// - `wrapped_dek` の実体長と `wrapped_dek_len` が一致しない場合は [`VaultError::InvalidLength`] を返す。
+/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, VaultError> {
+    if entry.wrapped_dek.len() > u16::MAX as usize {
+        return Err(VaultError::InvalidLength);
+    }
+    if entry.wrapped_dek.len() != entry.wrapped_dek_len as usize {
+        return Err(VaultError::InvalidLength);
+    }
     let mut bytes = alloc::vec::Vec::with_capacity(KEK_SLOT_HEADER_LEN + entry.wrapped_dek.len());
-    bytes.push(entry.slot_id);
-    bytes.push(entry.kdf_kind);
-    bytes.push(len_bytes[0]);
-    bytes.push(len_bytes[1]);
-    bytes.extend_from_slice(&entry.wrapped_dek);
+    serialize_slot_entry_into(entry, &mut bytes)?;
     Ok(bytes)
 }
 
@@ -344,9 +370,41 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
     Ok((record, rest))
 }
 
+/// `TlvRecord` 単体のシリアライズ結果のバイト長を計算する。
+///
+/// # Errors
+///
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+pub fn record_serialized_len(record: &TlvRecord) -> Result<usize, VaultError> {
+    match record {
+        TlvRecord::Entry(payload) => {
+            let payload_len = payload
+                .ciphertext
+                .len()
+                .checked_add(AUTH_TAG_LEN)
+                .ok_or(VaultError::InvalidLength)?;
+            if payload_len > u8::MAX as usize {
+                return Err(VaultError::InvalidLength);
+            }
+            TLV_HEADER_LEN
+                .checked_add(payload_len)
+                .ok_or(VaultError::InvalidLength)
+        }
+        TlvRecord::Unknown { raw_bytes, .. } => {
+            if raw_bytes.len() > u8::MAX as usize {
+                return Err(VaultError::InvalidLength);
+            }
+            TLV_HEADER_LEN
+                .checked_add(raw_bytes.len())
+                .ok_or(VaultError::InvalidLength)
+        }
+    }
+}
+
 /// `TlvRecord` 単体の純粋関数型シリアライザー。
 ///
-/// 指定された [`TlvRecord`] をバイト列にシリアライズする。
+/// 指定されたバッファに [`TlvRecord`] のバイナリ表現を追記する。
 /// エントリレコードの場合は `[Tag (1B), Length (1B), Ciphertext..., AuthTag (16B)]`、
 /// 未知レコードの場合は `[Tag (1B), Length (1B), RawBytes...]` を出力する。
 ///
@@ -354,7 +412,10 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
 ///
 /// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, VaultError> {
+pub fn serialize_record_into(
+    record: &TlvRecord,
+    out: &mut alloc::vec::Vec<u8>,
+) -> Result<(), VaultError> {
     match record {
         TlvRecord::Entry(payload) => {
             let payload_len = payload
@@ -366,25 +427,42 @@ pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, Vault
                 return Err(VaultError::InvalidLength);
             }
             let length = payload_len as u8;
-            let mut bytes = alloc::vec::Vec::with_capacity(2 + payload_len);
-            bytes.push(TAG_ENTRY);
-            bytes.push(length);
-            bytes.extend_from_slice(&payload.ciphertext);
-            bytes.extend_from_slice(&payload.auth_tag);
-            Ok(bytes)
+            out.reserve(TLV_HEADER_LEN + payload_len);
+            out.push(TAG_ENTRY);
+            out.push(length);
+            out.extend_from_slice(&payload.ciphertext);
+            out.extend_from_slice(&payload.auth_tag);
+            Ok(())
         }
         TlvRecord::Unknown { tag, raw_bytes } => {
             if raw_bytes.len() > u8::MAX as usize {
                 return Err(VaultError::InvalidLength);
             }
             let length = raw_bytes.len() as u8;
-            let mut bytes = alloc::vec::Vec::with_capacity(2 + raw_bytes.len());
-            bytes.push(*tag);
-            bytes.push(length);
-            bytes.extend_from_slice(raw_bytes);
-            Ok(bytes)
+            out.reserve(TLV_HEADER_LEN + raw_bytes.len());
+            out.push(*tag);
+            out.push(length);
+            out.extend_from_slice(raw_bytes);
+            Ok(())
         }
     }
+}
+
+/// `TlvRecord` 単体の純粋関数型シリアライザー。
+///
+/// 指定された [`TlvRecord`] をバイト列にシリアライズする。
+/// エントリレコードの場合は `[Tag (1B), Length (1B), Ciphertext..., AuthTag (16B)]`、
+/// 未知レコードの場合は `[Tag (1B), Length (1B), RawBytes...]` を出力する。
+///
+/// # Errors
+///
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, VaultError> {
+    let len = record_serialized_len(record)?;
+    let mut bytes = alloc::vec::Vec::with_capacity(len);
+    serialize_record_into(record, &mut bytes)?;
+    Ok(bytes)
 }
 
 /// Vault全体の集約型。
@@ -477,11 +555,13 @@ pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
 /// 指定された [`Vault`] をバイナリ形式にシリアライズする。
 /// ヘッダー、KEKスロット定義テーブル、およびTLVレコード群を結合したバイト列を出力する。
 ///
+/// 全体の出力長を事前計算して単一のバッファを一括確保し、不要な一時バッファの生成や再割り当てを防ぐ。
+///
 /// # Errors
 ///
 /// - KEKスロット数が `u8::MAX` (255個) を超過する場合は [`VaultError::InvalidLength`] を返す。
 /// - レコード数が `u16::MAX` (65535個) を超過する場合は [`VaultError::InvalidLength`] を返す。
-/// - レコードシリアライズ処理でエラーが発生した場合はその [`VaultError`] を返す。
+/// - スロットまたはレコードのシリアライズ処理でエラーが発生した場合はその [`VaultError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn serialize(vault: &Vault) -> Result<alloc::vec::Vec<u8>, VaultError> {
     if vault.slots.len() > u8::MAX as usize {
@@ -491,22 +571,47 @@ pub fn serialize(vault: &Vault) -> Result<alloc::vec::Vec<u8>, VaultError> {
         return Err(VaultError::InvalidLength);
     }
 
+    let mut total_len = VAULT_HEADER_LEN
+        .checked_add(1)
+        .and_then(|l| l.checked_add(2))
+        .ok_or(VaultError::InvalidLength)?;
+
+    for slot in &vault.slots {
+        if slot.wrapped_dek.len() > u16::MAX as usize
+            || slot.wrapped_dek.len() != slot.wrapped_dek_len as usize
+        {
+            return Err(VaultError::InvalidLength);
+        }
+        let slot_len = KEK_SLOT_HEADER_LEN
+            .checked_add(slot.wrapped_dek.len())
+            .ok_or(VaultError::InvalidLength)?;
+        total_len = total_len
+            .checked_add(slot_len)
+            .ok_or(VaultError::InvalidLength)?;
+    }
+
+    for record in &vault.records {
+        let rec_len = record_serialized_len(record)?;
+        total_len = total_len
+            .checked_add(rec_len)
+            .ok_or(VaultError::InvalidLength)?;
+    }
+
+    let mut out = alloc::vec::Vec::with_capacity(total_len);
+
     let header_bytes = serialize_header(&vault.header);
-    let mut out = alloc::vec::Vec::new();
     out.extend_from_slice(&header_bytes);
 
     let slot_count = vault.slots.len() as u8;
     out.push(slot_count);
     for slot in &vault.slots {
-        let slot_bytes = serialize_slot_entry(slot)?;
-        out.extend_from_slice(&slot_bytes);
+        serialize_slot_entry_into(slot, &mut out)?;
     }
 
     let record_count = (vault.records.len() as u16).to_be_bytes();
     out.extend_from_slice(&record_count);
     for record in &vault.records {
-        let record_bytes = serialize_record(record)?;
-        out.extend_from_slice(&record_bytes);
+        serialize_record_into(record, &mut out)?;
     }
 
     Ok(out)
@@ -1171,6 +1276,53 @@ mod tests {
             res,
             Err(VaultError::InvalidLength),
             "スロット数が255超過時のInvalidLength返却検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_record_into_matches_serialize_record() {
+        let record = TlvRecord::Entry(EntryPayload::new(
+            alloc::vec![1, 2, 3, 4],
+            [0xee; AUTH_TAG_LEN],
+        ));
+        let mut buf = alloc::vec::Vec::new();
+        serialize_record_into(&record, &mut buf).expect("serialize_record_into実行に成功。");
+        let direct = serialize_record(&record).expect("serialize_record実行に成功。");
+        assert_eq!(
+            buf, direct,
+            "serialize_record_intoとserialize_recordの一致検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_vault_capacity_matches_len() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 2,
+        };
+        let slot = KekSlotEntry {
+            slot_id: 1,
+            kdf_kind: 1,
+            wrapped_dek_len: 2,
+            wrapped_dek: alloc::vec![0xaa, 0xbb],
+        };
+        let record1 = TlvRecord::Entry(EntryPayload::new(
+            alloc::vec![0x01, 0x02],
+            [0x55; AUTH_TAG_LEN],
+        ));
+        let record2 = TlvRecord::Unknown {
+            tag: 77,
+            raw_bytes: alloc::vec![0x99, 0x88, 0x77],
+        };
+        let vault = Vault::new(header, alloc::vec![slot], alloc::vec![record1, record2]);
+        let serialized = serialize(&vault).expect("事前容量計算シリアライズに成功。");
+        assert_eq!(
+            serialized.len(),
+            serialized.capacity(),
+            "事前計算によるバッファ一括確保と容量完全一致の検証に成功。"
         );
     }
 }
