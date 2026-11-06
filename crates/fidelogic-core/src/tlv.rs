@@ -64,6 +64,98 @@ pub struct KekSlotEntry {
     pub wrapped_dek_len: u16,
 }
 
+/// AEAD認証タグのバイト長(16バイト)。
+pub const AUTH_TAG_LEN: usize = 16;
+
+/// TLVレコードの既知ペイロード(暗号化データおよび認証タグ)。
+#[cfg(feature = "alloc")]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, PartialEq, Eq)]
+pub struct TlvPayload {
+    /// 暗号化データ本体。
+    pub ciphertext: alloc::vec::Vec<u8>,
+    /// AEAD認証タグ(16バイト)。
+    pub auth_tag: [u8; AUTH_TAG_LEN],
+}
+
+#[cfg(feature = "alloc")]
+impl TlvPayload {
+    /// 新しい既知ペイロード構造体を生成する。
+    #[must_use]
+    pub fn new(ciphertext: alloc::vec::Vec<u8>, auth_tag: [u8; AUTH_TAG_LEN]) -> Self {
+        Self {
+            ciphertext,
+            auth_tag,
+        }
+    }
+}
+
+/// ペイロード部のTLVレコードを表す列挙型。
+///
+/// 既知タグ(`Known`)または将来拡張用の未知タグ(`UnknownTag`)を表現する。
+#[cfg(feature = "alloc")]
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone)]
+pub enum TlvRecord {
+    /// 既知タグと解釈済みペイロード。
+    Known {
+        /// レコード種別タグ。
+        tag: u8,
+        /// 暗号化データおよび認証タグ。
+        payload: TlvPayload,
+    },
+    /// 未知タグと未解釈生バイト列。
+    UnknownTag {
+        /// レコード種別タグ。
+        tag: u8,
+        /// レコードの生バイト列。
+        raw_bytes: alloc::vec::Vec<u8>,
+    },
+}
+
+#[cfg(feature = "alloc")]
+impl PartialEq for TlvRecord {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Known {
+                    tag: tag1,
+                    payload: payload1,
+                },
+                Self::Known {
+                    tag: tag2,
+                    payload: payload2,
+                },
+            ) => tag1 == tag2 && payload1 == payload2,
+            (
+                Self::UnknownTag {
+                    tag: tag1,
+                    raw_bytes: bytes1,
+                },
+                Self::UnknownTag {
+                    tag: tag2,
+                    raw_bytes: bytes2,
+                },
+            ) => tag1 == tag2 && bytes1 == bytes2,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl Eq for TlvRecord {}
+
+#[cfg(feature = "alloc")]
+impl TlvRecord {
+    /// レコード種別タグを返す。
+    #[must_use]
+    pub const fn tag(&self) -> u8 {
+        match *self {
+            Self::Known { tag, .. } | Self::UnknownTag { tag, .. } => tag,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,5 +188,43 @@ mod tests {
             wrapped_dek_len: 64,
         };
         assert_eq!(entry1, entry2, "同一パラメータのKekSlotEntry比較に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_tlv_record_equality() {
+        let payload1 = TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]);
+        let payload2 = TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]);
+        let known1 = TlvRecord::Known {
+            tag: 1,
+            payload: payload1,
+        };
+        let known2 = TlvRecord::Known {
+            tag: 1,
+            payload: payload2,
+        };
+        assert_eq!(
+            known1, known2,
+            "同一パラメータのTlvRecord::Known比較に成功。"
+        );
+        assert_eq!(known1.tag(), 1, "TlvRecord::Knownからのtag取得に成功。");
+
+        let unknown1 = TlvRecord::UnknownTag {
+            tag: 99,
+            raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
+        };
+        let unknown2 = TlvRecord::UnknownTag {
+            tag: 99,
+            raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
+        };
+        assert_eq!(
+            unknown1, unknown2,
+            "同一パラメータのTlvRecord::UnknownTag比較に成功。"
+        );
+        assert_eq!(
+            unknown1.tag(),
+            99,
+            "TlvRecord::UnknownTagからのtag取得に成功。"
+        );
     }
 }
