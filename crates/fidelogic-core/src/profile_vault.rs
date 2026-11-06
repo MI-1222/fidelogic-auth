@@ -4,8 +4,9 @@
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
 pub use crate::tlv::{
-    KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN,
-    VAULT_MAGIC, VaultError, VaultHeader, deserialize_header, is_known_tag, serialize_header,
+    KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TLV_HEADER_LEN, TlvParseError,
+    VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader, deserialize_header, is_known_tag,
+    serialize_header,
 };
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{

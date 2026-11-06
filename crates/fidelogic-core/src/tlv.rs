@@ -9,10 +9,13 @@ pub struct TlvHeader {
     pub length: u8,
 }
 
+/// TLVレコードヘッダーのバイト長(2バイト: Tag 1B + Length 1B)。
+pub const TLV_HEADER_LEN: usize = 2;
+
 /// 2バイトのヘッダー [Tag (1B), Length (1B)] を安全に取得する。
 #[must_use]
 pub fn parse_tlv_header(bytes: &[u8]) -> Option<TlvHeader> {
-    if bytes.len() < 2 {
+    if bytes.len() < TLV_HEADER_LEN {
         None
     } else {
         Some(TlvHeader {
@@ -26,7 +29,7 @@ pub fn parse_tlv_header(bytes: &[u8]) -> Option<TlvHeader> {
 #[must_use]
 pub fn validate_tlv_bounds(bytes: &[u8]) -> bool {
     if let Some(header) = parse_tlv_header(bytes) {
-        let required_len = 2usize + (header.length as usize);
+        let required_len = TLV_HEADER_LEN + (header.length as usize);
         bytes.len() >= required_len
     } else {
         false
@@ -459,6 +462,7 @@ impl Vault {
 /// # Errors
 ///
 /// - 入力バイト列の長さが各フィールドの必要長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
+/// - スロット数やレコード数に対して残余バイト列長が不足している場合は [`VaultError::UnexpectedEof`] を返す。
 /// - マジックバイトが不正な場合は [`VaultError::InvalidMagic`] を返す。
 /// - レコード長や認証タグ長が不正な場合は各 [`VaultError`] を返す。
 #[cfg(feature = "alloc")]
@@ -470,6 +474,10 @@ pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
     }
     let slot_count = rest[0] as usize;
     rest = &rest[1..];
+
+    if slot_count.saturating_mul(KEK_SLOT_HEADER_LEN) > rest.len() {
+        return Err(VaultError::UnexpectedEof);
+    }
 
     let mut slots = alloc::vec::Vec::with_capacity(slot_count);
     for _ in 0..slot_count {
@@ -483,6 +491,10 @@ pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
     }
     let record_count = u16::from_be_bytes([rest[0], rest[1]]) as usize;
     rest = &rest[2..];
+
+    if record_count.saturating_mul(TLV_HEADER_LEN) > rest.len() {
+        return Err(VaultError::UnexpectedEof);
+    }
 
     let mut records = alloc::vec::Vec::with_capacity(record_count);
     for _ in 0..record_count {
@@ -940,6 +952,22 @@ mod tests {
             deserialize(&record_missing),
             Err(VaultError::UnexpectedEof),
             "レコードデータ不足時のUnexpectedEof検証に成功。"
+        );
+
+        // slot_count事前境界チェック(Allocation DoS防止)
+        let slot_dos_attack = [b'F', b'V', b'A', b'U', 1, 1, 255, 0, 1];
+        assert_eq!(
+            deserialize(&slot_dos_attack),
+            Err(VaultError::UnexpectedEof),
+            "過大slot_countによる事前境界チェック(Allocation DoS防止)の検証に成功。"
+        );
+
+        // record_count事前境界チェック(Allocation DoS防止)
+        let record_dos_attack = [b'F', b'V', b'A', b'U', 1, 1, 0, 0xff, 0xff, 1, 2];
+        assert_eq!(
+            deserialize(&record_dos_attack),
+            Err(VaultError::UnexpectedEof),
+            "過大record_countによる事前境界チェック(Allocation DoS防止)の検証に成功。"
         );
     }
 
