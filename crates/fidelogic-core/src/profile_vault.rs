@@ -4,11 +4,11 @@
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
 pub use crate::tlv::{
-    KekSlotEntry, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader,
-    deserialize_header, is_known_tag,
+    KEK_SLOT_ENTRY_LEN, KekSlotEntry, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC,
+    VaultError, VaultHeader, deserialize_header, deserialize_slot_entry, is_known_tag,
 };
 #[cfg(feature = "alloc")]
-pub use crate::tlv::{TlvPayload, TlvRecord, Vault, deserialize_record};
+pub use crate::tlv::{TlvPayload, TlvRecord, Vault, deserialize, deserialize_record};
 
 /// `profile-vault` の運用エンジンを表す構造体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -74,6 +74,27 @@ mod tests {
             res,
             Err(VaultError::InvalidLength),
             "profile_vault経由のdeserialize_record呼び出しに成功。"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_slot_entry_reexport() {
+        let input = [0, 1, 0, 64];
+        let res = deserialize_slot_entry(&input);
+        assert!(
+            res.is_ok(),
+            "profile_vault経由のdeserialize_slot_entry呼び出しに成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_vault_reexport() {
+        let input = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x00];
+        let res = deserialize(&input);
+        assert!(
+            res.is_ok(),
+            "profile_vault経由のdeserialize呼び出しに成功。"
         );
     }
 }

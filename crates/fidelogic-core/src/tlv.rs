@@ -117,6 +117,32 @@ pub struct KekSlotEntry {
     pub wrapped_dek_len: u16,
 }
 
+/// KEKスロットエントリのバイト長(4バイト)。
+pub const KEK_SLOT_ENTRY_LEN: usize = 4;
+
+/// `KekSlotEntry` 単体の純粋関数型デシリアライザー。
+///
+/// 入力バイト列からスロットID (1B), KDF種別 (1B), ラップ済みDEK長 (2B, ビッグエンディアン) を安全に読み取り、
+/// デシリアライズされた [`KekSlotEntry`] と残余バイトスライスを返す。
+///
+/// # Errors
+///
+/// - 入力バイト列の長さが [`KEK_SLOT_ENTRY_LEN`] 未満の場合は [`VaultError::UnexpectedEof`] を返す。
+pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), TlvParseError> {
+    if bytes.len() < KEK_SLOT_ENTRY_LEN {
+        return Err(VaultError::UnexpectedEof);
+    }
+    let slot_id = bytes[0];
+    let kdf_kind = bytes[1];
+    let wrapped_dek_len = u16::from_be_bytes([bytes[2], bytes[3]]);
+    let entry = KekSlotEntry {
+        slot_id,
+        kdf_kind,
+        wrapped_dek_len,
+    };
+    Ok((entry, &bytes[KEK_SLOT_ENTRY_LEN..]))
+}
+
 /// AEAD認証タグのバイト長(16バイト)。
 pub const AUTH_TAG_LEN: usize = 16;
 
@@ -296,6 +322,50 @@ impl Vault {
             records,
         }
     }
+}
+
+/// `Vault` 全体の純粋関数型デシリアライザー。
+///
+/// 入力バイト列から [`VaultHeader`]、KEKスロット定義テーブル、およびTLVレコード群を順次デシリアライズし、
+/// 結合された [`Vault`] と残余バイトスライスを返す。
+///
+/// # Errors
+///
+/// - 入力バイト列の長さが各フィールドの必要長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
+/// - マジックバイトが不正な場合は [`VaultError::InvalidMagic`] を返す。
+/// - レコード長や認証タグ長が不正な場合は各 [`VaultError`] を返す。
+#[cfg(feature = "alloc")]
+pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
+    let (header, mut rest) = deserialize_header(bytes)?;
+
+    if rest.is_empty() {
+        return Err(VaultError::UnexpectedEof);
+    }
+    let slot_count = rest[0] as usize;
+    rest = &rest[1..];
+
+    let mut slots = alloc::vec::Vec::with_capacity(slot_count);
+    for _ in 0..slot_count {
+        let (slot_entry, next_rest) = deserialize_slot_entry(rest)?;
+        slots.push(slot_entry);
+        rest = next_rest;
+    }
+
+    if rest.len() < 2 {
+        return Err(VaultError::UnexpectedEof);
+    }
+    let record_count = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+    rest = &rest[2..];
+
+    let mut records = alloc::vec::Vec::with_capacity(record_count);
+    for _ in 0..record_count {
+        let (record, next_rest) = deserialize_record(rest)?;
+        records.push(record);
+        rest = next_rest;
+    }
+
+    let vault = Vault::new(header, slots, records);
+    Ok((vault, rest))
 }
 
 #[cfg(test)]
@@ -529,6 +599,186 @@ mod tests {
             deserialize_record(&input),
             Err(VaultError::InvalidLength),
             "既知タグで認証タグ長未満時のInvalidLength検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_slot_entry_success() {
+        let input = [1, 2, 0x01, 0x00, 0xff];
+        let result = deserialize_slot_entry(&input);
+        assert!(
+            result.is_ok(),
+            "KEKスロットエントリの正常系デシリアライズに成功。"
+        );
+        let (entry, rest) = result.unwrap();
+        assert_eq!(
+            entry,
+            KekSlotEntry {
+                slot_id: 1,
+                kdf_kind: 2,
+                wrapped_dek_len: 256,
+            },
+            "デシリアライズされたKekSlotEntry内容の検証に成功。"
+        );
+        assert_eq!(rest, &[0xff], "スロットパース後の残余スライス検証に成功。");
+    }
+
+    #[test]
+    fn test_deserialize_slot_entry_unexpected_eof() {
+        let short_input = [1, 2, 0x01];
+        assert_eq!(
+            deserialize_slot_entry(&short_input),
+            Err(VaultError::UnexpectedEof),
+            "スロット長不足時のUnexpectedEof検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_vault_success() {
+        let mut input = alloc::vec![b'F', b'V', b'A', b'U', 1, 2];
+        // 1スロット
+        input.push(1);
+        input.extend_from_slice(&[0, 1, 0x00, 0x40]);
+        // 2レコード
+        input.extend_from_slice(&[0x00, 0x02]);
+        // レコード1: 既知タグ
+        input.extend_from_slice(&[TAG_ENTRY, 19]);
+        input.extend_from_slice(&[0x01, 0x02, 0x03]);
+        input.extend_from_slice(&[0xaa; AUTH_TAG_LEN]);
+        // レコード2: 未知タグ
+        input.extend_from_slice(&[99, 4, 0xde, 0xad, 0xbe, 0xef]);
+        // 残余バイト
+        input.extend_from_slice(&[0x99, 0x88]);
+
+        let result = deserialize(&input);
+        assert!(result.is_ok(), "Vault全体の正常系デシリアライズに成功。");
+        let (vault, rest) = result.unwrap();
+        assert_eq!(
+            vault.header,
+            VaultHeader {
+                magic: VAULT_MAGIC,
+                version: 1,
+                suite_id: 2,
+            },
+            "デシリアライズされたVaultHeaderの検証に成功。"
+        );
+        assert_eq!(
+            vault.slots,
+            alloc::vec![KekSlotEntry {
+                slot_id: 0,
+                kdf_kind: 1,
+                wrapped_dek_len: 64,
+            }],
+            "デシリアライズされたスロットテーブルの検証に成功。"
+        );
+        assert_eq!(
+            vault.records,
+            alloc::vec![
+                TlvRecord::Known {
+                    tag: TAG_ENTRY,
+                    payload: TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]),
+                },
+                TlvRecord::UnknownTag {
+                    tag: 99,
+                    raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
+                },
+            ],
+            "デシリアライズされたレコード群の検証に成功。"
+        );
+        assert_eq!(
+            rest,
+            &[0x99, 0x88],
+            "Vault全体のパース後残余スライス検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_vault_empty_slots_and_records() {
+        let input = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x00];
+        let result = deserialize(&input);
+        assert!(
+            result.is_ok(),
+            "空スロットおよび空レコードのVaultデシリアライズに成功。"
+        );
+        let (vault, rest) = result.unwrap();
+        assert!(
+            vault.slots.is_empty(),
+            "スロットテーブルが空であることの検証に成功。"
+        );
+        assert!(
+            vault.records.is_empty(),
+            "レコード群が空であることの検証に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_vault_unexpected_eof() {
+        // ヘッダー不足
+        assert_eq!(
+            deserialize(b"FVA"),
+            Err(VaultError::UnexpectedEof),
+            "Vaultヘッダー長不足時のUnexpectedEof検証に成功。"
+        );
+
+        // slot_count不足
+        let header_only = [b'F', b'V', b'A', b'U', 1, 1];
+        assert_eq!(
+            deserialize(&header_only),
+            Err(VaultError::UnexpectedEof),
+            "slot_count不足時のUnexpectedEof検証に成功。"
+        );
+
+        // スロットデータ不足
+        let slot_missing = [b'F', b'V', b'A', b'U', 1, 1, 1, 0, 1];
+        assert_eq!(
+            deserialize(&slot_missing),
+            Err(VaultError::UnexpectedEof),
+            "スロットデータ不足時のUnexpectedEof検証に成功。"
+        );
+
+        // record_count不足
+        let record_count_missing = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00];
+        assert_eq!(
+            deserialize(&record_count_missing),
+            Err(VaultError::UnexpectedEof),
+            "record_count不足時のUnexpectedEof検証に成功。"
+        );
+
+        // レコードデータ不足
+        let record_missing = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x01, TAG_ENTRY, 10];
+        assert_eq!(
+            deserialize(&record_missing),
+            Err(VaultError::UnexpectedEof),
+            "レコードデータ不足時のUnexpectedEof検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_vault_invalid_magic() {
+        let input = [b'X', b'X', b'X', b'X', 1, 1, 0, 0x00, 0x00];
+        assert_eq!(
+            deserialize(&input),
+            Err(VaultError::InvalidMagic),
+            "不正マジックバイト時のInvalidMagic検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_vault_record_error() {
+        let input = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x01, TAG_ENTRY, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8,
+            9,
+        ];
+        assert_eq!(
+            deserialize(&input),
+            Err(VaultError::InvalidLength),
+            "不正レコード含有時のエラー伝播検証に成功。"
         );
     }
 }
