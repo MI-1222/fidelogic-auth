@@ -48,6 +48,51 @@ STANDARD_APPROVED_AXIOMS: set[str] = {
 }
 
 # Approved axioms for TLC library in Separation Logic Foundations (SLF).
+
+# Approved axioms for Aeneas pure modeling primitives (slice, array, and arch-specific scalar bounds).
+AENEAS_APPROVED_AXIOMS: set[str] = {
+    "Primitives.Primitives.isize_min",
+    "Primitives.Primitives.isize_max",
+    "Primitives.Primitives.usize_max",
+    "Primitives.Primitives.isize_min_bound",
+    "Primitives.Primitives.isize_max_bound",
+    "Primitives.Primitives.usize_max_bound",
+    "Primitives.isize_min",
+    "Primitives.isize_max",
+    "Primitives.usize_max",
+    "Primitives.isize_min_bound",
+    "Primitives.isize_max_bound",
+    "Primitives.usize_max_bound",
+    "isize_min",
+    "isize_max",
+    "usize_max",
+    "isize_min_bound",
+    "isize_max_bound",
+    "usize_max_bound",
+    "Primitives.Primitives.slice_len",
+    "Primitives.Primitives.slice_index_usize",
+    "Primitives.Primitives.slice_update_usize",
+    "Primitives.Primitives.slice_update",
+    "Primitives.slice_len",
+    "Primitives.slice_index_usize",
+    "Primitives.slice_update_usize",
+    "Primitives.slice_update",
+    "slice_len",
+    "slice_index_usize",
+    "slice_update_usize",
+    "slice_update",
+    "Primitives.Primitives.mk_array",
+    "Primitives.Primitives.array_repeat",
+    "Primitives.Primitives.array_index_usize",
+    "Primitives.Primitives.array_update_usize",
+    "Primitives.Primitives.array_update",
+    "Primitives.Primitives.array_to_slice",
+    "Primitives.Primitives.array_from_slice",
+    "Primitives.Primitives.alloc_vec_Vec_index_usize",
+    "Primitives.Primitives.alloc_vec_Vec_update_usize",
+    "Primitives.Primitives.alloc_vec_Vec_update",
+}
+
 TLC_APPROVED_AXIOMS: set[str] = {
     "LibAxioms.prop_ext",
     "LibAxioms.fun_ext_dep",
@@ -384,6 +429,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Allow TLC axiom set for Separation Logic Foundations (SLF).",
     )
+    parser.add_argument(
+        "--allow-aeneas-axioms",
+        action="store_true",
+        help="Allow approved Aeneas primitive axioms (slice bounds and architecture scalars).",
+    )
     return parser.parse_args()
 
 
@@ -422,6 +472,9 @@ def main() -> None:
         allowed_set.update(STANDARD_APPROVED_AXIOMS)
     if args.allow_tlc_axioms:
         allowed_set.update(TLC_APPROVED_AXIOMS)
+    if args.allow_aeneas_axioms:
+        allowed_set.update(AENEAS_APPROVED_AXIOMS)
+
 
     unapproved_axioms: list[str] = []
     admitted_detected = False

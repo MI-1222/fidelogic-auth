@@ -22,6 +22,8 @@ pub mod profile_lite;
 #[cfg(feature = "profile-vault")]
 pub mod profile_vault;
 
+pub mod tlv;
+
 /// 現在有効化されているプロファイルの識別子を返す。
 #[must_use]
 pub fn active_profile() -> &'static str {
