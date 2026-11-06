@@ -109,4 +109,9 @@ python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --theorem tlv_record_roundtrip_unknown \
   --allow-aeneas-axioms
 
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_header_roundtrip \
+  --allow-aeneas-axioms
+
 echo "==> [SUCCESS] All TLV extraction, proofs, and axiom audits passed cleanly."

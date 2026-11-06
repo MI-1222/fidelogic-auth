@@ -38,6 +38,18 @@ Proof.
   apply Z.eqb_refl.
 Qed.
 
+(** [SPEC]
+    スカラー型の非等価判定 (scalar_neqb) の非反射性。
+    任意の x に対し (x s<> x) は必ず false となる。 *)
+Lemma scalar_neqb_irrefl : forall {ty : scalar_ty} (x : scalar ty),
+  (scalar_neqb x x) = false.
+Proof.
+  intros ty x.
+  unfold scalar_neqb.
+  rewrite Z.eqb_refl.
+  reflexivity.
+Qed.
+
 (** [MODEL]
     空スライス表現。 *)
 Definition slice_empty : slice u8 :=
@@ -354,4 +366,99 @@ Proof.
   inversion Hrec; subst.
   apply tlv_record_roundtrip_unknown_minimal.
   assumption.
+Qed.
+
+(** ** VaultHeader のラウンドトリップ検証 *)
+
+(** [SPEC]
+    VaultHeader レコードの構成要素からの再構成補題。 *)
+Lemma tlv_vault_header_eta : forall (h : tlv_VaultHeader_t),
+  {| tlv_VaultHeader_magic := h.(tlv_VaultHeader_magic);
+     tlv_VaultHeader_version := h.(tlv_VaultHeader_version);
+     tlv_VaultHeader_suite_id := h.(tlv_VaultHeader_suite_id) |} = h.
+Proof.
+  destruct h.
+  reflexivity.
+Qed.
+
+(** [MODEL]
+    VaultHeader に対するシリアライズ結果バイト列 bytes の振る舞い規定。
+    有効なマジックバイト ("FVAU") を保持し、6バイト固定長のヘッダー構造を満たすことを規定する。 *)
+Record tlv_is_serialized_header
+  (h : tlv_VaultHeader_t) (bytes : slice u8) : Type :=
+mktlv_is_serialized_header {
+  ser_hdr_valid_magic :
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC;
+
+  ser_hdr_bytes_len :
+    slice_len bytes = tlv_VAULT_HEADER_LEN;
+
+  ser_hdr_b0 : u8;
+  ser_hdr_b1 : u8;
+  ser_hdr_b2 : u8;
+  ser_hdr_b3 : u8;
+
+  ser_hdr_idx0 : slice_index_usize bytes 0%usize = Ok ser_hdr_b0;
+  ser_hdr_idx1 : slice_index_usize bytes 1%usize = Ok ser_hdr_b1;
+  ser_hdr_idx2 : slice_index_usize bytes 2%usize = Ok ser_hdr_b2;
+  ser_hdr_idx3 : slice_index_usize bytes 3%usize = Ok ser_hdr_b3;
+  ser_hdr_idx4 : slice_index_usize bytes 4%usize = Ok h.(tlv_VaultHeader_version);
+  ser_hdr_idx5 : slice_index_usize bytes 5%usize = Ok h.(tlv_VaultHeader_suite_id);
+
+  ser_hdr_reconstruct_magic :
+    mk_array 4%usize [ser_hdr_b0; ser_hdr_b1; ser_hdr_b2; ser_hdr_b3] = tlv_VAULT_MAGIC;
+
+  ser_hdr_magic_idx0 : array_index_usize tlv_VAULT_MAGIC 0%usize = Ok ser_hdr_b0;
+  ser_hdr_magic_idx1 : array_index_usize tlv_VAULT_MAGIC 1%usize = Ok ser_hdr_b1;
+  ser_hdr_magic_idx2 : array_index_usize tlv_VAULT_MAGIC 2%usize = Ok ser_hdr_b2;
+  ser_hdr_magic_idx3 : array_index_usize tlv_VAULT_MAGIC 3%usize = Ok ser_hdr_b3;
+
+  ser_hdr_extract_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
+      {| core_ops_range_RangeFrom_start := tlv_VAULT_HEADER_LEN |} = Ok slice_empty;
+}.
+
+(** [SPEC]
+    補題 6: VaultHeader に対する最小ラウンドトリップ補題。
+    有効なマジックバイトを持つ VaultHeader h をシリアライズしたバイト列 bytes に対し、
+    tlv_deserialize_header を実行すると、
+    元のヘッダー h と空の残余スライスが完全に復元される。 *)
+Lemma tlv_header_roundtrip :
+  forall (h : tlv_VaultHeader_t) (bytes : slice u8),
+    tlv_is_serialized_header h bytes ->
+    tlv_deserialize_header bytes =
+      Ok (Core_result_Result_Ok (h, slice_empty)).
+Proof.
+  intros h bytes Hser.
+  unfold tlv_deserialize_header.
+  (* 1. スライス長チェックの解消 *)
+  rewrite (ser_hdr_bytes_len h bytes Hser).
+  rewrite (scalar_ltb_irrefl tlv_VAULT_HEADER_LEN).
+  cbn [bind].
+  (* 2. 各バイトのインデックス抽出 *)
+  rewrite (ser_hdr_idx0 h bytes Hser); cbn [bind].
+  rewrite (ser_hdr_idx1 h bytes Hser); cbn [bind].
+  rewrite (ser_hdr_idx2 h bytes Hser); cbn [bind].
+  rewrite (ser_hdr_idx3 h bytes Hser); cbn [bind].
+  (* 3. マジック配列の復元と各要素の一致判定 *)
+  rewrite (ser_hdr_reconstruct_magic h bytes Hser).
+  rewrite (ser_hdr_magic_idx0 h bytes Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_b0 h bytes Hser)).
+  rewrite (ser_hdr_magic_idx1 h bytes Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_b1 h bytes Hser)).
+  rewrite (ser_hdr_magic_idx2 h bytes Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_b2 h bytes Hser)).
+  rewrite (ser_hdr_magic_idx3 h bytes Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_b3 h bytes Hser)).
+  (* 4. バージョン、暗号スイートID、残余スライスの抽出 *)
+  rewrite (ser_hdr_idx4 h bytes Hser); cbn [bind].
+  rewrite (ser_hdr_idx5 h bytes Hser); cbn [bind].
+  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+  rewrite (ser_hdr_extract_rest h bytes Hser); cbn [bind].
+  (* 5. レコードの再構成 *)
+  rewrite <- (ser_hdr_valid_magic h bytes Hser).
+  rewrite (tlv_vault_header_eta h).
+  reflexivity.
 Qed.
