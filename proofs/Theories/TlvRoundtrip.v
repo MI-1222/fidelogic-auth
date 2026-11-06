@@ -147,12 +147,70 @@ mktlv_is_serialized_entry {
 }.
 
 (** [MODEL]
+    未知タグレコード (tag, raw_bytes) に対するシリアライズ結果バイト列 bytes の振る舞い規定。
+    Rust 実装 serialize_record の TlvRecord::Unknown 分岐に対応する。 *)
+Record tlv_is_serialized_unknown
+  (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8) : Type :=
+mktlv_is_serialized_unknown {
+  ser_unk_valid_len :
+    to_Z (alloc_vec_Vec_len raw_bytes) <= 255;
+
+  ser_unk_tag_not_entry :
+    (tag s= tlv_TAG_ENTRY) = false;
+
+  ser_unk_payload_len_u8 : u8;
+  ser_unk_payload_len_usize : usize;
+  ser_unk_total_len : usize;
+
+  ser_unk_cast_len :
+    scalar_cast U8 Usize ser_unk_payload_len_u8 = Ok ser_unk_payload_len_usize;
+  ser_unk_add_total_len :
+    usize_add 2%usize ser_unk_payload_len_usize = Ok ser_unk_total_len;
+
+  ser_unk_header_parse :
+    tlv_parse_tlv_header bytes =
+      Ok (Some {| tlv_TlvHeader_tag := tag;
+                  tlv_TlvHeader_length := ser_unk_payload_len_u8 |});
+
+  ser_unk_bytes_len :
+    slice_len bytes = ser_unk_total_len;
+
+  ser_unk_payload_bytes : slice u8;
+  ser_unk_payload_bytes_len :
+    slice_len ser_unk_payload_bytes = ser_unk_payload_len_usize;
+
+  ser_unk_extract_payload :
+    core_slice_index_Slice_index
+      (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
+      {|
+        core_ops_range_Range_start := 2%usize;
+        core_ops_range_Range_end_ := ser_unk_total_len
+      |} = Ok ser_unk_payload_bytes;
+
+  ser_unk_extract_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
+      {|
+        core_ops_range_RangeFrom_start := ser_unk_total_len
+      |} = Ok slice_empty;
+
+  ser_unk_restore_raw_bytes :
+    alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
+      core_clone_CloneU8 ser_unk_payload_bytes =
+    Ok raw_bytes;
+}.
+
+(** [MODEL]
     レコード全体のシリアライズ関係 (既知エントリおよび未知タグの直和型)。 *)
 Inductive tlv_is_serialized_record : tlv_TlvRecord_t -> slice u8 -> Type :=
 | Tlv_is_serialized_record_Entry :
     forall (ep : tlv_EntryPayload_t) (bytes : slice u8),
       tlv_is_serialized_entry ep bytes ->
-      tlv_is_serialized_record (Tlv_TlvRecord_Entry ep) bytes.
+      tlv_is_serialized_record (Tlv_TlvRecord_Entry ep) bytes
+| Tlv_is_serialized_record_Unknown :
+    forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8),
+      tlv_is_serialized_unknown tag raw_bytes bytes ->
+      tlv_is_serialized_record (Tlv_TlvRecord_Unknown tag raw_bytes) bytes.
 
 (** [SPEC]
     補題 1: 既知タグエントリに対するヘッダーパースの整合性。 *)
@@ -239,5 +297,61 @@ Proof.
   intros ep bytes Hrec.
   inversion Hrec; subst.
   apply tlv_record_roundtrip_entry_minimal.
+  assumption.
+Qed.
+
+(** [SPEC]
+    補題 4: 未知タグレコードに対する最小ラウンドトリップ補題。
+    未知タグレコード (tag, raw_bytes) をシリアライズしたバイト列 bytes に対し、
+    tlv_deserialize_record を実行すると、
+    元の未知タグレコードと空の残余スライスが完全に復元される。 *)
+Lemma tlv_record_roundtrip_unknown_minimal :
+  forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8),
+    tlv_is_serialized_unknown tag raw_bytes bytes ->
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, slice_empty)).
+Proof.
+  intros tag raw_bytes bytes Hser.
+  unfold tlv_deserialize_record.
+  (* 1. ヘッダーパースの展開 *)
+  rewrite (ser_unk_header_parse tag raw_bytes bytes Hser).
+  cbn [bind].
+  change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_payload_len_u8 tag raw_bytes bytes Hser |})
+    with (ser_unk_payload_len_u8 tag raw_bytes bytes Hser).
+  rewrite (ser_unk_cast_len tag raw_bytes bytes Hser).
+  cbn [bind].
+  rewrite (ser_unk_add_total_len tag raw_bytes bytes Hser).
+  cbn [bind].
+  (* 2. 全体長チェックの解消 *)
+  rewrite (ser_unk_bytes_len tag raw_bytes bytes Hser).
+  rewrite (scalar_ltb_irrefl (ser_unk_total_len tag raw_bytes bytes Hser)).
+  cbn [bind].
+  (* 3. ペイロードスライスおよび残余スライスの切り出し *)
+  rewrite (ser_unk_extract_payload tag raw_bytes bytes Hser).
+  cbn [bind].
+  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+  rewrite (ser_unk_extract_rest tag raw_bytes bytes Hser).
+  cbn [bind].
+  (* 4. 未知タグ判定 (TAG_ENTRY でないこと) の解決 *)
+  change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_payload_len_u8 tag raw_bytes bytes Hser |})
+    with tag.
+  rewrite (ser_unk_tag_not_entry tag raw_bytes bytes Hser).
+  (* 5. raw_bytes の復元 *)
+  rewrite (ser_unk_restore_raw_bytes tag raw_bytes bytes Hser).
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    補題 5: TlvRecord レベルでの未知タグ最小ラウンドトリップ補題。 *)
+Lemma tlv_record_roundtrip_unknown :
+  forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8),
+    tlv_is_serialized_record (Tlv_TlvRecord_Unknown tag raw_bytes) bytes ->
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, slice_empty)).
+Proof.
+  intros tag raw_bytes bytes Hrec.
+  inversion Hrec; subst.
+  apply tlv_record_roundtrip_unknown_minimal.
   assumption.
 Qed.
