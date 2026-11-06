@@ -70,7 +70,11 @@ pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParse
         return Err(VaultError::UnexpectedEof);
     }
     let magic = [bytes[0], bytes[1], bytes[2], bytes[3]];
-    if magic != VAULT_MAGIC {
+    if magic[0] != VAULT_MAGIC[0]
+        || magic[1] != VAULT_MAGIC[1]
+        || magic[2] != VAULT_MAGIC[2]
+        || magic[3] != VAULT_MAGIC[3]
+    {
         return Err(VaultError::InvalidMagic);
     }
     let version = bytes[4];
@@ -350,20 +354,20 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
     let payload_bytes = &bytes[2..total_len];
     let rest = &bytes[total_len..];
 
-    let record = match header.tag {
-        TAG_ENTRY => {
-            if payload_bytes.len() < AUTH_TAG_LEN {
-                return Err(VaultError::InvalidLength);
-            }
-            let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
-            let ciphertext = alloc::vec::Vec::from(&payload_bytes[..ciphertext_len]);
-            let mut auth_tag = [0u8; AUTH_TAG_LEN];
-            auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
-            TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
+    let record = if header.tag == TAG_ENTRY {
+        if payload_bytes.len() < AUTH_TAG_LEN {
+            return Err(VaultError::InvalidLength);
         }
-        tag => {
-            let raw_bytes = alloc::vec::Vec::from(payload_bytes);
-            TlvRecord::Unknown { tag, raw_bytes }
+        let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
+        let ciphertext = alloc::vec::Vec::from(&payload_bytes[..ciphertext_len]);
+        let mut auth_tag = [0u8; AUTH_TAG_LEN];
+        auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
+        TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
+    } else {
+        let raw_bytes = alloc::vec::Vec::from(payload_bytes);
+        TlvRecord::Unknown {
+            tag: header.tag,
+            raw_bytes,
         }
     };
 

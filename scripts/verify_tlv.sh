@@ -8,7 +8,17 @@ cd "${REPO_ROOT}"
 
 echo "==> [1/4] Extracting LLBC from Rust via Charon..."
 mkdir -p target
-charon cargo --preset aeneas --start-from fidelogic_core::tlv --dest-file "${REPO_ROOT}/target/fidelogic_core.llbc" -- -p fidelogic-core
+charon cargo --preset aeneas \
+  --start-from fidelogic_core::tlv::parse_tlv_header \
+  --start-from fidelogic_core::tlv::validate_tlv_bounds \
+  --start-from fidelogic_core::tlv::deserialize_header \
+  --start-from fidelogic_core::tlv::serialize_header \
+  --start-from fidelogic_core::tlv::is_known_tag \
+  --start-from fidelogic_core::tlv::deserialize_slot_entry \
+  --start-from fidelogic_core::tlv::deserialize_record \
+  --start-from fidelogic_core::tlv::record_serialized_len \
+  --dest-file "${REPO_ROOT}/target/fidelogic_core.llbc" \
+  -- -p fidelogic-core
 
 echo "==> [2/4] Generating Rocq theories via Aeneas..."
 mkdir -p proofs/Theories
@@ -19,6 +29,7 @@ python3 -c '
 path = "proofs/Theories/FidelogicCore.v"
 with open(path, "r") as f:
     c = f.read()
+c = c.replace("Require Import List.", "From Stdlib Require Import List.")
 c = c.replace("Require Import Primitives.", "From Fidelogic.Aeneas Require Import Primitives.")
 with open(path, "w") as f:
     f.write(c)
