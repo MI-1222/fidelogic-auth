@@ -74,4 +74,19 @@ python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --theorem tlv_deserialize_record_bounds_violation \
   --allow-aeneas-axioms
 
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_slots_totality \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_records_totality \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvTotality \
+  --theorem tlv_deserialize_totality \
+  --allow-aeneas-axioms
+
 echo "==> [SUCCESS] All TLV extraction, proofs, and axiom audits passed cleanly."
