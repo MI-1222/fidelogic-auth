@@ -11,5 +11,5 @@ WORKDIR /workspace
 
 COPY --chown=rocq:rocq . /workspace
 
-# デフォルトで検証ビルドと公理監査を実行
-CMD ["bash", "-c", "eval $(opam env) && ./scripts/audit_axioms.sh --module Fidelogic.Sanity --theorem sanity_add_comm"]
+# デフォルトで検証ビルドと全対象定理の公理監査を実行。
+CMD ["bash", "-c", "eval $(opam env) && ./scripts/ci/check_proofs.sh"]

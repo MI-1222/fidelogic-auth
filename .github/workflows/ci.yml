@@ -1,0 +1,91 @@
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proofs-audit:
+    name: Rocq Proofs & Axiom Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run proofs and axiom audits in isolated container
+        run: |
+          docker build --platform linux/amd64 -f Dockerfile.proofs -t fidelogic-proofs .
+          docker run --rm --platform linux/amd64 fidelogic-proofs
+
+  rust-lint-and-test:
+    name: Rust Quality & no_std Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Check code formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy lints
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run unit & integration tests
+        run: cargo test --workspace --all-features
+
+      - name: Audit third-party security vulnerabilities
+        run: cargo audit
+
+      - name: Verify no_std target boundaries
+        run: ./scripts/ci/check_no_std.sh
+
+  wasm-size-and-zeroize-gate:
+    name: Wasm Size Gate & Zeroize DSE Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (wabt, brotli, binaryen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wabt brotli binaryen
+
+      - name: Install cargo-bloat
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-bloat
+
+      - name: Check Wasm size gates
+        run: ./scripts/ci/check_wasm_size.sh
+
+      - name: Verify zeroize volatile store preservation (DSE audit)
+        run: ./scripts/ci/check_zeroize_dse.sh

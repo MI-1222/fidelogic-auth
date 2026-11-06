@@ -23,6 +23,7 @@ pub mod profile_lite;
 pub mod profile_vault;
 
 pub mod tlv;
+pub mod zeroize;
 
 /// 現在有効化されているプロファイルの識別子を返す。
 #[must_use]

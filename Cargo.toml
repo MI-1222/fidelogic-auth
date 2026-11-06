@@ -12,3 +12,10 @@ edition = "2024"
 
 [workspace.dependencies]
 fidelogic-core = { path = "crates/fidelogic-core", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
