@@ -120,6 +120,15 @@ pub struct KekSlotEntry {
 /// AEAD認証タグのバイト長(16バイト)。
 pub const AUTH_TAG_LEN: usize = 16;
 
+/// エントリレコードの既知タグ(1)。
+pub const TAG_ENTRY: u8 = 1;
+
+/// 指定されたタグが既知のレコード種別であるかを判定する。
+#[must_use]
+pub const fn is_known_tag(tag: u8) -> bool {
+    tag == TAG_ENTRY
+}
+
 /// TLVレコードの既知ペイロード(暗号化データおよび認証タグ)。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
@@ -207,6 +216,54 @@ impl TlvRecord {
             Self::Known { tag, .. } | Self::UnknownTag { tag, .. } => tag,
         }
     }
+}
+
+/// `TlvRecord` 単体の純粋関数型デシリアライザー。
+///
+/// 入力バイト列からヘッダー `[Tag (1B), Length (1B)]` を安全に取得し、
+/// 続くペイロードバイト列を解釈する。
+/// 既知タグ ([`TAG_ENTRY`]) の場合は暗号化データと認証タグ ([`AUTH_TAG_LEN`]) に分解して [`TlvRecord::Known`] を生成する。
+/// 未知タグに遭遇した場合は、後続バイト列の安全な読み飛ばしを行い、生バイト列を保持する [`TlvRecord::UnknownTag`] を生成する。
+/// デシリアライズされた [`TlvRecord`] と残余バイトスライスを返す。
+///
+/// # Errors
+///
+/// - 入力バイト列の長さがヘッダー長 (2バイト) 未満、または宣言長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
+/// - 既知タグのペイロード長が認証タグ長 ([`AUTH_TAG_LEN`]) 未満の場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseError> {
+    let Some(header) = parse_tlv_header(bytes) else {
+        return Err(VaultError::UnexpectedEof);
+    };
+    let length = header.length as usize;
+    let total_len = 2 + length;
+    if bytes.len() < total_len {
+        return Err(VaultError::UnexpectedEof);
+    }
+    let payload_bytes = &bytes[2..total_len];
+    let rest = &bytes[total_len..];
+
+    let record = if is_known_tag(header.tag) {
+        if payload_bytes.len() < AUTH_TAG_LEN {
+            return Err(VaultError::InvalidLength);
+        }
+        let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
+        let ciphertext = alloc::vec::Vec::from(&payload_bytes[..ciphertext_len]);
+        let mut auth_tag = [0u8; AUTH_TAG_LEN];
+        auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
+        TlvRecord::Known {
+            tag: header.tag,
+            payload: TlvPayload::new(ciphertext, auth_tag),
+        }
+    } else {
+        let raw_bytes = alloc::vec::Vec::from(payload_bytes);
+        TlvRecord::UnknownTag {
+            tag: header.tag,
+            raw_bytes,
+        }
+    };
+
+    Ok((record, rest))
 }
 
 /// Vault全体の集約型。
@@ -389,6 +446,89 @@ mod tests {
             result,
             Err(VaultError::InvalidMagic),
             "不正マジックバイト時のInvalidMagic返却検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_record_known_success() {
+        let mut input = alloc::vec![TAG_ENTRY, 19];
+        input.extend_from_slice(&[0x01, 0x02, 0x03]);
+        input.extend_from_slice(&[0xaa; AUTH_TAG_LEN]);
+        input.extend_from_slice(&[0xee, 0xff]);
+
+        let result = deserialize_record(&input);
+        assert!(
+            result.is_ok(),
+            "既知タグレコードの正常系デシリアライズに成功。"
+        );
+        let (record, rest) = result.unwrap();
+        assert_eq!(
+            record,
+            TlvRecord::Known {
+                tag: TAG_ENTRY,
+                payload: TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]),
+            },
+            "デシリアライズされた既知レコード内容の検証に成功。"
+        );
+        assert_eq!(
+            rest,
+            &[0xee, 0xff],
+            "レコードパース後の残余スライス検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_record_unknown_success() {
+        let input = [99, 4, 0xde, 0xad, 0xbe, 0xef, 0x12, 0x34];
+        let result = deserialize_record(&input);
+        assert!(
+            result.is_ok(),
+            "未知タグレコードの無害な読み飛ばしデシリアライズに成功。"
+        );
+        let (record, rest) = result.unwrap();
+        assert_eq!(
+            record,
+            TlvRecord::UnknownTag {
+                tag: 99,
+                raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
+            },
+            "デシリアライズされた未知タグレコード内容の検証に成功。"
+        );
+        assert_eq!(
+            rest,
+            &[0x12, 0x34],
+            "未知タグパース後の残余スライス検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_record_unexpected_eof() {
+        let short_header = [TAG_ENTRY];
+        assert_eq!(
+            deserialize_record(&short_header),
+            Err(VaultError::UnexpectedEof),
+            "ヘッダー長不足時のUnexpectedEof検証に成功。"
+        );
+
+        let short_payload = [TAG_ENTRY, 10, 0x01, 0x02];
+        assert_eq!(
+            deserialize_record(&short_payload),
+            Err(VaultError::UnexpectedEof),
+            "宣言長不足時のUnexpectedEof検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_record_invalid_length() {
+        let input = [TAG_ENTRY, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        assert_eq!(
+            deserialize_record(&input),
+            Err(VaultError::InvalidLength),
+            "既知タグで認証タグ長未満時のInvalidLength検証に成功。"
         );
     }
 }

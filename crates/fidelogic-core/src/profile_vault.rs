@@ -4,11 +4,11 @@
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
 pub use crate::tlv::{
-    KekSlotEntry, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader,
-    deserialize_header,
+    KekSlotEntry, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader,
+    deserialize_header, is_known_tag,
 };
 #[cfg(feature = "alloc")]
-pub use crate::tlv::{TlvPayload, TlvRecord, Vault};
+pub use crate::tlv::{TlvPayload, TlvRecord, Vault, deserialize_record};
 
 /// `profile-vault` の運用エンジンを表す構造体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,6 +62,18 @@ mod tests {
         assert!(
             res.is_ok(),
             "profile_vault経由のdeserialize_header呼び出しに成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_deserialize_record_reexport() {
+        let input = [TAG_ENTRY, 0];
+        let res = deserialize_record(&input);
+        assert_eq!(
+            res,
+            Err(VaultError::InvalidLength),
+            "profile_vault経由のdeserialize_record呼び出しに成功。"
         );
     }
 }
