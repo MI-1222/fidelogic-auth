@@ -50,6 +50,29 @@ pub struct VaultHeader {
     pub suite_id: u8,
 }
 
+/// VaultおよびTLVパース処理で発生するエラーを表す列挙型。
+///
+/// パニックを完全に排除し、境界外アクセスや不正なフォーマットを純粋な値として通知する。
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum VaultError {
+    /// 入力バイト列の長さが不足している。
+    UnexpectedEof,
+    /// マジックバイトが既定値と一致しない。
+    InvalidMagic,
+    /// 未知または非対応のフォーマットバージョン。
+    UnsupportedVersion,
+    /// 未知または非対応の暗号スイートID。
+    UnsupportedSuite,
+    /// 宣言されたデータ長が不正またはスライス境界を超過している。
+    InvalidLength,
+    /// レコードまたはヘッダーのフォーマットが不正。
+    InvalidFormat,
+}
+
+/// TLVパース専用のエラー型エイリアス。
+pub type TlvParseError = VaultError;
+
 /// KEKスロット定義テーブルのエントリを表す固定長レコード。
 ///
 /// スロットID, KDF種別, ラップ済みDEKのバイト長を保持する。
@@ -205,6 +228,22 @@ mod tests {
             suite_id: 1,
         };
         assert_eq!(header1, header2, "同一パラメータのVaultHeader比較に成功。");
+    }
+
+    #[test]
+    fn test_vault_error_equality() {
+        let err1 = VaultError::UnexpectedEof;
+        let err2 = VaultError::UnexpectedEof;
+        let err3 = VaultError::InvalidMagic;
+        assert_eq!(err1, err2, "同一のVaultErrorバリアント比較に成功。");
+        assert_ne!(err1, err3, "異なるVaultErrorバリアント比較に成功。");
+
+        let parse_err: TlvParseError = VaultError::InvalidLength;
+        assert_eq!(
+            parse_err,
+            VaultError::InvalidLength,
+            "TlvParseError型エイリアスとの比較に成功。"
+        );
     }
 
     #[test]
