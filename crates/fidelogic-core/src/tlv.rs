@@ -32,3 +32,40 @@ pub fn validate_tlv_bounds(bytes: &[u8]) -> bool {
         false
     }
 }
+
+/// Vaultヘッダーの既定マジックバイト。
+pub const VAULT_MAGIC: [u8; 4] = *b"FVAU";
+
+/// Vaultバイナリフォーマットの固定長ヘッダー。
+///
+/// マジックバイト, フォーマットバージョン, 暗号スイートID を保持する。
+#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct VaultHeader {
+    /// マジックバイト(4バイト)。
+    pub magic: [u8; 4],
+    /// フォーマットバージョン。
+    pub version: u8,
+    /// 暗号スイート識別子。
+    pub suite_id: u8,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vault_header_equality() {
+        let header1 = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        let header2 = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        assert_eq!(header1, header2, "同一パラメータのVaultHeader比較に成功。");
+    }
+}
