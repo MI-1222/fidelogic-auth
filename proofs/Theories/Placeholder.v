@@ -2,7 +2,8 @@
 
 From Stdlib Require Import Arith.PeanoNat.
 
-(** 恒等命題の健全性確認用補題。 *)
+(** [SPEC]
+    恒等命題の健全性確認用補題。 *)
 Lemma sanity_placeholder : forall (n : nat), n = n.
 Proof.
   intros n.
