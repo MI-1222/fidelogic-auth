@@ -80,6 +80,21 @@ pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParse
     Ok((header, &bytes[VAULT_HEADER_LEN..]))
 }
 
+/// `VaultHeader` 単体の純粋関数型シリアライザー。
+///
+/// 指定された [`VaultHeader`] を固定長バイト配列 (6バイト) にシリアライズする。
+#[must_use]
+pub const fn serialize_header(header: &VaultHeader) -> [u8; VAULT_HEADER_LEN] {
+    [
+        header.magic[0],
+        header.magic[1],
+        header.magic[2],
+        header.magic[3],
+        header.version,
+        header.suite_id,
+    ]
+}
+
 /// VaultおよびTLVパース処理で発生するエラーを表す列挙型。
 ///
 /// パニックを完全に排除し、境界外アクセスや不正なフォーマットを純粋な値として通知する。
@@ -141,6 +156,15 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
         wrapped_dek_len,
     };
     Ok((entry, &bytes[KEK_SLOT_ENTRY_LEN..]))
+}
+
+/// `KekSlotEntry` 単体の純粋関数型シリアライザー。
+///
+/// 指定された [`KekSlotEntry`] を固定長バイト配列 (4バイト) にシリアライズする。
+#[must_use]
+pub const fn serialize_slot_entry(entry: &KekSlotEntry) -> [u8; KEK_SLOT_ENTRY_LEN] {
+    let len_bytes = entry.wrapped_dek_len.to_be_bytes();
+    [entry.slot_id, entry.kdf_kind, len_bytes[0], len_bytes[1]]
 }
 
 /// AEAD認証タグのバイト長(16バイト)。
@@ -292,6 +316,49 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
     Ok((record, rest))
 }
 
+/// `TlvRecord` 単体の純粋関数型シリアライザー。
+///
+/// 指定された [`TlvRecord`] をバイト列にシリアライズする。
+/// 既知レコードの場合は `[Tag (1B), Length (1B), Ciphertext..., AuthTag (16B)]`、
+/// 未知レコードの場合は `[Tag (1B), Length (1B), RawBytes...]` を出力する。
+///
+/// # Errors
+///
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, VaultError> {
+    match record {
+        TlvRecord::Known { tag, payload } => {
+            let payload_len = payload
+                .ciphertext
+                .len()
+                .checked_add(AUTH_TAG_LEN)
+                .ok_or(VaultError::InvalidLength)?;
+            if payload_len > u8::MAX as usize {
+                return Err(VaultError::InvalidLength);
+            }
+            let length = payload_len as u8;
+            let mut bytes = alloc::vec::Vec::with_capacity(2 + payload_len);
+            bytes.push(*tag);
+            bytes.push(length);
+            bytes.extend_from_slice(&payload.ciphertext);
+            bytes.extend_from_slice(&payload.auth_tag);
+            Ok(bytes)
+        }
+        TlvRecord::UnknownTag { tag, raw_bytes } => {
+            if raw_bytes.len() > u8::MAX as usize {
+                return Err(VaultError::InvalidLength);
+            }
+            let length = raw_bytes.len() as u8;
+            let mut bytes = alloc::vec::Vec::with_capacity(2 + raw_bytes.len());
+            bytes.push(*tag);
+            bytes.push(length);
+            bytes.extend_from_slice(raw_bytes);
+            Ok(bytes)
+        }
+    }
+}
+
 /// Vault全体の集約型。
 ///
 /// ヘッダー情報、KEKスロット定義テーブル、TLVレコード群を統括する。
@@ -366,6 +433,45 @@ pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
 
     let vault = Vault::new(header, slots, records);
     Ok((vault, rest))
+}
+
+/// `Vault` 全体の純粋関数型シリアライザー。
+///
+/// 指定された [`Vault`] をバイナリ形式にシリアライズする。
+/// ヘッダー、KEKスロット定義テーブル、およびTLVレコード群を結合したバイト列を出力する。
+///
+/// # Errors
+///
+/// - KEKスロット数が `u8::MAX` (255個) を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - レコード数が `u16::MAX` (65535個) を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - レコードシリアライズ処理でエラーが発生した場合はその [`VaultError`] を返す。
+#[cfg(feature = "alloc")]
+pub fn serialize(vault: &Vault) -> Result<alloc::vec::Vec<u8>, VaultError> {
+    if vault.slots.len() > u8::MAX as usize {
+        return Err(VaultError::InvalidLength);
+    }
+    if vault.records.len() > u16::MAX as usize {
+        return Err(VaultError::InvalidLength);
+    }
+
+    let header_bytes = serialize_header(&vault.header);
+    let mut out = alloc::vec::Vec::new();
+    out.extend_from_slice(&header_bytes);
+
+    let slot_count = vault.slots.len() as u8;
+    out.push(slot_count);
+    for slot in &vault.slots {
+        out.extend_from_slice(&serialize_slot_entry(slot));
+    }
+
+    let record_count = (vault.records.len() as u16).to_be_bytes();
+    out.extend_from_slice(&record_count);
+    for record in &vault.records {
+        let record_bytes = serialize_record(record)?;
+        out.extend_from_slice(&record_bytes);
+    }
+
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -779,6 +885,193 @@ mod tests {
             deserialize(&input),
             Err(VaultError::InvalidLength),
             "不正レコード含有時のエラー伝播検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_serialize_header_and_roundtrip() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 3,
+        };
+        let bytes = serialize_header(&header);
+        assert_eq!(
+            bytes,
+            [b'F', b'V', b'A', b'U', 1, 3],
+            "VaultHeaderのシリアライズ結果検証に成功。"
+        );
+
+        let (deserialized, rest) = deserialize_header(&bytes).expect("デシリアライズに成功。");
+        assert_eq!(
+            deserialized, header,
+            "VaultHeaderのシリアライズ・デシリアライズ往復に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[test]
+    fn test_serialize_slot_entry_and_roundtrip() {
+        let entry = KekSlotEntry {
+            slot_id: 2,
+            kdf_kind: 1,
+            wrapped_dek_len: 512,
+        };
+        let bytes = serialize_slot_entry(&entry);
+        assert_eq!(
+            bytes,
+            [2, 1, 0x02, 0x00],
+            "KekSlotEntryのシリアライズ結果検証に成功。"
+        );
+
+        let (deserialized, rest) = deserialize_slot_entry(&bytes).expect("デシリアライズに成功。");
+        assert_eq!(
+            deserialized, entry,
+            "KekSlotEntryのシリアライズ・デシリアライズ往復に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_record_known_and_roundtrip() {
+        let record = TlvRecord::Known {
+            tag: TAG_ENTRY,
+            payload: TlvPayload::new(alloc::vec![0x10, 0x20, 0x30], [0xcc; AUTH_TAG_LEN]),
+        };
+        let bytes = serialize_record(&record).expect("既知レコードのシリアライズに成功。");
+        assert_eq!(bytes[0], TAG_ENTRY, "シリアライズ後タグの一致確認に成功。");
+        assert_eq!(
+            bytes[1],
+            (3 + AUTH_TAG_LEN) as u8,
+            "シリアライズ後データ長の一致確認に成功。"
+        );
+
+        let (deserialized, rest) = deserialize_record(&bytes).expect("デシリアライズに成功。");
+        assert_eq!(
+            deserialized, record,
+            "既知TlvRecordのシリアライズ・デシリアライズ往復に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_record_unknown_and_roundtrip() {
+        let record = TlvRecord::UnknownTag {
+            tag: 88,
+            raw_bytes: alloc::vec![0x01, 0x02, 0x03, 0x04],
+        };
+        let bytes = serialize_record(&record).expect("未知タグレコードのシリアライズに成功。");
+        assert_eq!(bytes[0], 88, "未知タグの一致確認に成功。");
+        assert_eq!(bytes[1], 4, "未知データ長の一致確認に成功。");
+
+        let (deserialized, rest) = deserialize_record(&bytes).expect("デシリアライズに成功。");
+        assert_eq!(
+            deserialized, record,
+            "未知TlvRecordのシリアライズ・デシリアライズ往復に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_record_overflow() {
+        let large_ciphertext = alloc::vec![0u8; 250];
+        let record = TlvRecord::Known {
+            tag: TAG_ENTRY,
+            payload: TlvPayload::new(large_ciphertext, [0x00; AUTH_TAG_LEN]),
+        };
+        let res = serialize_record(&record);
+        assert_eq!(
+            res,
+            Err(VaultError::InvalidLength),
+            "既知レコード長が255超過時のInvalidLength返却検証に成功。"
+        );
+
+        let large_unknown = alloc::vec![0u8; 256];
+        let record_unknown = TlvRecord::UnknownTag {
+            tag: 50,
+            raw_bytes: large_unknown,
+        };
+        let res_unknown = serialize_record(&record_unknown);
+        assert_eq!(
+            res_unknown,
+            Err(VaultError::InvalidLength),
+            "未知レコード長が255超過時のInvalidLength返却検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_vault_and_roundtrip() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 2,
+        };
+        let slot = KekSlotEntry {
+            slot_id: 0,
+            kdf_kind: 1,
+            wrapped_dek_len: 64,
+        };
+        let record1 = TlvRecord::Known {
+            tag: TAG_ENTRY,
+            payload: TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]),
+        };
+        let record2 = TlvRecord::UnknownTag {
+            tag: 99,
+            raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
+        };
+        let vault = Vault::new(header, alloc::vec![slot], alloc::vec![record1, record2]);
+
+        let bytes = serialize(&vault).expect("Vaultシリアライズに成功。");
+        let (deserialized, rest) = deserialize(&bytes).expect("Vaultデシリアライズに成功。");
+        assert_eq!(
+            deserialized, vault,
+            "Vault全体のシリアライズ・デシリアライズ往復に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_vault_empty() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
+        let bytes = serialize(&vault).expect("空Vaultシリアライズに成功。");
+        let (deserialized, rest) = deserialize(&bytes).expect("空Vaultデシリアライズに成功。");
+        assert_eq!(
+            deserialized, vault,
+            "空Vaultのシリアライズ・デシリアライズ往復に成功。"
+        );
+        assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_vault_slot_overflow() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        let slot = KekSlotEntry {
+            slot_id: 0,
+            kdf_kind: 1,
+            wrapped_dek_len: 64,
+        };
+        let slots = alloc::vec![slot; 256];
+        let vault = Vault::new(header, slots, alloc::vec::Vec::new());
+        let res = serialize(&vault);
+        assert_eq!(
+            res,
+            Err(VaultError::InvalidLength),
+            "スロット数が255超過時のInvalidLength返却検証に成功。"
         );
     }
 }

@@ -6,9 +6,12 @@
 pub use crate::tlv::{
     KEK_SLOT_ENTRY_LEN, KekSlotEntry, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC,
     VaultError, VaultHeader, deserialize_header, deserialize_slot_entry, is_known_tag,
+    serialize_header, serialize_slot_entry,
 };
 #[cfg(feature = "alloc")]
-pub use crate::tlv::{TlvPayload, TlvRecord, Vault, deserialize, deserialize_record};
+pub use crate::tlv::{
+    TlvPayload, TlvRecord, Vault, deserialize, deserialize_record, serialize, serialize_record,
+};
 
 /// `profile-vault` の運用エンジンを表す構造体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -96,5 +99,62 @@ mod tests {
             res.is_ok(),
             "profile_vault経由のdeserialize呼び出しに成功。"
         );
+    }
+
+    #[test]
+    fn test_serialize_header_reexport() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        let bytes = serialize_header(&header);
+        assert_eq!(
+            bytes,
+            [b'F', b'V', b'A', b'U', 1, 1],
+            "profile_vault経由のserialize_header呼び出しに成功。"
+        );
+    }
+
+    #[test]
+    fn test_serialize_slot_entry_reexport() {
+        let entry = KekSlotEntry {
+            slot_id: 0,
+            kdf_kind: 1,
+            wrapped_dek_len: 64,
+        };
+        let bytes = serialize_slot_entry(&entry);
+        assert_eq!(
+            bytes,
+            [0, 1, 0, 64],
+            "profile_vault経由のserialize_slot_entry呼び出しに成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_record_reexport() {
+        let record = TlvRecord::UnknownTag {
+            tag: 99,
+            raw_bytes: alloc::vec![1, 2, 3],
+        };
+        let res = serialize_record(&record);
+        assert!(
+            res.is_ok(),
+            "profile_vault経由のserialize_record呼び出しに成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_vault_reexport() {
+        let header = VaultHeader {
+            magic: VAULT_MAGIC,
+            version: 1,
+            suite_id: 1,
+        };
+        let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
+        let res = serialize(&vault);
+        assert!(res.is_ok(), "profile_vault経由のserialize呼び出しに成功。");
     }
 }
