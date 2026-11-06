@@ -10,6 +10,8 @@ From Fidelogic.Aeneas Require Import Primitives.
 Import Primitives.
 From Fidelogic.Theories Require Import FidelogicCore.
 Import FidelogicCore.
+From Fidelogic.Theories Require Import TlvTotality.
+Import TlvTotality.
 
 Local Open Scope Z_scope.
 Local Open Scope Primitives_scope.
@@ -462,3 +464,598 @@ Proof.
   rewrite (tlv_vault_header_eta h).
   reflexivity.
 Qed.
+
+(** ** 残余スライスを保持するヘッダー連鎖検証 *)
+
+(** [MODEL]
+    残余スライス rest を後続に伴う VaultHeader シリアライズ関係。 *)
+Record tlv_is_serialized_header_chain
+  (h : tlv_VaultHeader_t) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_header_chain {
+  ser_hdr_chain_valid_magic :
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC;
+
+  ser_hdr_chain_bytes_ge_hdr :
+    (slice_len bytes s< tlv_VAULT_HEADER_LEN) = false;
+
+  ser_hdr_chain_b0 : u8;
+  ser_hdr_chain_b1 : u8;
+  ser_hdr_chain_b2 : u8;
+  ser_hdr_chain_b3 : u8;
+
+  ser_hdr_chain_idx0 : slice_index_usize bytes 0%usize = Ok ser_hdr_chain_b0;
+  ser_hdr_chain_idx1 : slice_index_usize bytes 1%usize = Ok ser_hdr_chain_b1;
+  ser_hdr_chain_idx2 : slice_index_usize bytes 2%usize = Ok ser_hdr_chain_b2;
+  ser_hdr_chain_idx3 : slice_index_usize bytes 3%usize = Ok ser_hdr_chain_b3;
+  ser_hdr_chain_idx4 : slice_index_usize bytes 4%usize = Ok h.(tlv_VaultHeader_version);
+  ser_hdr_chain_idx5 : slice_index_usize bytes 5%usize = Ok h.(tlv_VaultHeader_suite_id);
+
+  ser_hdr_chain_reconstruct_magic :
+    mk_array 4%usize [ser_hdr_chain_b0; ser_hdr_chain_b1; ser_hdr_chain_b2; ser_hdr_chain_b3] = tlv_VAULT_MAGIC;
+
+  ser_hdr_chain_magic_idx0 : array_index_usize tlv_VAULT_MAGIC 0%usize = Ok ser_hdr_chain_b0;
+  ser_hdr_chain_magic_idx1 : array_index_usize tlv_VAULT_MAGIC 1%usize = Ok ser_hdr_chain_b1;
+  ser_hdr_chain_magic_idx2 : array_index_usize tlv_VAULT_MAGIC 2%usize = Ok ser_hdr_chain_b2;
+  ser_hdr_chain_magic_idx3 : array_index_usize tlv_VAULT_MAGIC 3%usize = Ok ser_hdr_chain_b3;
+
+  ser_hdr_chain_extract_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
+      {| core_ops_range_RangeFrom_start := tlv_VAULT_HEADER_LEN |} = Ok rest;
+}.
+
+(** [SPEC]
+    補題 7: 残余スライスを保持する VaultHeader に対するラウンドトリップ補題。 *)
+Lemma tlv_header_chain_roundtrip :
+  forall (h : tlv_VaultHeader_t) (bytes rest : slice u8),
+    tlv_is_serialized_header_chain h bytes rest ->
+    tlv_deserialize_header bytes =
+      Ok (Core_result_Result_Ok (h, rest)).
+Proof.
+  intros h bytes rest Hser.
+  unfold tlv_deserialize_header.
+  rewrite (ser_hdr_chain_bytes_ge_hdr h bytes rest Hser).
+  cbn [bind].
+  rewrite (ser_hdr_chain_idx0 h bytes rest Hser); cbn [bind].
+  rewrite (ser_hdr_chain_idx1 h bytes rest Hser); cbn [bind].
+  rewrite (ser_hdr_chain_idx2 h bytes rest Hser); cbn [bind].
+  rewrite (ser_hdr_chain_idx3 h bytes rest Hser); cbn [bind].
+  rewrite (ser_hdr_chain_reconstruct_magic h bytes rest Hser).
+  rewrite (ser_hdr_chain_magic_idx0 h bytes rest Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b0 h bytes rest Hser)).
+  rewrite (ser_hdr_chain_magic_idx1 h bytes rest Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b1 h bytes rest Hser)).
+  rewrite (ser_hdr_chain_magic_idx2 h bytes rest Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b2 h bytes rest Hser)).
+  rewrite (ser_hdr_chain_magic_idx3 h bytes rest Hser); cbn [bind].
+  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b3 h bytes rest Hser)).
+  rewrite (ser_hdr_chain_idx4 h bytes rest Hser); cbn [bind].
+  rewrite (ser_hdr_chain_idx5 h bytes rest Hser); cbn [bind].
+  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+  rewrite (ser_hdr_chain_extract_rest h bytes rest Hser); cbn [bind].
+  rewrite <- (ser_hdr_chain_valid_magic h bytes rest Hser).
+  rewrite (tlv_vault_header_eta h).
+  reflexivity.
+Qed.
+
+(** ** KEKスロット単体およびスロット列のラウンドトリップ検証 *)
+
+(** [SPEC]
+    KekSlotEntry レコードの構成要素からの再構成補題。 *)
+Lemma tlv_kek_slot_entry_eta : forall (slot : tlv_KekSlotEntry_t),
+  {| tlv_KekSlotEntry_slot_id := slot.(tlv_KekSlotEntry_slot_id);
+     tlv_KekSlotEntry_kdf_kind := slot.(tlv_KekSlotEntry_kdf_kind);
+     tlv_KekSlotEntry_wrapped_dek_len := slot.(tlv_KekSlotEntry_wrapped_dek_len);
+     tlv_KekSlotEntry_wrapped_dek := slot.(tlv_KekSlotEntry_wrapped_dek) |} = slot.
+Proof.
+  destruct slot.
+  reflexivity.
+Qed.
+
+(** [MODEL]
+    KekSlotEntry に対するシリアライズ結果バイト列 bytes の振る舞い規定。 *)
+Record tlv_is_serialized_slot
+  (slot : tlv_KekSlotEntry_t) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_slot {
+  ser_slot_bytes_ge_hdr :
+    (slice_len bytes s< tlv_KEK_SLOT_HEADER_LEN) = false;
+
+  ser_slot_idx0 :
+    slice_index_usize bytes 0%usize = Ok slot.(tlv_KekSlotEntry_slot_id);
+  ser_slot_idx1 :
+    slice_index_usize bytes 1%usize = Ok slot.(tlv_KekSlotEntry_kdf_kind);
+
+  ser_slot_b2 : u8;
+  ser_slot_b3 : u8;
+
+  ser_slot_idx2 :
+    slice_index_usize bytes 2%usize = Ok ser_slot_b2;
+  ser_slot_idx3 :
+    slice_index_usize bytes 3%usize = Ok ser_slot_b3;
+
+  ser_slot_reconstruct_len :
+    core_num_U16_from_be_bytes (mk_array 2%usize [ser_slot_b2; ser_slot_b3]) =
+      slot.(tlv_KekSlotEntry_wrapped_dek_len);
+
+  ser_slot_dek_len_usize : usize;
+  ser_slot_cast_dek_len :
+    scalar_cast U16 Usize slot.(tlv_KekSlotEntry_wrapped_dek_len) =
+      Ok ser_slot_dek_len_usize;
+
+  ser_slot_payload_bytes : slice u8;
+  ser_slot_extract_payload :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
+      {| core_ops_range_RangeFrom_start := tlv_KEK_SLOT_HEADER_LEN |} =
+    Ok ser_slot_payload_bytes;
+
+  ser_slot_payload_len_ge_dek :
+    (slice_len ser_slot_payload_bytes s< ser_slot_dek_len_usize) = false;
+
+  ser_slot_dek_slice : slice u8;
+  ser_slot_extract_dek :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      ser_slot_payload_bytes
+      {| core_ops_range_RangeTo_end_ := ser_slot_dek_len_usize |} =
+    Ok ser_slot_dek_slice;
+
+  ser_slot_restore_dek :
+    alloc_slice_Slice_to_vec core_clone_CloneU8 ser_slot_dek_slice =
+      Ok slot.(tlv_KekSlotEntry_wrapped_dek);
+
+  ser_slot_extract_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      ser_slot_payload_bytes
+      {| core_ops_range_RangeFrom_start := ser_slot_dek_len_usize |} =
+    Ok rest;
+}.
+
+(** [SPEC]
+    補題 8: 単一 KekSlotEntry に対するラウンドトリップ補題。 *)
+Lemma tlv_slot_roundtrip :
+  forall (slot : tlv_KekSlotEntry_t) (bytes rest : slice u8),
+    tlv_is_serialized_slot slot bytes rest ->
+    tlv_deserialize_slot_entry bytes =
+      Ok (Core_result_Result_Ok (slot, rest)).
+Proof.
+  intros slot bytes rest Hser.
+  unfold tlv_deserialize_slot_entry.
+  rewrite (ser_slot_bytes_ge_hdr slot bytes rest Hser).
+  cbn [bind].
+  rewrite (ser_slot_idx0 slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_idx1 slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_idx2 slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_idx3 slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_reconstruct_len slot bytes rest Hser).
+  rewrite (ser_slot_cast_dek_len slot bytes rest Hser); cbn [bind].
+  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+  rewrite (ser_slot_extract_payload slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_payload_len_ge_dek slot bytes rest Hser).
+  cbn [bind].
+  change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
+  change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
+  rewrite (ser_slot_extract_dek slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_restore_dek slot bytes rest Hser); cbn [bind].
+  rewrite (ser_slot_extract_rest slot bytes rest Hser); cbn [bind].
+  rewrite (tlv_kek_slot_entry_eta slot).
+  reflexivity.
+Qed.
+
+(** [MODEL]
+    スロットリストに対する帰納的シリアライズ関係。 *)
+Inductive tlv_is_serialized_slots : list tlv_KekSlotEntry_t -> slice u8 -> slice u8 -> Type :=
+| Tlv_is_serialized_slots_nil :
+    forall (bytes : slice u8),
+      tlv_is_serialized_slots [] bytes bytes
+| Tlv_is_serialized_slots_cons :
+    forall (slot : tlv_KekSlotEntry_t) (slots : list tlv_KekSlotEntry_t)
+           (bytes mid rest : slice u8),
+      tlv_is_serialized_slot slot bytes mid ->
+      tlv_is_serialized_slots slots mid rest ->
+      tlv_is_serialized_slots (slot :: slots) bytes rest.
+
+(** [SPEC]
+    補題 9: スロットリスト全体に対するリスト帰納的ラウンドトリップ補題。 *)
+Lemma tlv_slots_roundtrip :
+  forall (slots : list tlv_KekSlotEntry_t) (bytes rest : slice u8),
+    tlv_is_serialized_slots slots bytes rest ->
+    tlv_deserialize_slots (length slots) bytes =
+      Ok (Core_result_Result_Ok (slots, rest)).
+Proof.
+  intros slots bytes rest Hser.
+  induction Hser as [b | slot slots' b mid r Hslot Hslots' IH].
+  - reflexivity.
+  - cbn [tlv_deserialize_slots length].
+    unfold bind.
+    rewrite (tlv_slot_roundtrip slot b mid Hslot).
+    cbn [bind].
+    rewrite IH.
+    reflexivity.
+Qed.
+
+(** ** 未知タグ・既知タグ混在レコード列の連鎖シリアライズ関係とラウンドトリップ検証 *)
+
+(** [MODEL]
+    残余スライス rest を後続に伴う既知エントリシリアライズ関係。 *)
+Record tlv_is_serialized_entry_chain
+  (ep : tlv_EntryPayload_t) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_entry_chain {
+  ser_chain_valid_len :
+    tlv_entry_payload_valid_len ep;
+
+  ser_chain_payload_len_u8 : u8;
+  ser_chain_payload_len_usize : usize;
+  ser_chain_total_len : usize;
+
+  ser_chain_cast_len :
+    scalar_cast U8 Usize ser_chain_payload_len_u8 = Ok ser_chain_payload_len_usize;
+  ser_chain_add_total_len :
+    usize_add 2%usize ser_chain_payload_len_usize = Ok ser_chain_total_len;
+
+  ser_chain_header_parse :
+    tlv_parse_tlv_header bytes =
+      Ok (Some {| tlv_TlvHeader_tag := tlv_TAG_ENTRY;
+                  tlv_TlvHeader_length := ser_chain_payload_len_u8 |});
+
+  ser_chain_bytes_ge_total :
+    (slice_len bytes s< ser_chain_total_len) = false;
+
+  ser_chain_payload_bytes : slice u8;
+  ser_chain_payload_bytes_len :
+    slice_len ser_chain_payload_bytes = ser_chain_payload_len_usize;
+
+  ser_chain_extract_payload :
+    core_slice_index_Slice_index
+      (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
+      {|
+        core_ops_range_Range_start := 2%usize;
+        core_ops_range_Range_end_ := ser_chain_total_len
+      |} = Ok ser_chain_payload_bytes;
+
+  ser_chain_extract_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
+      {|
+        core_ops_range_RangeFrom_start := ser_chain_total_len
+      |} = Ok rest;
+
+  ser_chain_payload_len_ge_auth :
+    (slice_len ser_chain_payload_bytes s< tlv_AUTH_TAG_LEN) = false;
+
+  ser_chain_sub_ciphertext_len :
+    usize_sub (slice_len ser_chain_payload_bytes) tlv_AUTH_TAG_LEN =
+      Ok (alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext));
+
+  ser_chain_ct_slice : slice u8;
+  ser_chain_extract_ciphertext :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      ser_chain_payload_bytes
+      {| core_ops_range_RangeTo_end_ := alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext) |} =
+    Ok ser_chain_ct_slice;
+
+  ser_chain_restore_ciphertext :
+    alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
+      core_clone_CloneU8 ser_chain_ct_slice =
+    Ok ep.(tlv_EntryPayload_ciphertext);
+
+  ser_chain_tag_slice : slice u8;
+  ser_chain_extract_tag :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      ser_chain_payload_bytes
+      {| core_ops_range_RangeFrom_start := alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext) |} =
+    Ok ser_chain_tag_slice;
+
+  ser_chain_tag_copied_slice : slice u8;
+  ser_chain_copy_tag :
+    core_slice_Slice_copy_from_slice
+      core_marker_CopyU8
+      (array_to_slice (array_repeat 16%usize 0%u8))
+      ser_chain_tag_slice =
+    Ok ser_chain_tag_copied_slice;
+
+  ser_chain_restore_tag :
+    array_from_slice (array_repeat 16%usize 0%u8) ser_chain_tag_copied_slice =
+    ep.(tlv_EntryPayload_auth_tag);
+}.
+
+(** [MODEL]
+    残余スライス rest を後続に伴う未知タグシリアライズ関係。 *)
+Record tlv_is_serialized_unknown_chain
+  (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_unknown_chain {
+  ser_unk_chain_valid_len :
+    to_Z (alloc_vec_Vec_len raw_bytes) <= 255;
+
+  ser_unk_chain_tag_not_entry :
+    (tag s= tlv_TAG_ENTRY) = false;
+
+  ser_unk_chain_payload_len_u8 : u8;
+  ser_unk_chain_payload_len_usize : usize;
+  ser_unk_chain_total_len : usize;
+
+  ser_unk_chain_cast_len :
+    scalar_cast U8 Usize ser_unk_chain_payload_len_u8 = Ok ser_unk_chain_payload_len_usize;
+  ser_unk_chain_add_total_len :
+    usize_add 2%usize ser_unk_chain_payload_len_usize = Ok ser_unk_chain_total_len;
+
+  ser_unk_chain_header_parse :
+    tlv_parse_tlv_header bytes =
+      Ok (Some {| tlv_TlvHeader_tag := tag;
+                  tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 |});
+
+  ser_unk_chain_bytes_ge_total :
+    (slice_len bytes s< ser_unk_chain_total_len) = false;
+
+  ser_unk_chain_payload_bytes : slice u8;
+  ser_unk_chain_payload_bytes_len :
+    slice_len ser_unk_chain_payload_bytes = ser_unk_chain_payload_len_usize;
+
+  ser_unk_chain_extract_payload :
+    core_slice_index_Slice_index
+      (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
+      {|
+        core_ops_range_Range_start := 2%usize;
+        core_ops_range_Range_end_ := ser_unk_chain_total_len
+      |} = Ok ser_unk_chain_payload_bytes;
+
+  ser_unk_chain_extract_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
+      {|
+        core_ops_range_RangeFrom_start := ser_unk_chain_total_len
+      |} = Ok rest;
+
+  ser_unk_chain_restore_raw_bytes :
+    alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
+      core_clone_CloneU8 ser_unk_chain_payload_bytes =
+    Ok raw_bytes;
+}.
+
+(** [MODEL]
+    残余スライス rest を後続に伴うレコード単体の直和型シリアライズ関係。 *)
+Inductive tlv_is_serialized_record_chain : tlv_TlvRecord_t -> slice u8 -> slice u8 -> Type :=
+| Tlv_is_serialized_record_chain_Entry :
+    forall (ep : tlv_EntryPayload_t) (bytes rest : slice u8),
+      tlv_is_serialized_entry_chain ep bytes rest ->
+      tlv_is_serialized_record_chain (Tlv_TlvRecord_Entry ep) bytes rest
+| Tlv_is_serialized_record_chain_Unknown :
+    forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8),
+      tlv_is_serialized_unknown_chain tag raw_bytes bytes rest ->
+      tlv_is_serialized_record_chain (Tlv_TlvRecord_Unknown tag raw_bytes) bytes rest.
+
+(** [SPEC]
+    補題 10: 残余スライスを保持する単一 TlvRecord に対するラウンドトリップ補題。 *)
+Lemma tlv_record_chain_roundtrip :
+  forall (r : tlv_TlvRecord_t) (bytes rest : slice u8),
+    tlv_is_serialized_record_chain r bytes rest ->
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (r, rest)).
+Proof.
+  intros r bytes rest Hrec.
+  destruct Hrec as [ep b rst Hser | tag raw_bytes b rst Hser].
+  - (* 既知エントリ *)
+    unfold tlv_deserialize_record.
+    rewrite (ser_chain_header_parse ep b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
+      with (ser_chain_payload_len_u8 ep b rst Hser).
+    rewrite (ser_chain_cast_len ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_add_total_len ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_bytes_ge_total ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_extract_payload ep b rst Hser); cbn [bind].
+    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+    rewrite (ser_chain_extract_rest ep b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
+      with tlv_TAG_ENTRY.
+    rewrite (scalar_eqb_refl tlv_TAG_ENTRY).
+    rewrite (ser_chain_payload_len_ge_auth ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_sub_ciphertext_len ep b rst Hser); cbn [bind].
+    change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
+    change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
+    rewrite (ser_chain_extract_ciphertext ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_restore_ciphertext ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_extract_tag ep b rst Hser); cbn [bind].
+    unfold array_to_slice_mut.
+    rewrite (ser_chain_copy_tag ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_restore_tag ep b rst Hser).
+    unfold tlv_EntryPayload_new.
+    rewrite (tlv_entry_payload_eta ep).
+    reflexivity.
+  - (* 未知タグ *)
+    unfold tlv_deserialize_record.
+    rewrite (ser_unk_chain_header_parse tag raw_bytes b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
+      with (ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser).
+    rewrite (ser_unk_chain_cast_len tag raw_bytes b rst Hser); cbn [bind].
+    rewrite (ser_unk_chain_add_total_len tag raw_bytes b rst Hser); cbn [bind].
+    rewrite (ser_unk_chain_bytes_ge_total tag raw_bytes b rst Hser); cbn [bind].
+    rewrite (ser_unk_chain_extract_payload tag raw_bytes b rst Hser); cbn [bind].
+    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+    rewrite (ser_unk_chain_extract_rest tag raw_bytes b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
+      with tag.
+    rewrite (ser_unk_chain_tag_not_entry tag raw_bytes b rst Hser).
+    rewrite (ser_unk_chain_restore_raw_bytes tag raw_bytes b rst Hser).
+    reflexivity.
+Qed.
+
+(** [MODEL]
+    混在レコードリストに対する帰納的シリアライズ関係。 *)
+Inductive tlv_is_serialized_records : list tlv_TlvRecord_t -> slice u8 -> slice u8 -> Type :=
+| Tlv_is_serialized_records_nil :
+    forall (bytes : slice u8),
+      tlv_is_serialized_records [] bytes bytes
+| Tlv_is_serialized_records_cons :
+    forall (r : tlv_TlvRecord_t) (records : list tlv_TlvRecord_t)
+           (bytes mid rest : slice u8),
+      tlv_is_serialized_record_chain r bytes mid ->
+      tlv_is_serialized_records records mid rest ->
+      tlv_is_serialized_records (r :: records) bytes rest.
+
+(** [SPEC]
+    補題 11: 未知・既知混在レコードリスト全体に対するリスト帰納的ラウンドトリップ補題。 *)
+Lemma tlv_records_roundtrip :
+  forall (records : list tlv_TlvRecord_t) (bytes rest : slice u8),
+    tlv_is_serialized_records records bytes rest ->
+    tlv_deserialize_records (length records) bytes =
+      Ok (Core_result_Result_Ok (records, rest)).
+Proof.
+  intros records bytes rest Hser.
+  induction Hser as [b | r rs b mid rst Hr Hrs IH].
+  - reflexivity.
+  - cbn [tlv_deserialize_records length].
+    unfold bind.
+    rewrite (tlv_record_chain_roundtrip r b mid Hr).
+    cbn [bind].
+    rewrite IH.
+    reflexivity.
+Qed.
+
+(** ** Vault 全体のラウンドトリップ検証 *)
+
+(** [SPEC]
+    Vault レコードの構成要素からの再構成補題。 *)
+Lemma tlv_vault_eta : forall (v : tlv_Vault_t),
+  {| tlv_Vault_header := v.(tlv_Vault_header);
+     tlv_Vault_slots := v.(tlv_Vault_slots);
+     tlv_Vault_records := v.(tlv_Vault_records) |} = v.
+Proof.
+  destruct v.
+  reflexivity.
+Qed.
+
+(** [MODEL]
+    未知タグと既知タグが混在する Vault 構造全体に対するシリアライズ結果バイト列 bytes の振る舞い規定。 *)
+Record tlv_is_serialized_vault
+  (v : tlv_Vault_t) (bytes : slice u8) : Type :=
+mktlv_is_serialized_vault {
+  ser_vault_rest1 : slice u8;
+  ser_vault_header :
+    tlv_is_serialized_header_chain v.(tlv_Vault_header) bytes ser_vault_rest1;
+
+  ser_vault_rest1_len_ge_1 :
+    (slice_len ser_vault_rest1 s< 1%usize) = false;
+
+  ser_vault_slot_count_u8 : u8;
+  ser_vault_idx_slot_count :
+    slice_index_usize ser_vault_rest1 0%usize = Ok ser_vault_slot_count_u8;
+
+  ser_vault_slot_count_usize : usize;
+  ser_vault_cast_slot_count :
+    scalar_cast U8 Usize ser_vault_slot_count_u8 = Ok ser_vault_slot_count_usize;
+
+  ser_vault_slot_count_nat :
+    usize_to_nat ser_vault_slot_count_usize = length v.(tlv_Vault_slots);
+
+  ser_vault_rest2 : slice u8;
+  ser_vault_extract_rest2 :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      ser_vault_rest1 {| core_ops_range_RangeFrom_start := 1%usize |} =
+    Ok ser_vault_rest2;
+
+  ser_vault_needed_slot_len : usize;
+  ser_vault_mul_needed_slot_len :
+    usize_mul ser_vault_slot_count_usize tlv_KEK_SLOT_HEADER_LEN =
+      Ok ser_vault_needed_slot_len;
+
+  ser_vault_rest2_len_ge_slots :
+    (slice_len ser_vault_rest2 s< ser_vault_needed_slot_len) = false;
+
+  ser_vault_rest3 : slice u8;
+  ser_vault_slots_chain :
+    tlv_is_serialized_slots v.(tlv_Vault_slots) ser_vault_rest2 ser_vault_rest3;
+
+  ser_vault_rest3_len_ge_2 :
+    (slice_len ser_vault_rest3 s< 2%usize) = false;
+
+  ser_vault_b0 : u8;
+  ser_vault_b1 : u8;
+  ser_vault_idx_b0 :
+    slice_index_usize ser_vault_rest3 0%usize = Ok ser_vault_b0;
+  ser_vault_idx_b1 :
+    slice_index_usize ser_vault_rest3 1%usize = Ok ser_vault_b1;
+
+  ser_vault_record_count_usize : usize;
+  ser_vault_cast_record_count :
+    scalar_cast U16 Usize
+      (core_num_U16_from_be_bytes (mk_array 2%usize [ser_vault_b0; ser_vault_b1])) =
+      Ok ser_vault_record_count_usize;
+
+  ser_vault_record_count_nat :
+    usize_to_nat ser_vault_record_count_usize = length v.(tlv_Vault_records);
+
+  ser_vault_rest4 : slice u8;
+  ser_vault_extract_rest4 :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      ser_vault_rest3 {| core_ops_range_RangeFrom_start := 2%usize |} =
+    Ok ser_vault_rest4;
+
+  ser_vault_needed_record_len : usize;
+  ser_vault_mul_needed_record_len :
+    usize_mul ser_vault_record_count_usize tlv_TLV_HEADER_LEN =
+      Ok ser_vault_needed_record_len;
+
+  ser_vault_rest4_len_ge_records :
+    (slice_len ser_vault_rest4 s< ser_vault_needed_record_len) = false;
+
+  ser_vault_records_chain :
+    tlv_is_serialized_records v.(tlv_Vault_records) ser_vault_rest4 slice_empty;
+}.
+
+(** [SPEC]
+    最上位定理: 未知タグと既知タグが混在する Vault 構造全体に対する完全ラウンドトリップ定理。
+    シリアライズ仕様を満たすバイト列 bytes に対し、tlv_deserialize を実行すると、
+    元の Vault 構造体 v と空の残余スライスが完全に復元される。 *)
+Theorem tlv_vault_roundtrip :
+  forall (v : tlv_Vault_t) (bytes : slice u8),
+    tlv_is_serialized_vault v bytes ->
+    tlv_deserialize bytes = Ok (Core_result_Result_Ok (v, slice_empty)).
+Proof.
+  intros v bytes Hser.
+  unfold tlv_deserialize.
+  (* 1. ヘッダーのデシリアライズ *)
+  rewrite (tlv_header_chain_roundtrip
+             v.(tlv_Vault_header) bytes (ser_vault_rest1 v bytes Hser)
+             (ser_vault_header v bytes Hser)).
+  cbn [bind].
+  (* 2. slot_count の読み取りと境界判定 *)
+  rewrite (ser_vault_rest1_len_ge_1 v bytes Hser).
+  rewrite (ser_vault_idx_slot_count v bytes Hser); cbn [bind].
+  rewrite (ser_vault_cast_slot_count v bytes Hser); cbn [bind].
+  rewrite (ser_vault_extract_rest2 v bytes Hser); cbn [bind].
+  rewrite (ser_vault_mul_needed_slot_len v bytes Hser); cbn [bind].
+  rewrite (ser_vault_rest2_len_ge_slots v bytes Hser).
+  (* 3. スロット列のデシリアライズ *)
+  rewrite (ser_vault_slot_count_nat v bytes Hser).
+  rewrite (tlv_slots_roundtrip
+             v.(tlv_Vault_slots) (ser_vault_rest2 v bytes Hser) (ser_vault_rest3 v bytes Hser)
+             (ser_vault_slots_chain v bytes Hser)).
+  cbn [bind].
+  (* 4. record_count の読み取りと境界判定 *)
+  rewrite (ser_vault_rest3_len_ge_2 v bytes Hser).
+  rewrite (ser_vault_idx_b0 v bytes Hser); cbn [bind].
+  rewrite (ser_vault_idx_b1 v bytes Hser); cbn [bind].
+  rewrite (ser_vault_cast_record_count v bytes Hser); cbn [bind].
+  rewrite (ser_vault_extract_rest4 v bytes Hser); cbn [bind].
+  rewrite (ser_vault_mul_needed_record_len v bytes Hser); cbn [bind].
+  rewrite (ser_vault_rest4_len_ge_records v bytes Hser).
+  (* 5. レコード列のデシリアライズ *)
+  rewrite (ser_vault_record_count_nat v bytes Hser).
+  rewrite (tlv_records_roundtrip
+             v.(tlv_Vault_records) (ser_vault_rest4 v bytes Hser) slice_empty
+             (ser_vault_records_chain v bytes Hser)).
+  cbn [bind].
+  (* 6. Vault 構造体の再構成 *)
+  rewrite (tlv_vault_eta v).
+  reflexivity.
+Qed.
+

@@ -114,4 +114,29 @@ python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --theorem tlv_header_roundtrip \
   --allow-aeneas-axioms
 
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_slot_roundtrip \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_slots_roundtrip \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_record_chain_roundtrip \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_records_roundtrip \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_vault_roundtrip \
+  --allow-aeneas-axioms
+
 echo "==> [SUCCESS] All TLV extraction, proofs, and axiom audits passed cleanly."
