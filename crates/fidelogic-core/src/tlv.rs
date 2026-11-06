@@ -270,7 +270,7 @@ impl TlvPayload {
 /// 既知タグ(`Known`)または将来拡張用の未知タグ(`UnknownTag`)を表現する。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum TlvRecord {
     /// 既知タグと解釈済みペイロード。
     Known {
@@ -287,38 +287,6 @@ pub enum TlvRecord {
         raw_bytes: alloc::vec::Vec<u8>,
     },
 }
-
-#[cfg(feature = "alloc")]
-impl PartialEq for TlvRecord {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Known {
-                    tag: tag1,
-                    payload: payload1,
-                },
-                Self::Known {
-                    tag: tag2,
-                    payload: payload2,
-                },
-            ) => tag1 == tag2 && payload1 == payload2,
-            (
-                Self::UnknownTag {
-                    tag: tag1,
-                    raw_bytes: bytes1,
-                },
-                Self::UnknownTag {
-                    tag: tag2,
-                    raw_bytes: bytes2,
-                },
-            ) => tag1 == tag2 && bytes1 == bytes2,
-            _ => false,
-        }
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl Eq for TlvRecord {}
 
 #[cfg(feature = "alloc")]
 impl TlvRecord {
