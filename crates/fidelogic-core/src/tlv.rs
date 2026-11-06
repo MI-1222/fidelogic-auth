@@ -1325,4 +1325,122 @@ mod tests {
             "事前計算によるバッファ一括確保と容量完全一致の検証に成功。"
         );
     }
+
+    #[cfg(feature = "alloc")]
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_vault_header() -> impl Strategy<Value = VaultHeader> {
+            (any::<u8>(), any::<u8>()).prop_map(|(version, suite_id)| VaultHeader {
+                magic: VAULT_MAGIC,
+                version,
+                suite_id,
+            })
+        }
+
+        fn arb_kek_slot_entry() -> impl Strategy<Value = KekSlotEntry> {
+            (
+                any::<u8>(),
+                any::<u8>(),
+                prop::collection::vec(any::<u8>(), 0..=256),
+            )
+                .prop_map(|(slot_id, kdf_kind, wrapped_dek)| KekSlotEntry {
+                    slot_id,
+                    kdf_kind,
+                    wrapped_dek_len: wrapped_dek.len() as u16,
+                    wrapped_dek,
+                })
+        }
+
+        fn arb_entry_payload() -> impl Strategy<Value = EntryPayload> {
+            (
+                prop::collection::vec(any::<u8>(), 0..=(255 - AUTH_TAG_LEN)),
+                any::<[u8; AUTH_TAG_LEN]>(),
+            )
+                .prop_map(|(ciphertext, auth_tag)| EntryPayload::new(ciphertext, auth_tag))
+        }
+
+        fn arb_tlv_record() -> impl Strategy<Value = TlvRecord> {
+            prop_oneof![
+                arb_entry_payload().prop_map(TlvRecord::Entry),
+                (
+                    (0u8..=255u8).prop_filter("TAG_ENTRYは除外。", |&tag| tag != TAG_ENTRY),
+                    prop::collection::vec(any::<u8>(), 0..=255),
+                )
+                    .prop_map(|(tag, raw_bytes)| TlvRecord::Unknown { tag, raw_bytes }),
+            ]
+        }
+
+        fn arb_vault() -> impl Strategy<Value = Vault> {
+            (
+                arb_vault_header(),
+                prop::collection::vec(arb_kek_slot_entry(), 0..=16),
+                prop::collection::vec(arb_tlv_record(), 0..=32),
+            )
+                .prop_map(|(header, slots, records)| Vault::new(header, slots, records))
+        }
+
+        proptest! {
+            /// 任意の有効な `Vault` 構造体をシリアライズ・デシリアライズすると完全に元に戻る性質(Round-trip)を検証。
+            #[test]
+            fn prop_vault_roundtrip(vault in arb_vault()) {
+                let bytes = serialize(&vault).expect("Vaultシリアライズに成功。");
+                let (deserialized, rest) = deserialize(&bytes).expect("Vaultデシリアライズに成功。");
+                prop_assert_eq!(deserialized, vault, "シリアライズ・デシリアライズ往復で値が完全に一致。");
+                prop_assert!(rest.is_empty(), "デシリアライズ後の残余スライスが空であることを確認。");
+            }
+
+            /// 任意のランダムなバイト列を `deserialize` に投入してもパニックを起こさず常に `Err` または `Ok` を返す性質を検証。
+            #[test]
+            fn prop_deserialize_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..=1024)) {
+                let res = deserialize(&bytes);
+                match res {
+                    Ok((vault, rest)) => {
+                        prop_assert!(rest.len() <= bytes.len(), "残余バイトスライスが入力長以下であることを確認。");
+                        let _ = vault;
+                    }
+                    Err(err) => {
+                        let _ = err;
+                    }
+                }
+            }
+
+            /// 任意のランダムなバイト列を `deserialize_header` に投入してもパニックを起こさない性質を検証。
+            #[test]
+            fn prop_deserialize_header_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..=64)) {
+                let _ = deserialize_header(&bytes);
+            }
+
+            /// 任意のランダムなバイト列を `deserialize_slot_entry` に投入してもパニックを起こさない性質を検証。
+            #[test]
+            fn prop_deserialize_slot_entry_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..=512)) {
+                let _ = deserialize_slot_entry(&bytes);
+            }
+
+            /// 任意のランダムなバイト列を `deserialize_record` に投入してもパニックを起こさない性質を検証。
+            #[test]
+            fn prop_deserialize_record_never_panics(bytes in prop::collection::vec(any::<u8>(), 0..=512)) {
+                let _ = deserialize_record(&bytes);
+            }
+
+            /// 任意の `KekSlotEntry` の Round-trip 性を検証。
+            #[test]
+            fn prop_slot_entry_roundtrip(entry in arb_kek_slot_entry()) {
+                let bytes = serialize_slot_entry(&entry).expect("スロットエントリシリアライズに成功。");
+                let (deserialized, rest) = deserialize_slot_entry(&bytes).expect("スロットエントリデシリアライズに成功。");
+                prop_assert_eq!(deserialized, entry, "スロットエントリ往復で値が完全に一致。");
+                prop_assert!(rest.is_empty(), "残余スライスが空であることを確認。");
+            }
+
+            /// 任意の `TlvRecord` の Round-trip 性を検証。
+            #[test]
+            fn prop_tlv_record_roundtrip(record in arb_tlv_record()) {
+                let bytes = serialize_record(&record).expect("レコードシリアライズに成功。");
+                let (deserialized, rest) = deserialize_record(&bytes).expect("レコードデシリアライズに成功。");
+                prop_assert_eq!(deserialized, record, "レコード往復で値が完全に一致。");
+                prop_assert!(rest.is_empty(), "残余スライスが空であることを確認。");
+            }
+        }
+    }
 }

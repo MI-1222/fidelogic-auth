@@ -14,3 +14,6 @@ profile-lite = ["alloc"]
 profile-vault = ["alloc"]
 
 [dependencies]
+
+[dev-dependencies]
+proptest = "1"
