@@ -4,13 +4,13 @@
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
 pub use crate::tlv::{
-    KEK_SLOT_ENTRY_LEN, KekSlotEntry, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC,
-    VaultError, VaultHeader, deserialize_header, deserialize_slot_entry, is_known_tag,
-    serialize_header, serialize_slot_entry,
+    KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TlvParseError, VAULT_HEADER_LEN,
+    VAULT_MAGIC, VaultError, VaultHeader, deserialize_header, is_known_tag, serialize_header,
 };
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{
-    TlvPayload, TlvRecord, Vault, deserialize, deserialize_record, serialize, serialize_record,
+    KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
+    deserialize_slot_entry, serialize, serialize_record, serialize_slot_entry,
 };
 
 /// `profile-vault` の運用エンジンを表す構造体。
@@ -80,9 +80,10 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_slot_entry_reexport() {
-        let input = [0, 1, 0, 64];
+        let input = [0, 1, 0, 4, 1, 2, 3, 4];
         let res = deserialize_slot_entry(&input);
         assert!(
             res.is_ok(),
@@ -116,17 +117,19 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_slot_entry_reexport() {
         let entry = KekSlotEntry {
             slot_id: 0,
             kdf_kind: 1,
-            wrapped_dek_len: 64,
+            wrapped_dek_len: 4,
+            wrapped_dek: alloc::vec![1, 2, 3, 4],
         };
-        let bytes = serialize_slot_entry(&entry);
+        let bytes = serialize_slot_entry(&entry).expect("シリアライズに成功。");
         assert_eq!(
             bytes,
-            [0, 1, 0, 64],
+            [0, 1, 0, 4, 1, 2, 3, 4],
             "profile_vault経由のserialize_slot_entry呼び出しに成功。"
         );
     }

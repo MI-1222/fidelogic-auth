@@ -118,11 +118,18 @@ pub enum VaultError {
 /// TLVパース専用のエラー型エイリアス。
 pub type TlvParseError = VaultError;
 
-/// KEKスロット定義テーブルのエントリを表す固定長レコード。
+/// KEKスロットヘッダーのバイト長(4バイト)。
+pub const KEK_SLOT_HEADER_LEN: usize = 4;
+
+/// KEKスロットヘッダー長の後方互換用エイリアス(4バイト)。
+pub const KEK_SLOT_ENTRY_LEN: usize = KEK_SLOT_HEADER_LEN;
+
+/// KEKスロット定義テーブルのエントリを表すレコード。
 ///
-/// スロットID, KDF種別, ラップ済みDEKのバイト長を保持する。
+/// スロットID, KDF種別, ラップ済みDEKのバイト長, および暗号化DEK本体(Wrapped DEK)を保持する。
+#[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct KekSlotEntry {
     /// スロット識別子。
     pub slot_id: u8,
@@ -130,41 +137,94 @@ pub struct KekSlotEntry {
     pub kdf_kind: u8,
     /// ラップ済みDEKのバイト長。
     pub wrapped_dek_len: u16,
+    /// 暗号化DEK本体(Wrapped DEK)。
+    pub wrapped_dek: alloc::vec::Vec<u8>,
 }
 
-/// KEKスロットエントリのバイト長(4バイト)。
-pub const KEK_SLOT_ENTRY_LEN: usize = 4;
+#[cfg(feature = "alloc")]
+impl KekSlotEntry {
+    /// 新しいKEKスロットエントリ構造体を生成する。
+    ///
+    /// # Errors
+    ///
+    /// - `wrapped_dek` のバイト長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+    pub fn new(
+        slot_id: u8,
+        kdf_kind: u8,
+        wrapped_dek: alloc::vec::Vec<u8>,
+    ) -> Result<Self, VaultError> {
+        let wrapped_dek_len =
+            u16::try_from(wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
+        Ok(Self {
+            slot_id,
+            kdf_kind,
+            wrapped_dek_len,
+            wrapped_dek,
+        })
+    }
+}
 
 /// `KekSlotEntry` 単体の純粋関数型デシリアライザー。
 ///
-/// 入力バイト列からスロットID (1B), KDF種別 (1B), ラップ済みDEK長 (2B, ビッグエンディアン) を安全に読み取り、
+/// 入力バイト列からスロットID (1B), KDF種別 (1B), ラップ済みDEK長 (2B, ビッグエンディアン),
+/// およびラップ済みDEK実体データを安全に読み取り、
 /// デシリアライズされた [`KekSlotEntry`] と残余バイトスライスを返す。
 ///
 /// # Errors
 ///
-/// - 入力バイト列の長さが [`KEK_SLOT_ENTRY_LEN`] 未満の場合は [`VaultError::UnexpectedEof`] を返す。
+/// - 入力バイト列の長さがヘッダー長 ([`KEK_SLOT_HEADER_LEN`]) 未満の場合は [`VaultError::UnexpectedEof`] を返す。
+/// - 入力バイト列の長さがヘッダー長とラップ済みDEK長の合計未満の場合は [`VaultError::UnexpectedEof`] を返す。
+#[cfg(feature = "alloc")]
 pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), TlvParseError> {
-    if bytes.len() < KEK_SLOT_ENTRY_LEN {
+    if bytes.len() < KEK_SLOT_HEADER_LEN {
         return Err(VaultError::UnexpectedEof);
     }
     let slot_id = bytes[0];
     let kdf_kind = bytes[1];
     let wrapped_dek_len = u16::from_be_bytes([bytes[2], bytes[3]]);
+    let dek_len = wrapped_dek_len as usize;
+
+    let payload_bytes = &bytes[KEK_SLOT_HEADER_LEN..];
+    if payload_bytes.len() < dek_len {
+        return Err(VaultError::UnexpectedEof);
+    }
+
+    let wrapped_dek = payload_bytes[..dek_len].to_vec();
     let entry = KekSlotEntry {
         slot_id,
         kdf_kind,
         wrapped_dek_len,
+        wrapped_dek,
     };
-    Ok((entry, &bytes[KEK_SLOT_ENTRY_LEN..]))
+    Ok((entry, &payload_bytes[dek_len..]))
 }
 
 /// `KekSlotEntry` 単体の純粋関数型シリアライザー。
 ///
-/// 指定された [`KekSlotEntry`] を固定長バイト配列 (4バイト) にシリアライズする。
-#[must_use]
-pub const fn serialize_slot_entry(entry: &KekSlotEntry) -> [u8; KEK_SLOT_ENTRY_LEN] {
+/// 指定された [`KekSlotEntry`] をバイナリ形式にシリアライズする。
+/// スロットID (1B), KDF種別 (1B), ラップ済みDEK長 (2B, ビッグエンディアン),
+/// および暗号化DEK本体(Wrapped DEK)のバイト列を出力する。
+///
+/// # Errors
+///
+/// - `wrapped_dek` の実体長と `wrapped_dek_len` が一致しない場合は [`VaultError::InvalidLength`] を返す。
+/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, VaultError> {
+    if entry.wrapped_dek.len() > u16::MAX as usize {
+        return Err(VaultError::InvalidLength);
+    }
+    if entry.wrapped_dek.len() != entry.wrapped_dek_len as usize {
+        return Err(VaultError::InvalidLength);
+    }
     let len_bytes = entry.wrapped_dek_len.to_be_bytes();
-    [entry.slot_id, entry.kdf_kind, len_bytes[0], len_bytes[1]]
+    let mut bytes = alloc::vec::Vec::with_capacity(KEK_SLOT_HEADER_LEN + entry.wrapped_dek.len());
+    bytes.push(entry.slot_id);
+    bytes.push(entry.kdf_kind);
+    bytes.push(len_bytes[0]);
+    bytes.push(len_bytes[1]);
+    bytes.extend_from_slice(&entry.wrapped_dek);
+    Ok(bytes)
 }
 
 /// AEAD認証タグのバイト長(16バイト)。
@@ -461,7 +521,8 @@ pub fn serialize(vault: &Vault) -> Result<alloc::vec::Vec<u8>, VaultError> {
     let slot_count = vault.slots.len() as u8;
     out.push(slot_count);
     for slot in &vault.slots {
-        out.extend_from_slice(&serialize_slot_entry(slot));
+        let slot_bytes = serialize_slot_entry(slot)?;
+        out.extend_from_slice(&slot_bytes);
     }
 
     let record_count = (vault.records.len() as u16).to_be_bytes();
@@ -509,17 +570,20 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_kek_slot_entry_equality() {
         let entry1 = KekSlotEntry {
             slot_id: 0,
             kdf_kind: 1,
-            wrapped_dek_len: 64,
+            wrapped_dek_len: 4,
+            wrapped_dek: alloc::vec![0x01, 0x02, 0x03, 0x04],
         };
         let entry2 = KekSlotEntry {
             slot_id: 0,
             kdf_kind: 1,
-            wrapped_dek_len: 64,
+            wrapped_dek_len: 4,
+            wrapped_dek: alloc::vec![0x01, 0x02, 0x03, 0x04],
         };
         assert_eq!(entry1, entry2, "同一パラメータのKekSlotEntry比較に成功。");
     }
@@ -573,11 +637,16 @@ mod tests {
         let slot = KekSlotEntry {
             slot_id: 0,
             kdf_kind: 1,
-            wrapped_dek_len: 64,
+            wrapped_dek_len: 4,
+            wrapped_dek: alloc::vec![0x10, 0x20, 0x30, 0x40],
         };
         let payload = TlvPayload::new(alloc::vec![0x01, 0x02], [0xbb; AUTH_TAG_LEN]);
         let record = TlvRecord::Known { tag: 1, payload };
-        let vault1 = Vault::new(header, alloc::vec![slot], alloc::vec![record.clone()]);
+        let vault1 = Vault::new(
+            header,
+            alloc::vec![slot.clone()],
+            alloc::vec![record.clone()],
+        );
         let vault2 = Vault::new(header, alloc::vec![slot], alloc::vec![record]);
         assert_eq!(vault1, vault2, "同一パラメータのVault比較に成功。");
     }
@@ -708,9 +777,10 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_slot_entry_success() {
-        let input = [1, 2, 0x01, 0x00, 0xff];
+        let input = [1, 2, 0x00, 0x04, 0xaa, 0xbb, 0xcc, 0xdd, 0xff];
         let result = deserialize_slot_entry(&input);
         assert!(
             result.is_ok(),
@@ -722,20 +792,29 @@ mod tests {
             KekSlotEntry {
                 slot_id: 1,
                 kdf_kind: 2,
-                wrapped_dek_len: 256,
+                wrapped_dek_len: 4,
+                wrapped_dek: alloc::vec![0xaa, 0xbb, 0xcc, 0xdd],
             },
             "デシリアライズされたKekSlotEntry内容の検証に成功。"
         );
         assert_eq!(rest, &[0xff], "スロットパース後の残余スライス検証に成功。");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_slot_entry_unexpected_eof() {
-        let short_input = [1, 2, 0x01];
+        let short_header = [1, 2, 0x01];
         assert_eq!(
-            deserialize_slot_entry(&short_input),
+            deserialize_slot_entry(&short_header),
             Err(VaultError::UnexpectedEof),
-            "スロット長不足時のUnexpectedEof検証に成功。"
+            "ヘッダー長不足時のUnexpectedEof検証に成功。"
+        );
+
+        let short_payload = [1, 2, 0x00, 0x04, 0xaa, 0xbb];
+        assert_eq!(
+            deserialize_slot_entry(&short_payload),
+            Err(VaultError::UnexpectedEof),
+            "ペイロード長不足時のUnexpectedEof検証に成功。"
         );
     }
 
@@ -745,7 +824,7 @@ mod tests {
         let mut input = alloc::vec![b'F', b'V', b'A', b'U', 1, 2];
         // 1スロット
         input.push(1);
-        input.extend_from_slice(&[0, 1, 0x00, 0x40]);
+        input.extend_from_slice(&[0, 1, 0x00, 0x04, 0x11, 0x22, 0x33, 0x44]);
         // 2レコード
         input.extend_from_slice(&[0x00, 0x02]);
         // レコード1: 既知タグ
@@ -774,7 +853,8 @@ mod tests {
             alloc::vec![KekSlotEntry {
                 slot_id: 0,
                 kdf_kind: 1,
-                wrapped_dek_len: 64,
+                wrapped_dek_len: 4,
+                wrapped_dek: alloc::vec![0x11, 0x22, 0x33, 0x44],
             }],
             "デシリアライズされたスロットテーブルの検証に成功。"
         );
@@ -910,17 +990,19 @@ mod tests {
         assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_slot_entry_and_roundtrip() {
         let entry = KekSlotEntry {
             slot_id: 2,
             kdf_kind: 1,
-            wrapped_dek_len: 512,
+            wrapped_dek_len: 3,
+            wrapped_dek: alloc::vec![0xaa, 0xbb, 0xcc],
         };
-        let bytes = serialize_slot_entry(&entry);
+        let bytes = serialize_slot_entry(&entry).expect("シリアライズに成功。");
         assert_eq!(
             bytes,
-            [2, 1, 0x02, 0x00],
+            [2, 1, 0x00, 0x03, 0xaa, 0xbb, 0xcc],
             "KekSlotEntryのシリアライズ結果検証に成功。"
         );
 
@@ -930,6 +1012,33 @@ mod tests {
             "KekSlotEntryのシリアライズ・デシリアライズ往復に成功。"
         );
         assert!(rest.is_empty(), "残余スライスが空であることの検証に成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_slot_entry_mismatched_length() {
+        let entry = KekSlotEntry {
+            slot_id: 1,
+            kdf_kind: 1,
+            wrapped_dek_len: 4,
+            wrapped_dek: alloc::vec![0x01, 0x02],
+        };
+        assert_eq!(
+            serialize_slot_entry(&entry),
+            Err(VaultError::InvalidLength),
+            "実体長と宣言長の不一致時におけるInvalidLength返却検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_kek_slot_entry_new() {
+        let entry = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20])
+            .expect("正常なパラメータによるKekSlotEntry生成に成功。");
+        assert_eq!(entry.slot_id, 0);
+        assert_eq!(entry.kdf_kind, 1);
+        assert_eq!(entry.wrapped_dek_len, 2);
+        assert_eq!(entry.wrapped_dek, alloc::vec![0x10, 0x20]);
     }
 
     #[cfg(feature = "alloc")]
@@ -1013,7 +1122,8 @@ mod tests {
         let slot = KekSlotEntry {
             slot_id: 0,
             kdf_kind: 1,
-            wrapped_dek_len: 64,
+            wrapped_dek_len: 4,
+            wrapped_dek: alloc::vec![0x10, 0x20, 0x30, 0x40],
         };
         let record1 = TlvRecord::Known {
             tag: TAG_ENTRY,
@@ -1063,7 +1173,8 @@ mod tests {
         let slot = KekSlotEntry {
             slot_id: 0,
             kdf_kind: 1,
-            wrapped_dek_len: 64,
+            wrapped_dek_len: 0,
+            wrapped_dek: alloc::vec::Vec::new(),
         };
         let slots = alloc::vec![slot; 256];
         let vault = Vault::new(header, slots, alloc::vec::Vec::new());
