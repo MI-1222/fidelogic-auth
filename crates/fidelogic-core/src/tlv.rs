@@ -242,11 +242,11 @@ pub const fn is_known_tag(tag: u8) -> bool {
     tag == TAG_ENTRY
 }
 
-/// TLVレコードの既知ペイロード(暗号化データおよび認証タグ)。
+/// エントリレコードのペイロード(暗号化データおよび認証タグ)。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
-pub struct TlvPayload {
+pub struct EntryPayload {
     /// 暗号化データ本体。
     pub ciphertext: alloc::vec::Vec<u8>,
     /// AEAD認証タグ(16バイト)。
@@ -254,8 +254,8 @@ pub struct TlvPayload {
 }
 
 #[cfg(feature = "alloc")]
-impl TlvPayload {
-    /// 新しい既知ペイロード構造体を生成する。
+impl EntryPayload {
+    /// 新しいエントリペイロード構造体を生成する。
     #[must_use]
     pub fn new(ciphertext: alloc::vec::Vec<u8>, auth_tag: [u8; AUTH_TAG_LEN]) -> Self {
         Self {
@@ -265,22 +265,21 @@ impl TlvPayload {
     }
 }
 
-/// ペイロード部のTLVレコードを表す列挙型。
+/// エントリペイロードの後方互換用型エイリアス。
+#[cfg(feature = "alloc")]
+pub type TlvPayload = EntryPayload;
+
+/// ペイロード部のTLVレコードを表す代数的データ型(ADT)。
 ///
-/// 既知タグ(`Known`)または将来拡張用の未知タグ(`UnknownTag`)を表現する。
+/// 暗号化エントリレコード([`TlvRecord::Entry`])または将来拡張用の未知タグレコード([`TlvRecord::Unknown`])を表現する。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
 pub enum TlvRecord {
-    /// 既知タグと解釈済みペイロード。
-    Known {
-        /// レコード種別タグ。
-        tag: u8,
-        /// 暗号化データおよび認証タグ。
-        payload: TlvPayload,
-    },
+    /// エントリレコード(暗号化データおよび認証タグ)。
+    Entry(EntryPayload),
     /// 未知タグと未解釈生バイト列。
-    UnknownTag {
+    Unknown {
         /// レコード種別タグ。
         tag: u8,
         /// レコードの生バイト列。
@@ -294,7 +293,8 @@ impl TlvRecord {
     #[must_use]
     pub const fn tag(&self) -> u8 {
         match *self {
-            Self::Known { tag, .. } | Self::UnknownTag { tag, .. } => tag,
+            Self::Entry(_) => TAG_ENTRY,
+            Self::Unknown { tag, .. } => tag,
         }
     }
 }
@@ -303,14 +303,14 @@ impl TlvRecord {
 ///
 /// 入力バイト列からヘッダー `[Tag (1B), Length (1B)]` を安全に取得し、
 /// 続くペイロードバイト列を解釈する。
-/// 既知タグ ([`TAG_ENTRY`]) の場合は暗号化データと認証タグ ([`AUTH_TAG_LEN`]) に分解して [`TlvRecord::Known`] を生成する。
-/// 未知タグに遭遇した場合は、後続バイト列の安全な読み飛ばしを行い、生バイト列を保持する [`TlvRecord::UnknownTag`] を生成する。
+/// エントリタグ ([`TAG_ENTRY`]) の場合は暗号化データと認証タグ ([`AUTH_TAG_LEN`]) に分解して [`TlvRecord::Entry`] を生成する。
+/// 未知タグに遭遇した場合は、後続バイト列の安全な読み飛ばしを行い、生バイト列を保持する [`TlvRecord::Unknown`] を生成する。
 /// デシリアライズされた [`TlvRecord`] と残余バイトスライスを返す。
 ///
 /// # Errors
 ///
 /// - 入力バイト列の長さがヘッダー長 (2バイト) 未満、または宣言長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
-/// - 既知タグのペイロード長が認証タグ長 ([`AUTH_TAG_LEN`]) 未満の場合は [`VaultError::InvalidLength`] を返す。
+/// - エントリレコードのペイロード長が認証タグ長 ([`AUTH_TAG_LEN`]) 未満の場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseError> {
     let Some(header) = parse_tlv_header(bytes) else {
@@ -324,23 +324,20 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
     let payload_bytes = &bytes[2..total_len];
     let rest = &bytes[total_len..];
 
-    let record = if is_known_tag(header.tag) {
-        if payload_bytes.len() < AUTH_TAG_LEN {
-            return Err(VaultError::InvalidLength);
+    let record = match header.tag {
+        TAG_ENTRY => {
+            if payload_bytes.len() < AUTH_TAG_LEN {
+                return Err(VaultError::InvalidLength);
+            }
+            let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
+            let ciphertext = alloc::vec::Vec::from(&payload_bytes[..ciphertext_len]);
+            let mut auth_tag = [0u8; AUTH_TAG_LEN];
+            auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
+            TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
         }
-        let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
-        let ciphertext = alloc::vec::Vec::from(&payload_bytes[..ciphertext_len]);
-        let mut auth_tag = [0u8; AUTH_TAG_LEN];
-        auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
-        TlvRecord::Known {
-            tag: header.tag,
-            payload: TlvPayload::new(ciphertext, auth_tag),
-        }
-    } else {
-        let raw_bytes = alloc::vec::Vec::from(payload_bytes);
-        TlvRecord::UnknownTag {
-            tag: header.tag,
-            raw_bytes,
+        tag => {
+            let raw_bytes = alloc::vec::Vec::from(payload_bytes);
+            TlvRecord::Unknown { tag, raw_bytes }
         }
     };
 
@@ -350,7 +347,7 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
 /// `TlvRecord` 単体の純粋関数型シリアライザー。
 ///
 /// 指定された [`TlvRecord`] をバイト列にシリアライズする。
-/// 既知レコードの場合は `[Tag (1B), Length (1B), Ciphertext..., AuthTag (16B)]`、
+/// エントリレコードの場合は `[Tag (1B), Length (1B), Ciphertext..., AuthTag (16B)]`、
 /// 未知レコードの場合は `[Tag (1B), Length (1B), RawBytes...]` を出力する。
 ///
 /// # Errors
@@ -359,7 +356,7 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
 #[cfg(feature = "alloc")]
 pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, VaultError> {
     match record {
-        TlvRecord::Known { tag, payload } => {
+        TlvRecord::Entry(payload) => {
             let payload_len = payload
                 .ciphertext
                 .len()
@@ -370,13 +367,13 @@ pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, Vault
             }
             let length = payload_len as u8;
             let mut bytes = alloc::vec::Vec::with_capacity(2 + payload_len);
-            bytes.push(*tag);
+            bytes.push(TAG_ENTRY);
             bytes.push(length);
             bytes.extend_from_slice(&payload.ciphertext);
             bytes.extend_from_slice(&payload.auth_tag);
             Ok(bytes)
         }
-        TlvRecord::UnknownTag { tag, raw_bytes } => {
+        TlvRecord::Unknown { tag, raw_bytes } => {
             if raw_bytes.len() > u8::MAX as usize {
                 return Err(VaultError::InvalidLength);
             }
@@ -571,38 +568,36 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_tlv_record_equality() {
-        let payload1 = TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]);
-        let payload2 = TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]);
-        let known1 = TlvRecord::Known {
-            tag: 1,
-            payload: payload1,
-        };
-        let known2 = TlvRecord::Known {
-            tag: 1,
-            payload: payload2,
-        };
+        let payload1 = EntryPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]);
+        let payload2 = EntryPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]);
+        let entry1 = TlvRecord::Entry(payload1);
+        let entry2 = TlvRecord::Entry(payload2);
         assert_eq!(
-            known1, known2,
-            "同一パラメータのTlvRecord::Known比較に成功。"
+            entry1, entry2,
+            "同一パラメータのTlvRecord::Entry比較に成功。"
         );
-        assert_eq!(known1.tag(), 1, "TlvRecord::Knownからのtag取得に成功。");
+        assert_eq!(
+            entry1.tag(),
+            TAG_ENTRY,
+            "TlvRecord::Entryからのtag取得に成功。"
+        );
 
-        let unknown1 = TlvRecord::UnknownTag {
+        let unknown1 = TlvRecord::Unknown {
             tag: 99,
             raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
         };
-        let unknown2 = TlvRecord::UnknownTag {
+        let unknown2 = TlvRecord::Unknown {
             tag: 99,
             raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
         };
         assert_eq!(
             unknown1, unknown2,
-            "同一パラメータのTlvRecord::UnknownTag比較に成功。"
+            "同一パラメータのTlvRecord::Unknown比較に成功。"
         );
         assert_eq!(
             unknown1.tag(),
             99,
-            "TlvRecord::UnknownTagからのtag取得に成功。"
+            "TlvRecord::Unknownからのtag取得に成功。"
         );
     }
 
@@ -620,8 +615,8 @@ mod tests {
             wrapped_dek_len: 4,
             wrapped_dek: alloc::vec![0x10, 0x20, 0x30, 0x40],
         };
-        let payload = TlvPayload::new(alloc::vec![0x01, 0x02], [0xbb; AUTH_TAG_LEN]);
-        let record = TlvRecord::Known { tag: 1, payload };
+        let payload = EntryPayload::new(alloc::vec![0x01, 0x02], [0xbb; AUTH_TAG_LEN]);
+        let record = TlvRecord::Entry(payload);
         let vault1 = Vault::new(
             header,
             alloc::vec![slot.clone()],
@@ -690,11 +685,11 @@ mod tests {
         let (record, rest) = result.unwrap();
         assert_eq!(
             record,
-            TlvRecord::Known {
-                tag: TAG_ENTRY,
-                payload: TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]),
-            },
-            "デシリアライズされた既知レコード内容の検証に成功。"
+            TlvRecord::Entry(EntryPayload::new(
+                alloc::vec![0x01, 0x02, 0x03],
+                [0xaa; AUTH_TAG_LEN]
+            )),
+            "デシリアライズされたエントリレコード内容の検証に成功。"
         );
         assert_eq!(
             rest,
@@ -715,7 +710,7 @@ mod tests {
         let (record, rest) = result.unwrap();
         assert_eq!(
             record,
-            TlvRecord::UnknownTag {
+            TlvRecord::Unknown {
                 tag: 99,
                 raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
             },
@@ -841,11 +836,11 @@ mod tests {
         assert_eq!(
             vault.records,
             alloc::vec![
-                TlvRecord::Known {
-                    tag: TAG_ENTRY,
-                    payload: TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]),
-                },
-                TlvRecord::UnknownTag {
+                TlvRecord::Entry(EntryPayload::new(
+                    alloc::vec![0x01, 0x02, 0x03],
+                    [0xaa; AUTH_TAG_LEN]
+                )),
+                TlvRecord::Unknown {
                     tag: 99,
                     raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
                 },
@@ -1040,10 +1035,10 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_record_known_and_roundtrip() {
-        let record = TlvRecord::Known {
-            tag: TAG_ENTRY,
-            payload: TlvPayload::new(alloc::vec![0x10, 0x20, 0x30], [0xcc; AUTH_TAG_LEN]),
-        };
+        let record = TlvRecord::Entry(EntryPayload::new(
+            alloc::vec![0x10, 0x20, 0x30],
+            [0xcc; AUTH_TAG_LEN],
+        ));
         let bytes = serialize_record(&record).expect("既知レコードのシリアライズに成功。");
         assert_eq!(bytes[0], TAG_ENTRY, "シリアライズ後タグの一致確認に成功。");
         assert_eq!(
@@ -1063,7 +1058,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_record_unknown_and_roundtrip() {
-        let record = TlvRecord::UnknownTag {
+        let record = TlvRecord::Unknown {
             tag: 88,
             raw_bytes: alloc::vec![0x01, 0x02, 0x03, 0x04],
         };
@@ -1083,10 +1078,7 @@ mod tests {
     #[test]
     fn test_serialize_record_overflow() {
         let large_ciphertext = alloc::vec![0u8; 250];
-        let record = TlvRecord::Known {
-            tag: TAG_ENTRY,
-            payload: TlvPayload::new(large_ciphertext, [0x00; AUTH_TAG_LEN]),
-        };
+        let record = TlvRecord::Entry(EntryPayload::new(large_ciphertext, [0x00; AUTH_TAG_LEN]));
         let res = serialize_record(&record);
         assert_eq!(
             res,
@@ -1095,7 +1087,7 @@ mod tests {
         );
 
         let large_unknown = alloc::vec![0u8; 256];
-        let record_unknown = TlvRecord::UnknownTag {
+        let record_unknown = TlvRecord::Unknown {
             tag: 50,
             raw_bytes: large_unknown,
         };
@@ -1121,11 +1113,11 @@ mod tests {
             wrapped_dek_len: 4,
             wrapped_dek: alloc::vec![0x10, 0x20, 0x30, 0x40],
         };
-        let record1 = TlvRecord::Known {
-            tag: TAG_ENTRY,
-            payload: TlvPayload::new(alloc::vec![0x01, 0x02, 0x03], [0xaa; AUTH_TAG_LEN]),
-        };
-        let record2 = TlvRecord::UnknownTag {
+        let record1 = TlvRecord::Entry(EntryPayload::new(
+            alloc::vec![0x01, 0x02, 0x03],
+            [0xaa; AUTH_TAG_LEN],
+        ));
+        let record2 = TlvRecord::Unknown {
             tag: 99,
             raw_bytes: alloc::vec![0xde, 0xad, 0xbe, 0xef],
         };

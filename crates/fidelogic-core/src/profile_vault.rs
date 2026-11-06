@@ -3,15 +3,15 @@
 //! 完全なVault運用および高強度暗号処理を提供するプロファイル骨格。
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
+#[cfg(feature = "alloc")]
+pub use crate::tlv::{
+    EntryPayload, KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
+    deserialize_slot_entry, serialize, serialize_record, serialize_slot_entry,
+};
 pub use crate::tlv::{
     KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TLV_HEADER_LEN, TlvParseError,
     VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader, deserialize_header, is_known_tag,
     serialize_header,
-};
-#[cfg(feature = "alloc")]
-pub use crate::tlv::{
-    KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
-    deserialize_slot_entry, serialize, serialize_record, serialize_slot_entry,
 };
 
 /// `profile-vault` の運用エンジンを表す構造体。
@@ -138,7 +138,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_record_reexport() {
-        let record = TlvRecord::UnknownTag {
+        let record = TlvRecord::Unknown {
             tag: 99,
             raw_bytes: alloc::vec![1, 2, 3],
         };
