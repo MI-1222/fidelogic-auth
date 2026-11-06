@@ -36,6 +36,9 @@ pub fn validate_tlv_bounds(bytes: &[u8]) -> bool {
 /// Vaultヘッダーの既定マジックバイト。
 pub const VAULT_MAGIC: [u8; 4] = *b"FVAU";
 
+/// Vaultヘッダーのバイト長(6バイト)。
+pub const VAULT_HEADER_LEN: usize = 6;
+
 /// Vaultバイナリフォーマットの固定長ヘッダー。
 ///
 /// マジックバイト, フォーマットバージョン, 暗号スイートID を保持する。
@@ -48,6 +51,33 @@ pub struct VaultHeader {
     pub version: u8,
     /// 暗号スイート識別子。
     pub suite_id: u8,
+}
+
+/// `VaultHeader` 単体の純粋関数型デシリアライザー。
+///
+/// 入力バイト列からヘッダー情報 (マジックバイト, バージョン, 暗号スイートID) を安全に読み取り、
+/// デシリアライズされた [`VaultHeader`] と残余バイトスライスを返す。
+///
+/// # Errors
+///
+/// - 入力バイト列の長さがヘッダー長 ([`VAULT_HEADER_LEN`]) 未満の場合は [`VaultError::UnexpectedEof`] を返す。
+/// - マジックバイトが [`VAULT_MAGIC`] と一致しない場合は [`VaultError::InvalidMagic`] を返す。
+pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParseError> {
+    if bytes.len() < VAULT_HEADER_LEN {
+        return Err(VaultError::UnexpectedEof);
+    }
+    let magic = [bytes[0], bytes[1], bytes[2], bytes[3]];
+    if magic != VAULT_MAGIC {
+        return Err(VaultError::InvalidMagic);
+    }
+    let version = bytes[4];
+    let suite_id = bytes[5];
+    let header = VaultHeader {
+        magic,
+        version,
+        suite_id,
+    };
+    Ok((header, &bytes[VAULT_HEADER_LEN..]))
 }
 
 /// VaultおよびTLVパース処理で発生するエラーを表す列挙型。
@@ -317,5 +347,48 @@ mod tests {
         let vault1 = Vault::new(header, alloc::vec![slot], alloc::vec![record.clone()]);
         let vault2 = Vault::new(header, alloc::vec![slot], alloc::vec![record]);
         assert_eq!(vault1, vault2, "同一パラメータのVault比較に成功。");
+    }
+
+    #[test]
+    fn test_deserialize_header_success() {
+        let input = [b'F', b'V', b'A', b'U', 1, 2, 0xaa, 0xbb];
+        let result = deserialize_header(&input);
+        assert!(
+            result.is_ok(),
+            "正常なヘッダーバイト列のデシリアライズに成功。"
+        );
+        let (header, rest) = result.unwrap();
+        assert_eq!(
+            header,
+            VaultHeader {
+                magic: VAULT_MAGIC,
+                version: 1,
+                suite_id: 2,
+            },
+            "デシリアライズされたVaultHeaderの検証に成功。"
+        );
+        assert_eq!(rest, &[0xaa, 0xbb], "残余スライスの検証に成功。");
+    }
+
+    #[test]
+    fn test_deserialize_header_unexpected_eof() {
+        let input = [b'F', b'V', b'A', b'U', 1];
+        let result = deserialize_header(&input);
+        assert_eq!(
+            result,
+            Err(VaultError::UnexpectedEof),
+            "データ長不足時のUnexpectedEof返却検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_header_invalid_magic() {
+        let input = [b'W', b'R', b'N', b'G', 1, 2];
+        let result = deserialize_header(&input);
+        assert_eq!(
+            result,
+            Err(VaultError::InvalidMagic),
+            "不正マジックバイト時のInvalidMagic返却検証に成功。"
+        );
     }
 }

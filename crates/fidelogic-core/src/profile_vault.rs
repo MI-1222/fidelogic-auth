@@ -3,7 +3,10 @@
 //! 完全なVault運用および高強度暗号処理を提供するプロファイル骨格。
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
-pub use crate::tlv::{KekSlotEntry, TlvParseError, VaultError, VaultHeader};
+pub use crate::tlv::{
+    KekSlotEntry, TlvParseError, VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader,
+    deserialize_header,
+};
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{TlvPayload, TlvRecord, Vault};
 
@@ -49,6 +52,16 @@ mod tests {
             parse_err,
             VaultError::InvalidMagic,
             "profile_vault経由のVaultError再エクスポート確認に成功。"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_header_reexport() {
+        let input = [b'F', b'V', b'A', b'U', 1, 1];
+        let res = deserialize_header(&input);
+        assert!(
+            res.is_ok(),
+            "profile_vault経由のdeserialize_header呼び出しに成功。"
         );
     }
 }
