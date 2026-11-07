@@ -1059,3 +1059,93 @@ Proof.
   reflexivity.
 Qed.
 
+(** ** 未知タグ構造保存 (UnknownTag Preservation) の検証。 *)
+
+(** [SPEC]
+    補題 12: 単一未知タグレコードに対する構造保存 (raw_bytes の不変性) 補題。
+    旧バージョンクライアントが未知タグバイト列をパースして得た Unknown レコードは、
+    元のバイナリから tag および raw_bytes が一切の変質・欠損なく復元され、
+    かつ再シリアライズに必要な健全性条件 (最大長 255 バイト以下、tag <> TAG_ENTRY) を保持する。 *)
+Lemma tlv_unknown_tag_structure_preservation :
+  forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8)
+         (Hser : tlv_is_serialized_unknown_chain tag raw_bytes bytes rest),
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, rest)) /\
+    to_Z (alloc_vec_Vec_len raw_bytes) <= 255 /\
+    (tag s= tlv_TAG_ENTRY) = false.
+Proof.
+  intros tag raw_bytes bytes rest Hser.
+  split; [| split].
+  - apply (tlv_record_chain_roundtrip (Tlv_TlvRecord_Unknown tag raw_bytes) bytes rest).
+    apply Tlv_is_serialized_record_chain_Unknown.
+    exact Hser.
+  - exact (ser_unk_chain_valid_len tag raw_bytes bytes rest Hser).
+  - exact (ser_unk_chain_tag_not_entry tag raw_bytes bytes rest Hser).
+Qed.
+
+(** [SPEC]
+    補題 13: 最小未知タグレコードに対する構造保存 (raw_bytes の不変性) 補題。
+    後続データのない単一未知タグバイト列をパースした場合、
+    tag および raw_bytes が完全に復元され、空の残余スライスが返される。 *)
+Lemma tlv_unknown_tag_structure_preservation_minimal :
+  forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8)
+         (Hser : tlv_is_serialized_unknown tag raw_bytes bytes),
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, slice_empty)) /\
+    to_Z (alloc_vec_Vec_len raw_bytes) <= 255 /\
+    (tag s= tlv_TAG_ENTRY) = false.
+Proof.
+  intros tag raw_bytes bytes Hser.
+  split; [| split].
+  - apply (tlv_record_roundtrip_unknown_minimal tag raw_bytes bytes Hser).
+  - exact (ser_unk_valid_len tag raw_bytes bytes Hser).
+  - exact (ser_unk_tag_not_entry tag raw_bytes bytes Hser).
+Qed.
+
+(** [MODEL]
+    レコード列から未知タグレコードの (tag, raw_bytes) のみを順序通り抽出する射影関数。 *)
+Fixpoint extract_unknown_records (records : list tlv_TlvRecord_t) : list (u8 * alloc_vec_Vec u8) :=
+  match records with
+  | [] => []
+  | Tlv_TlvRecord_Entry _ :: rs => extract_unknown_records rs
+  | Tlv_TlvRecord_Unknown tag raw :: rs => (tag, raw) :: extract_unknown_records rs
+  end.
+
+(** [SPEC]
+    補題 14: 混在レコード列に対する未知フィールド保存 (脱落・破損防止) 定理。
+    新旧混在フォーマットのシリアライズバイト列を旧バージョンクライアントがパースした際、
+    レコード列中に含まれるすべての未知フィールド (tag および raw_bytes) は、
+    1 つも脱落せず、順序や内容が破損することなく完全に保存される。 *)
+Lemma tlv_records_preserve_unknown_fields :
+  forall (records : list tlv_TlvRecord_t) (bytes rest : slice u8),
+    tlv_is_serialized_records records bytes rest ->
+    forall (records' : list tlv_TlvRecord_t) (rest' : slice u8),
+      tlv_deserialize_records (length records) bytes = Ok (Core_result_Result_Ok (records', rest')) ->
+      extract_unknown_records records' = extract_unknown_records records.
+Proof.
+  intros records bytes rest Hser records' rest' Hdeser.
+  pose proof (tlv_records_roundtrip records bytes rest Hser) as Hrt.
+  rewrite Hrt in Hdeser.
+  inv Hdeser.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    最上位定理: Vault 全体に対する未知フィールド構造保存定理。
+    旧バージョンクライアントが未知タグを含む Vault バイト列をパースした際、
+    復元された Vault 構造体内のすべての未知レコード (tag, raw_bytes) は、
+    元の Vault 構造体と完全に一致し、一切の破損・脱落が生じない。 *)
+Theorem tlv_vault_preserve_unknown_fields :
+  forall (v : tlv_Vault_t) (bytes : slice u8),
+    tlv_is_serialized_vault v bytes ->
+    forall (v' : tlv_Vault_t) (rest' : slice u8),
+      tlv_deserialize bytes = Ok (Core_result_Result_Ok (v', rest')) ->
+      extract_unknown_records v'.(tlv_Vault_records) =
+        extract_unknown_records v.(tlv_Vault_records).
+Proof.
+  intros v bytes Hser v' rest' Hdeser.
+  pose proof (tlv_vault_roundtrip v bytes Hser) as Hrt.
+  rewrite Hrt in Hdeser.
+  inv Hdeser.
+  reflexivity.
+Qed.

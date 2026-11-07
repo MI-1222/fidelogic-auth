@@ -139,4 +139,24 @@ python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --theorem tlv_vault_roundtrip \
   --allow-aeneas-axioms
 
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_unknown_tag_structure_preservation \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_unknown_tag_structure_preservation_minimal \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_records_preserve_unknown_fields \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_vault_preserve_unknown_fields \
+  --allow-aeneas-axioms
+
 echo "==> [SUCCESS] All TLV extraction, proofs, and axiom audits passed cleanly."
