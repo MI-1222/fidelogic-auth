@@ -52,6 +52,46 @@ Proof.
   reflexivity.
 Qed.
 
+(** ** TLV デシリアライズ特化 Ltac 自動化タクティック *)
+
+(** スライス範囲指定レコードの型正規化。
+    Aeneas 生成項における (scalar Usize) と usize の表現揺れを統一する。 *)
+Ltac norm_range_types :=
+  repeat match goal with
+  | |- context [core_ops_range_RangeFrom_t (scalar Usize)] =>
+      change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize)
+  | |- context [@mkcore_ops_range_RangeFrom_t (scalar Usize)] =>
+      change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize)
+  | |- context [core_ops_range_RangeTo (scalar Usize)] =>
+      change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize)
+  | |- context [@mk_core_ops_range_RangeTo (scalar Usize)] =>
+      change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize)
+  end.
+
+(** TLV デシリアライズ処理の決定論的モナド展開タクティック。
+    モナド bind の簡約、型正規化、等式仮定の代入、スカラー真偽判定の解決を一括して行う。 *)
+Ltac tlv_monad_step :=
+  first [
+    progress norm_range_types
+  | progress (cbn [bind tlv_TlvHeader_length tlv_TlvHeader_tag])
+  | progress (
+      match goal with
+      | H : ?x = Ok _ |- context [?x] => rewrite H
+      | H : ?x = false |- context [?x] => rewrite H
+      | H : ?x = true |- context [?x] => rewrite H
+      | H : mk_array _ _ = _ |- context [mk_array _ _] => rewrite H
+      | H : array_index_usize _ _ = Ok _ |- context [array_index_usize _ _] => rewrite H
+      | H : slice_index_usize _ _ = Ok _ |- context [slice_index_usize _ _] => rewrite H
+      | H : usize_to_nat _ = _ |- context [usize_to_nat _] => rewrite H
+      | H : array_from_slice _ _ = _ |- context [array_from_slice _ _] => rewrite H
+      | H : alloc_slice_Slice_to_vec _ _ = Ok _ |- context [alloc_slice_Slice_to_vec _ _] => rewrite H
+      | H : core_num_U16_from_be_bytes _ = _ |- context [core_num_U16_from_be_bytes _] => rewrite H
+      end
+    )
+  | rewrite scalar_eqb_refl
+  | rewrite scalar_neqb_irrefl
+  ].
+
 (** [MODEL]
     空スライス表現。 *)
 Definition slice_empty : slice u8 :=
@@ -237,51 +277,17 @@ Lemma tlv_record_chain_roundtrip :
       Ok (Core_result_Result_Ok (r, rest)).
 Proof.
   intros r bytes rest Hrec.
-  destruct Hrec as [ep b rst Hser | tag raw_bytes b rst Hser].
+  destruct Hrec as [ep b rst Hser | tag raw_bytes b rst Hser]; destruct Hser.
   - (* 既知エントリ *)
     unfold tlv_deserialize_record.
-    rewrite (ser_chain_header_parse ep b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
-      with (ser_chain_payload_len_u8 ep b rst Hser).
-    rewrite (ser_chain_cast_len ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_add_total_len ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_bytes_ge_total ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_extract_payload ep b rst Hser); cbn [bind].
-    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-    rewrite (ser_chain_extract_rest ep b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
-      with tlv_TAG_ENTRY.
-    rewrite (scalar_eqb_refl tlv_TAG_ENTRY).
-    rewrite (ser_chain_payload_len_ge_auth ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_sub_ciphertext_len ep b rst Hser); cbn [bind].
-    change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
-    change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
-    rewrite (ser_chain_extract_ciphertext ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_restore_ciphertext ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_extract_tag ep b rst Hser); cbn [bind].
-    unfold array_to_slice_mut.
-    rewrite (ser_chain_copy_tag ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_restore_tag ep b rst Hser).
-    unfold tlv_EntryPayload_new.
-    rewrite (tlv_entry_payload_eta ep).
+    repeat tlv_monad_step.
+    unfold array_to_slice_mut, tlv_EntryPayload_new.
+    repeat tlv_monad_step.
+    rewrite tlv_entry_payload_eta.
     reflexivity.
   - (* 未知タグ *)
     unfold tlv_deserialize_record.
-    rewrite (ser_unk_chain_header_parse tag raw_bytes b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
-      with (ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser).
-    rewrite (ser_unk_chain_cast_len tag raw_bytes b rst Hser); cbn [bind].
-    rewrite (ser_unk_chain_add_total_len tag raw_bytes b rst Hser); cbn [bind].
-    rewrite (ser_unk_chain_bytes_ge_total tag raw_bytes b rst Hser); cbn [bind].
-    rewrite (ser_unk_chain_extract_payload tag raw_bytes b rst Hser); cbn [bind].
-    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-    rewrite (ser_unk_chain_extract_rest tag raw_bytes b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
-      with tag.
-    rewrite (ser_unk_chain_tag_not_entry tag raw_bytes b rst Hser).
-    rewrite (ser_unk_chain_restore_raw_bytes tag raw_bytes b rst Hser).
+    repeat tlv_monad_step.
     reflexivity.
 Qed.
 
@@ -353,7 +359,7 @@ Lemma tlv_record_roundtrip_known :
       Ok (Core_result_Result_Ok (Tlv_TlvRecord_Entry ep, slice_empty)).
 Proof.
   intros ep bytes Hrec.
-  inversion Hrec; subst.
+  inv Hrec.
   apply tlv_record_roundtrip_entry_minimal.
   assumption.
 Qed.
@@ -384,7 +390,7 @@ Lemma tlv_record_roundtrip_unknown :
       Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, slice_empty)).
 Proof.
   intros tag raw_bytes bytes Hrec.
-  inversion Hrec; subst.
+  inv Hrec.
   apply tlv_record_roundtrip_unknown_minimal.
   assumption.
 Qed.
@@ -449,29 +455,13 @@ Lemma tlv_header_chain_roundtrip :
       Ok (Core_result_Result_Ok (h, rest)).
 Proof.
   intros h bytes rest Hser.
+  destruct Hser.
   unfold tlv_deserialize_header.
-  rewrite (ser_hdr_chain_bytes_ge_hdr h bytes rest Hser).
-  cbn [bind].
-  rewrite (ser_hdr_chain_idx0 h bytes rest Hser); cbn [bind].
-  rewrite (ser_hdr_chain_idx1 h bytes rest Hser); cbn [bind].
-  rewrite (ser_hdr_chain_idx2 h bytes rest Hser); cbn [bind].
-  rewrite (ser_hdr_chain_idx3 h bytes rest Hser); cbn [bind].
-  rewrite (ser_hdr_chain_reconstruct_magic h bytes rest Hser).
-  rewrite (ser_hdr_chain_magic_idx0 h bytes rest Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b0 h bytes rest Hser)).
-  rewrite (ser_hdr_chain_magic_idx1 h bytes rest Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b1 h bytes rest Hser)).
-  rewrite (ser_hdr_chain_magic_idx2 h bytes rest Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b2 h bytes rest Hser)).
-  rewrite (ser_hdr_chain_magic_idx3 h bytes rest Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_chain_b3 h bytes rest Hser)).
-  rewrite (ser_hdr_chain_idx4 h bytes rest Hser); cbn [bind].
-  rewrite (ser_hdr_chain_idx5 h bytes rest Hser); cbn [bind].
-  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-  rewrite (ser_hdr_chain_extract_rest h bytes rest Hser); cbn [bind].
-  rewrite <- (ser_hdr_chain_valid_magic h bytes rest Hser).
-  rewrite (tlv_vault_header_eta h).
+  repeat tlv_monad_step.
+  match goal with
+  | H : tlv_VaultHeader_magic _ = _ |- _ => rewrite <- H
+  end.
+  rewrite tlv_vault_header_eta.
   reflexivity.
 Qed.
 
@@ -514,14 +504,7 @@ Proof.
   unfold tlv_serialize_header.
   rewrite Hmagic.
   unfold tlv_VAULT_MAGIC.
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
+  repeat (erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ]; monad_cbn).
   reflexivity.
 Qed.
 
@@ -688,26 +671,10 @@ Lemma tlv_slot_roundtrip :
       Ok (Core_result_Result_Ok (slot, rest)).
 Proof.
   intros slot bytes rest Hser.
+  destruct Hser.
   unfold tlv_deserialize_slot_entry.
-  rewrite (ser_slot_bytes_ge_hdr slot bytes rest Hser).
-  cbn [bind].
-  rewrite (ser_slot_idx0 slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_idx1 slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_idx2 slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_idx3 slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_reconstruct_len slot bytes rest Hser).
-  rewrite (ser_slot_cast_dek_len slot bytes rest Hser); cbn [bind].
-  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-  rewrite (ser_slot_extract_payload slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_payload_len_ge_dek slot bytes rest Hser).
-  cbn [bind].
-  change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
-  change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
-  rewrite (ser_slot_extract_dek slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_restore_dek slot bytes rest Hser); cbn [bind].
-  rewrite (ser_slot_extract_rest slot bytes rest Hser); cbn [bind].
-  rewrite (tlv_kek_slot_entry_eta slot).
+  repeat tlv_monad_step.
+  rewrite tlv_kek_slot_entry_eta.
   reflexivity.
 Qed.
 
@@ -738,7 +705,7 @@ Proof.
   - cbn [tlv_deserialize_slots length].
     unfold bind.
     rewrite (tlv_slot_roundtrip slot b mid Hslot).
-    cbn [bind].
+    monad_cbn.
     rewrite IH.
     reflexivity.
 Qed.
@@ -772,7 +739,7 @@ Proof.
   - cbn [tlv_deserialize_records length].
     unfold bind.
     rewrite (tlv_record_chain_roundtrip r b mid Hr).
-    cbn [bind].
+    monad_cbn.
     rewrite IH.
     reflexivity.
 Qed.
@@ -885,12 +852,12 @@ Proof.
   rewrite (tlv_header_chain_roundtrip
              v.(tlv_Vault_header) bytes (ser_vault_rest1 v bytes Hser)
              (ser_vault_header v bytes Hser)).
-  cbn [bind].
+  monad_cbn.
   (* 2. slot_count の読み取りと境界判定 *)
   rewrite (ser_vault_rest1_len_ge_1 v bytes Hser).
-  rewrite (ser_vault_idx_slot_count v bytes Hser); cbn [bind].
-  rewrite (ser_vault_cast_slot_count v bytes Hser); cbn [bind].
-  rewrite (ser_vault_extract_rest2 v bytes Hser); cbn [bind].
+  rewrite (ser_vault_idx_slot_count v bytes Hser); monad_cbn.
+  rewrite (ser_vault_cast_slot_count v bytes Hser); monad_cbn.
+  rewrite (ser_vault_extract_rest2 v bytes Hser); monad_cbn.
   rewrite (ser_vault_mul_needed_slot_len v bytes Hser).
   rewrite (ser_vault_rest2_len_ge_slots v bytes Hser).
   (* 3. スロット列のデシリアライズ *)
@@ -898,13 +865,13 @@ Proof.
   rewrite (tlv_slots_roundtrip
              v.(tlv_Vault_slots) (ser_vault_rest2 v bytes Hser) (ser_vault_rest3 v bytes Hser)
              (ser_vault_slots_chain v bytes Hser)).
-  cbn [bind].
+  monad_cbn.
   (* 4. record_count の読み取りと境界判定 *)
   rewrite (ser_vault_rest3_len_ge_2 v bytes Hser).
-  rewrite (ser_vault_idx_b0 v bytes Hser); cbn [bind].
-  rewrite (ser_vault_idx_b1 v bytes Hser); cbn [bind].
-  rewrite (ser_vault_cast_record_count v bytes Hser); cbn [bind].
-  rewrite (ser_vault_extract_rest4 v bytes Hser); cbn [bind].
+  rewrite (ser_vault_idx_b0 v bytes Hser); monad_cbn.
+  rewrite (ser_vault_idx_b1 v bytes Hser); monad_cbn.
+  rewrite (ser_vault_cast_record_count v bytes Hser); monad_cbn.
+  rewrite (ser_vault_extract_rest4 v bytes Hser); monad_cbn.
   rewrite (ser_vault_mul_needed_record_len v bytes Hser).
   rewrite (ser_vault_rest4_len_ge_records v bytes Hser).
   (* 5. レコード列のデシリアライズ *)
@@ -912,7 +879,7 @@ Proof.
   rewrite (tlv_records_roundtrip
              v.(tlv_Vault_records) (ser_vault_rest4 v bytes Hser) slice_empty
              (ser_vault_records_chain v bytes Hser)).
-  cbn [bind].
+  monad_cbn.
   (* 6. Vault 構造体の再構成 *)
   rewrite (tlv_vault_eta v).
   reflexivity.
