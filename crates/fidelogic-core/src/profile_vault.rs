@@ -7,7 +7,7 @@
 pub use crate::tlv::{
     EntryPayload, KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
     deserialize_slot_entry, record_serialized_len, serialize, serialize_record,
-    serialize_record_into, serialize_slot_entry, serialize_slot_entry_into,
+    serialize_record_into, serialize_slot_entry, serialize_slot_entry_into, slot_serialized_len,
 };
 pub use crate::tlv::{
     KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TLV_HEADER_LEN, TlvParseError,
@@ -157,5 +157,29 @@ mod tests {
         let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
         let res = serialize(&vault);
         assert!(res.is_ok(), "profile_vault経由のserialize呼び出しに成功。");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialized_len_helpers_reexport() {
+        let slot = KekSlotEntry::new(0, 1, alloc::vec![1, 2, 3, 4])
+            .expect("KEKスロットエントリ生成に成功。");
+        let slot_len = slot_serialized_len(&slot).expect("スロット長計算に成功。");
+        assert_eq!(
+            slot_len,
+            KEK_SLOT_HEADER_LEN + 4,
+            "profile_vault経由のslot_serialized_len呼び出しに成功。"
+        );
+
+        let record = TlvRecord::Unknown {
+            tag: 99,
+            raw_bytes: alloc::vec![1, 2, 3],
+        };
+        let record_len = record_serialized_len(&record).expect("レコード長計算に成功。");
+        assert_eq!(
+            record_len,
+            TLV_HEADER_LEN + 3,
+            "profile_vault経由のrecord_serialized_len呼び出しに成功。"
+        );
     }
 }
