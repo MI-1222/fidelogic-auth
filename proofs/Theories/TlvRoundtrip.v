@@ -54,6 +54,18 @@ Proof.
   reflexivity.
 Qed.
 
+(** [SPEC]
+    真偽値条件分岐の消去補題。 *)
+Lemma if_false_elim : forall {A : Type} (x y : A), (if false then x else y) = y.
+Proof.
+  reflexivity.
+Qed.
+
+Lemma if_true_elim : forall {A : Type} (x y : A), (if true then x else y) = x.
+Proof.
+  reflexivity.
+Qed.
+
 (** FidelogicCore 抽出型 core_ops_range_RangeFrom_t に対する末尾レンジ型クラスインスタンス。 *)
 #[global] Instance SliceRangeFrom_RangeFrom_t :
   SliceRangeFrom (core_ops_range_RangeFrom_t usize) := {|
@@ -74,6 +86,14 @@ Ltac norm_range_types :=
       change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize)
   | |- context [@mk_core_ops_range_RangeTo (scalar Usize)] =>
       change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize)
+  | H : context [core_ops_range_RangeFrom_t (scalar Usize)] |- _ =>
+      change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize) in H
+  | H : context [@mkcore_ops_range_RangeFrom_t (scalar Usize)] |- _ =>
+      change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize) in H
+  | H : context [core_ops_range_RangeTo (scalar Usize)] |- _ =>
+      change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize) in H
+  | H : context [@mk_core_ops_range_RangeTo (scalar Usize)] |- _ =>
+      change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize) in H
   end.
 
 (** TLV デシリアライズ処理の決定論的モナド展開タクティック。
@@ -94,8 +114,11 @@ Ltac tlv_monad_step :=
       | H : array_from_slice _ _ = _ |- context [array_from_slice _ _] => rewrite H
       | H : alloc_slice_Slice_to_vec _ _ = Ok _ |- context [alloc_slice_Slice_to_vec _ _] => rewrite H
       | H : core_num_U16_from_be_bytes _ = _ |- context [core_num_U16_from_be_bytes _] => rewrite H
+      | H : core_num_Usize_saturating_mul _ _ = _ |- context [core_num_Usize_saturating_mul _ _] => rewrite H
       end
     )
+  | rewrite if_false_elim
+  | rewrite if_true_elim
   | rewrite scalar_eqb_refl
   | rewrite scalar_neqb_irrefl
   ].
@@ -856,41 +879,21 @@ Theorem tlv_vault_roundtrip :
     tlv_deserialize bytes = Ok (Core_result_Result_Ok (v, slice_empty)).
 Proof.
   intros v bytes Hser.
+  destruct Hser as [
+    rest1 Hhdr Hlen1
+    slot_count_u8 Hidx_slot_count slot_count_usize Hcast_slot_count Hnat_slot_count
+    rest2 Hext_rest2 needed_slot_len Hmul_slot_len Hlen_slots
+    rest3 Hslots Hlen3
+    b0 b1 Hidx_b0 Hidx_b1 rec_count_usize Hcast_rec_count Hnat_rec_count
+    rest4 Hext_rest4 needed_record_len Hmul_rec_len Hlen_records
+    Hrecords
+  ].
+  pose proof (tlv_header_chain_roundtrip _ _ _ Hhdr) as Hhdr_rt.
+  pose proof (tlv_slots_roundtrip _ _ _ Hslots) as Hslots_rt.
+  pose proof (tlv_records_roundtrip _ _ _ Hrecords) as Hrecords_rt.
   unfold tlv_deserialize.
-  (* 1. ヘッダーのデシリアライズ *)
-  rewrite (tlv_header_chain_roundtrip
-             v.(tlv_Vault_header) bytes (ser_vault_rest1 v bytes Hser)
-             (ser_vault_header v bytes Hser)).
-  monad_cbn.
-  (* 2. slot_count の読み取りと境界判定 *)
-  rewrite (ser_vault_rest1_len_ge_1 v bytes Hser).
-  rewrite (ser_vault_idx_slot_count v bytes Hser); monad_cbn.
-  rewrite (ser_vault_cast_slot_count v bytes Hser); monad_cbn.
-  rewrite (ser_vault_extract_rest2 v bytes Hser); monad_cbn.
-  rewrite (ser_vault_mul_needed_slot_len v bytes Hser).
-  rewrite (ser_vault_rest2_len_ge_slots v bytes Hser).
-  (* 3. スロット列のデシリアライズ *)
-  rewrite (ser_vault_slot_count_nat v bytes Hser).
-  rewrite (tlv_slots_roundtrip
-             v.(tlv_Vault_slots) (ser_vault_rest2 v bytes Hser) (ser_vault_rest3 v bytes Hser)
-             (ser_vault_slots_chain v bytes Hser)).
-  monad_cbn.
-  (* 4. record_count の読み取りと境界判定 *)
-  rewrite (ser_vault_rest3_len_ge_2 v bytes Hser).
-  rewrite (ser_vault_idx_b0 v bytes Hser); monad_cbn.
-  rewrite (ser_vault_idx_b1 v bytes Hser); monad_cbn.
-  rewrite (ser_vault_cast_record_count v bytes Hser); monad_cbn.
-  rewrite (ser_vault_extract_rest4 v bytes Hser); monad_cbn.
-  rewrite (ser_vault_mul_needed_record_len v bytes Hser).
-  rewrite (ser_vault_rest4_len_ge_records v bytes Hser).
-  (* 5. レコード列のデシリアライズ *)
-  rewrite (ser_vault_record_count_nat v bytes Hser).
-  rewrite (tlv_records_roundtrip
-             v.(tlv_Vault_records) (ser_vault_rest4 v bytes Hser) slice_empty
-             (ser_vault_records_chain v bytes Hser)).
-  monad_cbn.
-  (* 6. Vault 構造体の再構成 *)
-  rewrite (tlv_vault_eta v).
+  repeat tlv_monad_step.
+  rewrite tlv_vault_eta.
   reflexivity.
 Qed.
 
