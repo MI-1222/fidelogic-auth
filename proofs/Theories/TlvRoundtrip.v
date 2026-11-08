@@ -73,146 +73,235 @@ Proof.
   reflexivity.
 Qed.
 
+(** ** レコード連鎖シリアライズ関係 (一般形) と単体への特殊化 *)
+
 (** [MODEL]
-    既知エントリペイロード ep に対するシリアライズ結果バイト列 bytes の振る舞い規定。
+    残余スライス rest を後続に伴う既知エントリシリアライズ関係。
     Rust 実装 serialize_record / serialize_record_into の出力スライスが満たす
     スライシング・インデックス・コピー操作の契約をモデル化する。 *)
-Record tlv_is_serialized_entry
-  (ep : tlv_EntryPayload_t) (bytes : slice u8) : Type :=
-mktlv_is_serialized_entry {
-  ser_valid_len :
+Record tlv_is_serialized_entry_chain
+  (ep : tlv_EntryPayload_t) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_entry_chain {
+  ser_chain_valid_len :
     tlv_entry_payload_valid_len ep;
 
-  ser_payload_len_u8 : u8;
-  ser_payload_len_usize : usize;
-  ser_total_len : usize;
+  ser_chain_payload_len_u8 : u8;
+  ser_chain_payload_len_usize : usize;
+  ser_chain_total_len : usize;
 
-  ser_cast_len :
-    scalar_cast U8 Usize ser_payload_len_u8 = Ok ser_payload_len_usize;
-  ser_add_total_len :
-    usize_add 2%usize ser_payload_len_usize = Ok ser_total_len;
+  ser_chain_cast_len :
+    scalar_cast U8 Usize ser_chain_payload_len_u8 = Ok ser_chain_payload_len_usize;
+  ser_chain_add_total_len :
+    usize_add 2%usize ser_chain_payload_len_usize = Ok ser_chain_total_len;
 
-  ser_header_parse :
+  ser_chain_header_parse :
     tlv_parse_tlv_header bytes =
       Ok (Some {| tlv_TlvHeader_tag := tlv_TAG_ENTRY;
-                  tlv_TlvHeader_length := ser_payload_len_u8 |});
+                  tlv_TlvHeader_length := ser_chain_payload_len_u8 |});
 
-  ser_bytes_len :
-    slice_len bytes = ser_total_len;
+  ser_chain_bytes_ge_total :
+    (slice_len bytes s< ser_chain_total_len) = false;
 
-  ser_payload_bytes : slice u8;
-  ser_payload_bytes_len :
-    slice_len ser_payload_bytes = ser_payload_len_usize;
+  ser_chain_payload_bytes : slice u8;
+  ser_chain_payload_bytes_len :
+    slice_len ser_chain_payload_bytes = ser_chain_payload_len_usize;
 
-  ser_extract_payload :
+  ser_chain_extract_payload :
     core_slice_index_Slice_index
       (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
       {|
         core_ops_range_Range_start := 2%usize;
-        core_ops_range_Range_end_ := ser_total_len
-      |} = Ok ser_payload_bytes;
+        core_ops_range_Range_end_ := ser_chain_total_len
+      |} = Ok ser_chain_payload_bytes;
 
-  ser_extract_rest :
+  ser_chain_extract_rest :
     core_slice_index_Slice_index
       (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
       {|
-        core_ops_range_RangeFrom_start := ser_total_len
-      |} = Ok slice_empty;
+        core_ops_range_RangeFrom_start := ser_chain_total_len
+      |} = Ok rest;
 
-  ser_payload_len_ge_auth :
-    (slice_len ser_payload_bytes s< tlv_AUTH_TAG_LEN) = false;
+  ser_chain_payload_len_ge_auth :
+    (slice_len ser_chain_payload_bytes s< tlv_AUTH_TAG_LEN) = false;
 
-  ser_sub_ciphertext_len :
-    usize_sub (slice_len ser_payload_bytes) tlv_AUTH_TAG_LEN =
+  ser_chain_sub_ciphertext_len :
+    usize_sub (slice_len ser_chain_payload_bytes) tlv_AUTH_TAG_LEN =
       Ok (alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext));
 
-  ser_ct_slice : slice u8;
-  ser_extract_ciphertext :
+  ser_chain_ct_slice : slice u8;
+  ser_chain_extract_ciphertext :
     core_slice_index_Slice_index
       (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
-      ser_payload_bytes
+      ser_chain_payload_bytes
       {| core_ops_range_RangeTo_end_ := alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext) |} =
-    Ok ser_ct_slice;
+    Ok ser_chain_ct_slice;
 
-  ser_restore_ciphertext :
+  ser_chain_restore_ciphertext :
     alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
-      core_clone_CloneU8 ser_ct_slice =
+      core_clone_CloneU8 ser_chain_ct_slice =
     Ok ep.(tlv_EntryPayload_ciphertext);
 
-  ser_tag_slice : slice u8;
-  ser_extract_tag :
+  ser_chain_tag_slice : slice u8;
+  ser_chain_extract_tag :
     core_slice_index_Slice_index
       (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
-      ser_payload_bytes
+      ser_chain_payload_bytes
       {| core_ops_range_RangeFrom_start := alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext) |} =
-    Ok ser_tag_slice;
+    Ok ser_chain_tag_slice;
 
-  ser_tag_copied_slice : slice u8;
-  ser_copy_tag :
+  ser_chain_tag_copied_slice : slice u8;
+  ser_chain_copy_tag :
     core_slice_Slice_copy_from_slice
       core_marker_CopyU8
       (array_to_slice (array_repeat 16%usize 0%u8))
-      ser_tag_slice =
-    Ok ser_tag_copied_slice;
+      ser_chain_tag_slice =
+    Ok ser_chain_tag_copied_slice;
 
-  ser_restore_tag :
-    array_from_slice (array_repeat 16%usize 0%u8) ser_tag_copied_slice =
+  ser_chain_restore_tag :
+    array_from_slice (array_repeat 16%usize 0%u8) ser_chain_tag_copied_slice =
     ep.(tlv_EntryPayload_auth_tag);
 }.
 
 (** [MODEL]
-    未知タグレコード (tag, raw_bytes) に対するシリアライズ結果バイト列 bytes の振る舞い規定。
+    残余スライス rest を後続に伴う未知タグシリアライズ関係。
     Rust 実装 serialize_record の TlvRecord::Unknown 分岐に対応する。 *)
-Record tlv_is_serialized_unknown
-  (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8) : Type :=
-mktlv_is_serialized_unknown {
-  ser_unk_valid_len :
+Record tlv_is_serialized_unknown_chain
+  (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_unknown_chain {
+  ser_unk_chain_valid_len :
     to_Z (alloc_vec_Vec_len raw_bytes) <= 255;
 
-  ser_unk_tag_not_entry :
+  ser_unk_chain_tag_not_entry :
     (tag s= tlv_TAG_ENTRY) = false;
 
-  ser_unk_payload_len_u8 : u8;
-  ser_unk_payload_len_usize : usize;
-  ser_unk_total_len : usize;
+  ser_unk_chain_payload_len_u8 : u8;
+  ser_unk_chain_payload_len_usize : usize;
+  ser_unk_chain_total_len : usize;
 
-  ser_unk_cast_len :
-    scalar_cast U8 Usize ser_unk_payload_len_u8 = Ok ser_unk_payload_len_usize;
-  ser_unk_add_total_len :
-    usize_add 2%usize ser_unk_payload_len_usize = Ok ser_unk_total_len;
+  ser_unk_chain_cast_len :
+    scalar_cast U8 Usize ser_unk_chain_payload_len_u8 = Ok ser_unk_chain_payload_len_usize;
+  ser_unk_chain_add_total_len :
+    usize_add 2%usize ser_unk_chain_payload_len_usize = Ok ser_unk_chain_total_len;
 
-  ser_unk_header_parse :
+  ser_unk_chain_header_parse :
     tlv_parse_tlv_header bytes =
       Ok (Some {| tlv_TlvHeader_tag := tag;
-                  tlv_TlvHeader_length := ser_unk_payload_len_u8 |});
+                  tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 |});
 
-  ser_unk_bytes_len :
-    slice_len bytes = ser_unk_total_len;
+  ser_unk_chain_bytes_ge_total :
+    (slice_len bytes s< ser_unk_chain_total_len) = false;
 
-  ser_unk_payload_bytes : slice u8;
-  ser_unk_payload_bytes_len :
-    slice_len ser_unk_payload_bytes = ser_unk_payload_len_usize;
+  ser_unk_chain_payload_bytes : slice u8;
+  ser_unk_chain_payload_bytes_len :
+    slice_len ser_unk_chain_payload_bytes = ser_unk_chain_payload_len_usize;
 
-  ser_unk_extract_payload :
+  ser_unk_chain_extract_payload :
     core_slice_index_Slice_index
       (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
       {|
         core_ops_range_Range_start := 2%usize;
-        core_ops_range_Range_end_ := ser_unk_total_len
-      |} = Ok ser_unk_payload_bytes;
+        core_ops_range_Range_end_ := ser_unk_chain_total_len
+      |} = Ok ser_unk_chain_payload_bytes;
 
-  ser_unk_extract_rest :
+  ser_unk_chain_extract_rest :
     core_slice_index_Slice_index
       (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
       {|
-        core_ops_range_RangeFrom_start := ser_unk_total_len
-      |} = Ok slice_empty;
+        core_ops_range_RangeFrom_start := ser_unk_chain_total_len
+      |} = Ok rest;
 
-  ser_unk_restore_raw_bytes :
+  ser_unk_chain_restore_raw_bytes :
     alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
-      core_clone_CloneU8 ser_unk_payload_bytes =
+      core_clone_CloneU8 ser_unk_chain_payload_bytes =
     Ok raw_bytes;
 }.
+
+(** [MODEL]
+    残余スライス rest を後続に伴うレコード単体の直和型シリアライズ関係。 *)
+Inductive tlv_is_serialized_record_chain : tlv_TlvRecord_t -> slice u8 -> slice u8 -> Type :=
+| Tlv_is_serialized_record_chain_Entry :
+    forall (ep : tlv_EntryPayload_t) (bytes rest : slice u8),
+      tlv_is_serialized_entry_chain ep bytes rest ->
+      tlv_is_serialized_record_chain (Tlv_TlvRecord_Entry ep) bytes rest
+| Tlv_is_serialized_record_chain_Unknown :
+    forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8),
+      tlv_is_serialized_unknown_chain tag raw_bytes bytes rest ->
+      tlv_is_serialized_record_chain (Tlv_TlvRecord_Unknown tag raw_bytes) bytes rest.
+
+(** [SPEC]
+    補題 10: 残余スライスを保持する単一 TlvRecord に対するラウンドトリップ補題。 *)
+Lemma tlv_record_chain_roundtrip :
+  forall (r : tlv_TlvRecord_t) (bytes rest : slice u8),
+    tlv_is_serialized_record_chain r bytes rest ->
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (r, rest)).
+Proof.
+  intros r bytes rest Hrec.
+  destruct Hrec as [ep b rst Hser | tag raw_bytes b rst Hser].
+  - (* 既知エントリ *)
+    unfold tlv_deserialize_record.
+    rewrite (ser_chain_header_parse ep b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
+      with (ser_chain_payload_len_u8 ep b rst Hser).
+    rewrite (ser_chain_cast_len ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_add_total_len ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_bytes_ge_total ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_extract_payload ep b rst Hser); cbn [bind].
+    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+    rewrite (ser_chain_extract_rest ep b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
+      with tlv_TAG_ENTRY.
+    rewrite (scalar_eqb_refl tlv_TAG_ENTRY).
+    rewrite (ser_chain_payload_len_ge_auth ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_sub_ciphertext_len ep b rst Hser); cbn [bind].
+    change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
+    change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
+    rewrite (ser_chain_extract_ciphertext ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_restore_ciphertext ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_extract_tag ep b rst Hser); cbn [bind].
+    unfold array_to_slice_mut.
+    rewrite (ser_chain_copy_tag ep b rst Hser); cbn [bind].
+    rewrite (ser_chain_restore_tag ep b rst Hser).
+    unfold tlv_EntryPayload_new.
+    rewrite (tlv_entry_payload_eta ep).
+    reflexivity.
+  - (* 未知タグ *)
+    unfold tlv_deserialize_record.
+    rewrite (ser_unk_chain_header_parse tag raw_bytes b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
+      with (ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser).
+    rewrite (ser_unk_chain_cast_len tag raw_bytes b rst Hser); cbn [bind].
+    rewrite (ser_unk_chain_add_total_len tag raw_bytes b rst Hser); cbn [bind].
+    rewrite (ser_unk_chain_bytes_ge_total tag raw_bytes b rst Hser); cbn [bind].
+    rewrite (ser_unk_chain_extract_payload tag raw_bytes b rst Hser); cbn [bind].
+    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
+    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
+    rewrite (ser_unk_chain_extract_rest tag raw_bytes b rst Hser); cbn [bind].
+    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
+      with tag.
+    rewrite (ser_unk_chain_tag_not_entry tag raw_bytes b rst Hser).
+    rewrite (ser_unk_chain_restore_raw_bytes tag raw_bytes b rst Hser).
+    reflexivity.
+Qed.
+
+(** [MODEL]
+    単体既知エントリシリアライズ関係 (残余スライスを slice_empty に特殊化)。 *)
+Definition tlv_is_serialized_entry
+  (ep : tlv_EntryPayload_t) (bytes : slice u8) : Type :=
+  tlv_is_serialized_entry_chain ep bytes slice_empty.
+
+(** ヘッダー宣言および補題との後方互換性のための射影関数。 *)
+Definition ser_payload_len_u8
+  (ep : tlv_EntryPayload_t) (bytes : slice u8)
+  (Hser : tlv_is_serialized_entry ep bytes) : u8 :=
+  ser_chain_payload_len_u8 ep bytes slice_empty Hser.
+
+(** [MODEL]
+    単体未知タグシリアライズ関係 (残余スライスを slice_empty に特殊化)。 *)
+Definition tlv_is_serialized_unknown
+  (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8) : Type :=
+  tlv_is_serialized_unknown_chain tag raw_bytes bytes slice_empty.
 
 (** [MODEL]
     レコード全体のシリアライズ関係 (既知エントリおよび未知タグの直和型)。 *)
@@ -235,7 +324,7 @@ Lemma tlv_parse_header_of_serialized_entry :
                   tlv_TlvHeader_length := (ser_payload_len_u8 ep bytes Hser) |}).
 Proof.
   intros ep bytes Hser.
-  exact (ser_header_parse ep bytes Hser).
+  exact (ser_chain_header_parse ep bytes slice_empty Hser).
 Qed.
 
 (** [SPEC]
@@ -250,54 +339,9 @@ Lemma tlv_record_roundtrip_entry_minimal :
       Ok (Core_result_Result_Ok (Tlv_TlvRecord_Entry ep, slice_empty)).
 Proof.
   intros ep bytes Hser.
-  unfold tlv_deserialize_record.
-  (* 1. ヘッダーパースの展開 *)
-  rewrite (ser_header_parse ep bytes Hser).
-  cbn [bind].
-  change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_payload_len_u8 ep bytes Hser |})
-    with (ser_payload_len_u8 ep bytes Hser).
-  rewrite (ser_cast_len ep bytes Hser).
-  cbn [bind].
-  rewrite (ser_add_total_len ep bytes Hser).
-  cbn [bind].
-  (* 3. 全体長チェックの解消 *)
-  rewrite (ser_bytes_len ep bytes Hser).
-  rewrite (scalar_ltb_irrefl (ser_total_len ep bytes Hser)).
-  cbn [bind].
-  (* 4. ペイロードスライスおよび残余スライスの切り出し *)
-  rewrite (ser_extract_payload ep bytes Hser).
-  cbn [bind].
-  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-  rewrite (ser_extract_rest ep bytes Hser).
-  cbn [bind].
-  (* 5. 既知タグ (TAG_ENTRY) 判定の解決 *)
-  change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_payload_len_u8 ep bytes Hser |})
-    with tlv_TAG_ENTRY.
-  rewrite (scalar_eqb_refl tlv_TAG_ENTRY).
-  (* 6. 認証タグ長 (16バイト) 境界判定の解決 *)
-  rewrite (ser_payload_len_ge_auth ep bytes Hser).
-  cbn [bind].
-  (* 7. 暗号文長計算および暗号文スライスの切り出し *)
-  rewrite (ser_sub_ciphertext_len ep bytes Hser).
-  cbn [bind].
-  change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
-  change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
-  rewrite (ser_extract_ciphertext ep bytes Hser).
-  cbn [bind].
-  rewrite (ser_restore_ciphertext ep bytes Hser).
-  cbn [bind].
-  (* 8. 認証タグスライスの切り出しおよび配列コピー *)
-  rewrite (ser_extract_tag ep bytes Hser).
-  cbn [bind].
-  unfold array_to_slice_mut.
-  rewrite (ser_copy_tag ep bytes Hser).
-  cbn [bind].
-  rewrite (ser_restore_tag ep bytes Hser).
-  (* 9. EntryPayload_new によるペイロードの復元 *)
-  unfold tlv_EntryPayload_new.
-  rewrite (tlv_entry_payload_eta ep).
-  reflexivity.
+  apply (tlv_record_chain_roundtrip (Tlv_TlvRecord_Entry ep) bytes slice_empty).
+  apply Tlv_is_serialized_record_chain_Entry.
+  exact Hser.
 Qed.
 
 (** [SPEC]
@@ -326,34 +370,9 @@ Lemma tlv_record_roundtrip_unknown_minimal :
       Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, slice_empty)).
 Proof.
   intros tag raw_bytes bytes Hser.
-  unfold tlv_deserialize_record.
-  (* 1. ヘッダーパースの展開 *)
-  rewrite (ser_unk_header_parse tag raw_bytes bytes Hser).
-  cbn [bind].
-  change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_payload_len_u8 tag raw_bytes bytes Hser |})
-    with (ser_unk_payload_len_u8 tag raw_bytes bytes Hser).
-  rewrite (ser_unk_cast_len tag raw_bytes bytes Hser).
-  cbn [bind].
-  rewrite (ser_unk_add_total_len tag raw_bytes bytes Hser).
-  cbn [bind].
-  (* 2. 全体長チェックの解消 *)
-  rewrite (ser_unk_bytes_len tag raw_bytes bytes Hser).
-  rewrite (scalar_ltb_irrefl (ser_unk_total_len tag raw_bytes bytes Hser)).
-  cbn [bind].
-  (* 3. ペイロードスライスおよび残余スライスの切り出し *)
-  rewrite (ser_unk_extract_payload tag raw_bytes bytes Hser).
-  cbn [bind].
-  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-  rewrite (ser_unk_extract_rest tag raw_bytes bytes Hser).
-  cbn [bind].
-  (* 4. 未知タグ判定 (TAG_ENTRY でないこと) の解決 *)
-  change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_payload_len_u8 tag raw_bytes bytes Hser |})
-    with tag.
-  rewrite (ser_unk_tag_not_entry tag raw_bytes bytes Hser).
-  (* 5. raw_bytes の復元 *)
-  rewrite (ser_unk_restore_raw_bytes tag raw_bytes bytes Hser).
-  reflexivity.
+  apply (tlv_record_chain_roundtrip (Tlv_TlvRecord_Unknown tag raw_bytes) bytes slice_empty).
+  apply Tlv_is_serialized_record_chain_Unknown.
+  exact Hser.
 Qed.
 
 (** [SPEC]
@@ -384,199 +403,8 @@ Proof.
 Qed.
 
 (** [MODEL]
-    VaultHeader に対するシリアライズ結果バイト列 bytes の振る舞い規定。
+    残余スライス rest を後続に伴う VaultHeader シリアライズ関係。
     有効なマジックバイト ("FVAU") を保持し、6バイト固定長のヘッダー構造を満たすことを規定する。 *)
-Record tlv_is_serialized_header
-  (h : tlv_VaultHeader_t) (bytes : slice u8) : Type :=
-mktlv_is_serialized_header {
-  ser_hdr_valid_magic :
-    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC;
-
-  ser_hdr_bytes_len :
-    slice_len bytes = tlv_VAULT_HEADER_LEN;
-
-  ser_hdr_b0 : u8;
-  ser_hdr_b1 : u8;
-  ser_hdr_b2 : u8;
-  ser_hdr_b3 : u8;
-
-  ser_hdr_idx0 : slice_index_usize bytes 0%usize = Ok ser_hdr_b0;
-  ser_hdr_idx1 : slice_index_usize bytes 1%usize = Ok ser_hdr_b1;
-  ser_hdr_idx2 : slice_index_usize bytes 2%usize = Ok ser_hdr_b2;
-  ser_hdr_idx3 : slice_index_usize bytes 3%usize = Ok ser_hdr_b3;
-  ser_hdr_idx4 : slice_index_usize bytes 4%usize = Ok h.(tlv_VaultHeader_version);
-  ser_hdr_idx5 : slice_index_usize bytes 5%usize = Ok h.(tlv_VaultHeader_suite_id);
-
-  ser_hdr_reconstruct_magic :
-    mk_array 4%usize [ser_hdr_b0; ser_hdr_b1; ser_hdr_b2; ser_hdr_b3] = tlv_VAULT_MAGIC;
-
-  ser_hdr_magic_idx0 : array_index_usize tlv_VAULT_MAGIC 0%usize = Ok ser_hdr_b0;
-  ser_hdr_magic_idx1 : array_index_usize tlv_VAULT_MAGIC 1%usize = Ok ser_hdr_b1;
-  ser_hdr_magic_idx2 : array_index_usize tlv_VAULT_MAGIC 2%usize = Ok ser_hdr_b2;
-  ser_hdr_magic_idx3 : array_index_usize tlv_VAULT_MAGIC 3%usize = Ok ser_hdr_b3;
-
-  ser_hdr_extract_rest :
-    core_slice_index_Slice_index
-      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
-      {| core_ops_range_RangeFrom_start := tlv_VAULT_HEADER_LEN |} = Ok slice_empty;
-}.
-
-(** [SPEC]
-    補題 6: VaultHeader に対する最小ラウンドトリップ補題。
-    有効なマジックバイトを持つ VaultHeader h をシリアライズしたバイト列 bytes に対し、
-    tlv_deserialize_header を実行すると、
-    元のヘッダー h と空の残余スライスが完全に復元される。 *)
-Lemma tlv_header_roundtrip :
-  forall (h : tlv_VaultHeader_t) (bytes : slice u8),
-    tlv_is_serialized_header h bytes ->
-    tlv_deserialize_header bytes =
-      Ok (Core_result_Result_Ok (h, slice_empty)).
-Proof.
-  intros h bytes Hser.
-  unfold tlv_deserialize_header.
-  (* 1. スライス長チェックの解消 *)
-  rewrite (ser_hdr_bytes_len h bytes Hser).
-  rewrite (scalar_ltb_irrefl tlv_VAULT_HEADER_LEN).
-  cbn [bind].
-  (* 2. 各バイトのインデックス抽出 *)
-  rewrite (ser_hdr_idx0 h bytes Hser); cbn [bind].
-  rewrite (ser_hdr_idx1 h bytes Hser); cbn [bind].
-  rewrite (ser_hdr_idx2 h bytes Hser); cbn [bind].
-  rewrite (ser_hdr_idx3 h bytes Hser); cbn [bind].
-  (* 3. マジック配列の復元と各要素の一致判定 *)
-  rewrite (ser_hdr_reconstruct_magic h bytes Hser).
-  rewrite (ser_hdr_magic_idx0 h bytes Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_b0 h bytes Hser)).
-  rewrite (ser_hdr_magic_idx1 h bytes Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_b1 h bytes Hser)).
-  rewrite (ser_hdr_magic_idx2 h bytes Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_b2 h bytes Hser)).
-  rewrite (ser_hdr_magic_idx3 h bytes Hser); cbn [bind].
-  rewrite (scalar_neqb_irrefl (ser_hdr_b3 h bytes Hser)).
-  (* 4. バージョン、暗号スイートID、残余スライスの抽出 *)
-  rewrite (ser_hdr_idx4 h bytes Hser); cbn [bind].
-  rewrite (ser_hdr_idx5 h bytes Hser); cbn [bind].
-  change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-  change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-  rewrite (ser_hdr_extract_rest h bytes Hser); cbn [bind].
-  (* 5. レコードの再構成 *)
-  rewrite <- (ser_hdr_valid_magic h bytes Hser).
-  rewrite (tlv_vault_header_eta h).
-  reflexivity.
-Qed.
-
-(** [SPEC]
-    VaultHeader シリアライザーの評価計算補題。
-    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header は必ず成功し、
-    マジック 4 バイト、バージョン、暗号スイートIDから成る 6 バイト配列を返す。 *)
-Lemma tlv_serialize_header_eval :
-  forall (h : tlv_VaultHeader_t),
-    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
-    tlv_serialize_header h =
-      Ok (mk_array 6%usize [
-            70%u8; 86%u8; 65%u8; 85%u8;
-            h.(tlv_VaultHeader_version);
-            h.(tlv_VaultHeader_suite_id)
-         ]).
-Proof.
-  intros h Hmagic.
-  unfold tlv_serialize_header.
-  rewrite Hmagic.
-  unfold tlv_VAULT_MAGIC.
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
-  cbn [bind].
-  reflexivity.
-Qed.
-
-(** [SPEC]
-    VaultHeader シリアライザーのシリアライズ関係充足補題 (構成的実在性 / Realizability)。
-    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header が出力する 6 バイト配列を
-    スライス化したバイト列は、前提 Record (tlv_is_serialized_header) の全契約を満たす。
-    これにより、tlv_is_serialized_header が空虚な仮定ではなく、Rust シリアライザーによって
-    構成的に充足されることが保証される。 *)
-Lemma tlv_serialize_header_is_serialized :
-  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
-    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
-    tlv_serialize_header h = Ok serialized ->
-    tlv_is_serialized_header h (array_to_slice serialized).
-Proof.
-  intros h serialized Hmagic Hser.
-  pose proof (tlv_serialize_header_eval h Hmagic) as Heval.
-  rewrite Heval in Hser.
-  inv Hser.
-  refine {|
-    ser_hdr_valid_magic := Hmagic;
-    ser_hdr_bytes_len := _;
-    ser_hdr_b0 := 70%u8;
-    ser_hdr_b1 := 86%u8;
-    ser_hdr_b2 := 65%u8;
-    ser_hdr_b3 := 85%u8;
-    ser_hdr_idx0 := _;
-    ser_hdr_idx1 := _;
-    ser_hdr_idx2 := _;
-    ser_hdr_idx3 := _;
-    ser_hdr_idx4 := _;
-    ser_hdr_idx5 := _;
-    ser_hdr_reconstruct_magic := _;
-    ser_hdr_magic_idx0 := _;
-    ser_hdr_magic_idx1 := _;
-    ser_hdr_magic_idx2 := _;
-    ser_hdr_magic_idx3 := _;
-    ser_hdr_extract_rest := _
-  |}.
-  - apply array_to_slice_len.
-  - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 0%usize 70%u8); reflexivity.
-  - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 1%usize 86%u8); reflexivity.
-  - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 2%usize 65%u8); reflexivity.
-  - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 3%usize 85%u8); reflexivity.
-  - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 4%usize (tlv_VaultHeader_version h)); reflexivity.
-  - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 5%usize (tlv_VaultHeader_suite_id h)); reflexivity.
-  - unfold tlv_VAULT_MAGIC. reflexivity.
-  - unfold tlv_VAULT_MAGIC.
-    apply (mk_array_index_nth 4%usize _ 0%usize 70%u8); reflexivity.
-  - unfold tlv_VAULT_MAGIC.
-    apply (mk_array_index_nth 4%usize _ 1%usize 86%u8); reflexivity.
-  - unfold tlv_VAULT_MAGIC.
-    apply (mk_array_index_nth 4%usize _ 2%usize 65%u8); reflexivity.
-  - unfold tlv_VAULT_MAGIC.
-    apply (mk_array_index_nth 4%usize _ 3%usize 85%u8); reflexivity.
-  - apply array_to_slice_range_from_end.
-Qed.
-
-(** [SPEC]
-    最上位完全定理: VaultHeader の真のラウンドトリップ定理。
-    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header でシリアライズした配列 serialized を
-    スライス化したバイト列 (array_to_slice serialized) を tlv_deserialize_header でデシリアライズすると、
-    元の VaultHeader h と空の残余スライスが完全に復元される。
-    (Rust シリアライズ関数とデシリアライズ関数の真の関数合成を直接検証する)。 *)
-Theorem tlv_header_roundtrip_sound :
-  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
-    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
-    tlv_serialize_header h = Ok serialized ->
-    tlv_deserialize_header (array_to_slice serialized) =
-      Ok (Core_result_Result_Ok (h, slice_empty)).
-Proof.
-  intros h serialized Hmagic Hser.
-  apply tlv_header_roundtrip.
-  apply (tlv_serialize_header_is_serialized h serialized Hmagic Hser).
-Qed.
-
-(** ** 残余スライスを保持するヘッダー連鎖検証 *)
-
-(** [MODEL]
-    残余スライス rest を後続に伴う VaultHeader シリアライズ関係。 *)
 Record tlv_is_serialized_header_chain
   (h : tlv_VaultHeader_t) (bytes rest : slice u8) : Type :=
 mktlv_is_serialized_header_chain {
@@ -645,6 +473,136 @@ Proof.
   rewrite <- (ser_hdr_chain_valid_magic h bytes rest Hser).
   rewrite (tlv_vault_header_eta h).
   reflexivity.
+Qed.
+
+(** [MODEL]
+    単体 VaultHeader シリアライズ関係 (残余スライスを slice_empty に特殊化)。 *)
+Definition tlv_is_serialized_header
+  (h : tlv_VaultHeader_t) (bytes : slice u8) : Type :=
+  tlv_is_serialized_header_chain h bytes slice_empty.
+
+(** [SPEC]
+    補題 6: VaultHeader に対する最小ラウンドトリップ補題。
+    有効なマジックバイトを持つ VaultHeader h をシリアライズしたバイト列 bytes に対し、
+    tlv_deserialize_header を実行すると、
+    元のヘッダー h と空の残余スライスが完全に復元される。 *)
+Lemma tlv_header_roundtrip :
+  forall (h : tlv_VaultHeader_t) (bytes : slice u8),
+    tlv_is_serialized_header h bytes ->
+    tlv_deserialize_header bytes =
+      Ok (Core_result_Result_Ok (h, slice_empty)).
+Proof.
+  intros h bytes Hser.
+  apply (tlv_header_chain_roundtrip h bytes slice_empty Hser).
+Qed.
+
+(** [SPEC]
+    VaultHeader シリアライザーの評価計算補題。
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header は必ず成功し、
+    マジック 4 バイト、バージョン、暗号スイートIDから成る 6 バイト配列を返す。 *)
+Lemma tlv_serialize_header_eval :
+  forall (h : tlv_VaultHeader_t),
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
+    tlv_serialize_header h =
+      Ok (mk_array 6%usize [
+            70%u8; 86%u8; 65%u8; 85%u8;
+            h.(tlv_VaultHeader_version);
+            h.(tlv_VaultHeader_suite_id)
+         ]).
+Proof.
+  intros h Hmagic.
+  unfold tlv_serialize_header.
+  rewrite Hmagic.
+  unfold tlv_VAULT_MAGIC.
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    VaultHeader シリアライザーのシリアライズ関係充足補題 (構成的実在性 / Realizability)。
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header が出力する 6 バイト配列を
+    スライス化したバイト列は、前提 Record (tlv_is_serialized_header) の全契約を満たす。
+    これにより、tlv_is_serialized_header が空虚な仮定ではなく、Rust シリアライザーによって
+    構成的に充足されることが保証される。 *)
+Lemma tlv_serialize_header_is_serialized :
+  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
+    tlv_serialize_header h = Ok serialized ->
+    tlv_is_serialized_header h (array_to_slice serialized).
+Proof.
+  intros h serialized Hmagic Hser.
+  pose proof (tlv_serialize_header_eval h Hmagic) as Heval.
+  rewrite Heval in Hser.
+  inv Hser.
+  refine {|
+    ser_hdr_chain_valid_magic := Hmagic;
+    ser_hdr_chain_bytes_ge_hdr := _;
+    ser_hdr_chain_b0 := 70%u8;
+    ser_hdr_chain_b1 := 86%u8;
+    ser_hdr_chain_b2 := 65%u8;
+    ser_hdr_chain_b3 := 85%u8;
+    ser_hdr_chain_idx0 := _;
+    ser_hdr_chain_idx1 := _;
+    ser_hdr_chain_idx2 := _;
+    ser_hdr_chain_idx3 := _;
+    ser_hdr_chain_idx4 := _;
+    ser_hdr_chain_idx5 := _;
+    ser_hdr_chain_reconstruct_magic := _;
+    ser_hdr_chain_magic_idx0 := _;
+    ser_hdr_chain_magic_idx1 := _;
+    ser_hdr_chain_magic_idx2 := _;
+    ser_hdr_chain_magic_idx3 := _;
+    ser_hdr_chain_extract_rest := _
+  |}.
+  - rewrite array_to_slice_len.
+    apply scalar_ltb_irrefl.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 0%usize 70%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 1%usize 86%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 2%usize 65%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 3%usize 85%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 4%usize (tlv_VaultHeader_version h)); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 5%usize (tlv_VaultHeader_suite_id h)); reflexivity.
+  - unfold tlv_VAULT_MAGIC. reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 0%usize 70%u8); reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 1%usize 86%u8); reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 2%usize 65%u8); reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 3%usize 85%u8); reflexivity.
+  - apply array_to_slice_range_from_end.
+Qed.
+
+(** [SPEC]
+    最上位完全定理: VaultHeader の真のラウンドトリップ定理。
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header でシリアライズした配列 serialized を
+    スライス化したバイト列 (array_to_slice serialized) を tlv_deserialize_header でデシリアライズすると、
+    元の VaultHeader h と空の残余スライスが完全に復元される。
+    (Rust シリアライズ関数とデシリアライズ関数の真の関数合成を直接検証する)。 *)
+Theorem tlv_header_roundtrip_sound :
+  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
+    tlv_serialize_header h = Ok serialized ->
+    tlv_deserialize_header (array_to_slice serialized) =
+      Ok (Core_result_Result_Ok (h, slice_empty)).
+Proof.
+  intros h serialized Hmagic Hser.
+  apply tlv_header_roundtrip.
+  apply (tlv_serialize_header_is_serialized h serialized Hmagic Hser).
 Qed.
 
 (** ** KEKスロット単体およびスロット列のラウンドトリップ検証 *)
@@ -786,213 +744,6 @@ Proof.
 Qed.
 
 (** ** 未知タグ・既知タグ混在レコード列の連鎖シリアライズ関係とラウンドトリップ検証 *)
-
-(** [MODEL]
-    残余スライス rest を後続に伴う既知エントリシリアライズ関係。 *)
-Record tlv_is_serialized_entry_chain
-  (ep : tlv_EntryPayload_t) (bytes rest : slice u8) : Type :=
-mktlv_is_serialized_entry_chain {
-  ser_chain_valid_len :
-    tlv_entry_payload_valid_len ep;
-
-  ser_chain_payload_len_u8 : u8;
-  ser_chain_payload_len_usize : usize;
-  ser_chain_total_len : usize;
-
-  ser_chain_cast_len :
-    scalar_cast U8 Usize ser_chain_payload_len_u8 = Ok ser_chain_payload_len_usize;
-  ser_chain_add_total_len :
-    usize_add 2%usize ser_chain_payload_len_usize = Ok ser_chain_total_len;
-
-  ser_chain_header_parse :
-    tlv_parse_tlv_header bytes =
-      Ok (Some {| tlv_TlvHeader_tag := tlv_TAG_ENTRY;
-                  tlv_TlvHeader_length := ser_chain_payload_len_u8 |});
-
-  ser_chain_bytes_ge_total :
-    (slice_len bytes s< ser_chain_total_len) = false;
-
-  ser_chain_payload_bytes : slice u8;
-  ser_chain_payload_bytes_len :
-    slice_len ser_chain_payload_bytes = ser_chain_payload_len_usize;
-
-  ser_chain_extract_payload :
-    core_slice_index_Slice_index
-      (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
-      {|
-        core_ops_range_Range_start := 2%usize;
-        core_ops_range_Range_end_ := ser_chain_total_len
-      |} = Ok ser_chain_payload_bytes;
-
-  ser_chain_extract_rest :
-    core_slice_index_Slice_index
-      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
-      {|
-        core_ops_range_RangeFrom_start := ser_chain_total_len
-      |} = Ok rest;
-
-  ser_chain_payload_len_ge_auth :
-    (slice_len ser_chain_payload_bytes s< tlv_AUTH_TAG_LEN) = false;
-
-  ser_chain_sub_ciphertext_len :
-    usize_sub (slice_len ser_chain_payload_bytes) tlv_AUTH_TAG_LEN =
-      Ok (alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext));
-
-  ser_chain_ct_slice : slice u8;
-  ser_chain_extract_ciphertext :
-    core_slice_index_Slice_index
-      (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
-      ser_chain_payload_bytes
-      {| core_ops_range_RangeTo_end_ := alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext) |} =
-    Ok ser_chain_ct_slice;
-
-  ser_chain_restore_ciphertext :
-    alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
-      core_clone_CloneU8 ser_chain_ct_slice =
-    Ok ep.(tlv_EntryPayload_ciphertext);
-
-  ser_chain_tag_slice : slice u8;
-  ser_chain_extract_tag :
-    core_slice_index_Slice_index
-      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
-      ser_chain_payload_bytes
-      {| core_ops_range_RangeFrom_start := alloc_vec_Vec_len ep.(tlv_EntryPayload_ciphertext) |} =
-    Ok ser_chain_tag_slice;
-
-  ser_chain_tag_copied_slice : slice u8;
-  ser_chain_copy_tag :
-    core_slice_Slice_copy_from_slice
-      core_marker_CopyU8
-      (array_to_slice (array_repeat 16%usize 0%u8))
-      ser_chain_tag_slice =
-    Ok ser_chain_tag_copied_slice;
-
-  ser_chain_restore_tag :
-    array_from_slice (array_repeat 16%usize 0%u8) ser_chain_tag_copied_slice =
-    ep.(tlv_EntryPayload_auth_tag);
-}.
-
-(** [MODEL]
-    残余スライス rest を後続に伴う未知タグシリアライズ関係。 *)
-Record tlv_is_serialized_unknown_chain
-  (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8) : Type :=
-mktlv_is_serialized_unknown_chain {
-  ser_unk_chain_valid_len :
-    to_Z (alloc_vec_Vec_len raw_bytes) <= 255;
-
-  ser_unk_chain_tag_not_entry :
-    (tag s= tlv_TAG_ENTRY) = false;
-
-  ser_unk_chain_payload_len_u8 : u8;
-  ser_unk_chain_payload_len_usize : usize;
-  ser_unk_chain_total_len : usize;
-
-  ser_unk_chain_cast_len :
-    scalar_cast U8 Usize ser_unk_chain_payload_len_u8 = Ok ser_unk_chain_payload_len_usize;
-  ser_unk_chain_add_total_len :
-    usize_add 2%usize ser_unk_chain_payload_len_usize = Ok ser_unk_chain_total_len;
-
-  ser_unk_chain_header_parse :
-    tlv_parse_tlv_header bytes =
-      Ok (Some {| tlv_TlvHeader_tag := tag;
-                  tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 |});
-
-  ser_unk_chain_bytes_ge_total :
-    (slice_len bytes s< ser_unk_chain_total_len) = false;
-
-  ser_unk_chain_payload_bytes : slice u8;
-  ser_unk_chain_payload_bytes_len :
-    slice_len ser_unk_chain_payload_bytes = ser_unk_chain_payload_len_usize;
-
-  ser_unk_chain_extract_payload :
-    core_slice_index_Slice_index
-      (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
-      {|
-        core_ops_range_Range_start := 2%usize;
-        core_ops_range_Range_end_ := ser_unk_chain_total_len
-      |} = Ok ser_unk_chain_payload_bytes;
-
-  ser_unk_chain_extract_rest :
-    core_slice_index_Slice_index
-      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8) bytes
-      {|
-        core_ops_range_RangeFrom_start := ser_unk_chain_total_len
-      |} = Ok rest;
-
-  ser_unk_chain_restore_raw_bytes :
-    alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
-      core_clone_CloneU8 ser_unk_chain_payload_bytes =
-    Ok raw_bytes;
-}.
-
-(** [MODEL]
-    残余スライス rest を後続に伴うレコード単体の直和型シリアライズ関係。 *)
-Inductive tlv_is_serialized_record_chain : tlv_TlvRecord_t -> slice u8 -> slice u8 -> Type :=
-| Tlv_is_serialized_record_chain_Entry :
-    forall (ep : tlv_EntryPayload_t) (bytes rest : slice u8),
-      tlv_is_serialized_entry_chain ep bytes rest ->
-      tlv_is_serialized_record_chain (Tlv_TlvRecord_Entry ep) bytes rest
-| Tlv_is_serialized_record_chain_Unknown :
-    forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes rest : slice u8),
-      tlv_is_serialized_unknown_chain tag raw_bytes bytes rest ->
-      tlv_is_serialized_record_chain (Tlv_TlvRecord_Unknown tag raw_bytes) bytes rest.
-
-(** [SPEC]
-    補題 10: 残余スライスを保持する単一 TlvRecord に対するラウンドトリップ補題。 *)
-Lemma tlv_record_chain_roundtrip :
-  forall (r : tlv_TlvRecord_t) (bytes rest : slice u8),
-    tlv_is_serialized_record_chain r bytes rest ->
-    tlv_deserialize_record bytes =
-      Ok (Core_result_Result_Ok (r, rest)).
-Proof.
-  intros r bytes rest Hrec.
-  destruct Hrec as [ep b rst Hser | tag raw_bytes b rst Hser].
-  - (* 既知エントリ *)
-    unfold tlv_deserialize_record.
-    rewrite (ser_chain_header_parse ep b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
-      with (ser_chain_payload_len_u8 ep b rst Hser).
-    rewrite (ser_chain_cast_len ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_add_total_len ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_bytes_ge_total ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_extract_payload ep b rst Hser); cbn [bind].
-    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-    rewrite (ser_chain_extract_rest ep b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tlv_TAG_ENTRY; tlv_TlvHeader_length := ser_chain_payload_len_u8 ep b rst Hser |})
-      with tlv_TAG_ENTRY.
-    rewrite (scalar_eqb_refl tlv_TAG_ENTRY).
-    rewrite (ser_chain_payload_len_ge_auth ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_sub_ciphertext_len ep b rst Hser); cbn [bind].
-    change (core_ops_range_RangeTo (scalar Usize)) with (core_ops_range_RangeTo usize).
-    change (@mk_core_ops_range_RangeTo (scalar Usize)) with (@mk_core_ops_range_RangeTo usize).
-    rewrite (ser_chain_extract_ciphertext ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_restore_ciphertext ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_extract_tag ep b rst Hser); cbn [bind].
-    unfold array_to_slice_mut.
-    rewrite (ser_chain_copy_tag ep b rst Hser); cbn [bind].
-    rewrite (ser_chain_restore_tag ep b rst Hser).
-    unfold tlv_EntryPayload_new.
-    rewrite (tlv_entry_payload_eta ep).
-    reflexivity.
-  - (* 未知タグ *)
-    unfold tlv_deserialize_record.
-    rewrite (ser_unk_chain_header_parse tag raw_bytes b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_length {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
-      with (ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser).
-    rewrite (ser_unk_chain_cast_len tag raw_bytes b rst Hser); cbn [bind].
-    rewrite (ser_unk_chain_add_total_len tag raw_bytes b rst Hser); cbn [bind].
-    rewrite (ser_unk_chain_bytes_ge_total tag raw_bytes b rst Hser); cbn [bind].
-    rewrite (ser_unk_chain_extract_payload tag raw_bytes b rst Hser); cbn [bind].
-    change (core_ops_range_RangeFrom_t (scalar Usize)) with (core_ops_range_RangeFrom_t usize).
-    change (@mkcore_ops_range_RangeFrom_t (scalar Usize)) with (@mkcore_ops_range_RangeFrom_t usize).
-    rewrite (ser_unk_chain_extract_rest tag raw_bytes b rst Hser); cbn [bind].
-    change (tlv_TlvHeader_tag {| tlv_TlvHeader_tag := tag; tlv_TlvHeader_length := ser_unk_chain_payload_len_u8 tag raw_bytes b rst Hser |})
-      with tag.
-    rewrite (ser_unk_chain_tag_not_entry tag raw_bytes b rst Hser).
-    rewrite (ser_unk_chain_restore_raw_bytes tag raw_bytes b rst Hser).
-    reflexivity.
-Qed.
 
 (** [MODEL]
     混在レコードリストに対する帰納的シリアライズ関係。 *)
@@ -1204,10 +955,7 @@ Lemma tlv_unknown_tag_structure_preservation_minimal :
     (tag s= tlv_TAG_ENTRY) = false.
 Proof.
   intros tag raw_bytes bytes Hser.
-  split; [| split].
-  - apply (tlv_record_roundtrip_unknown_minimal tag raw_bytes bytes Hser).
-  - exact (ser_unk_valid_len tag raw_bytes bytes Hser).
-  - exact (ser_unk_tag_not_entry tag raw_bytes bytes Hser).
+  apply (tlv_unknown_tag_structure_preservation tag raw_bytes bytes slice_empty Hser).
 Qed.
 
 (** [MODEL]
