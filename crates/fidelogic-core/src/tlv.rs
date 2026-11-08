@@ -412,6 +412,24 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
     Ok((record, rest))
 }
 
+/// `TlvRecord` のペイロード実効長 (バイト数) を安全に導出・検証する。
+///
+/// # Errors
+///
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+#[cfg(feature = "alloc")]
+fn record_payload_len(record: &TlvRecord) -> Result<u8, VaultError> {
+    let len = match record {
+        TlvRecord::Entry(payload) => payload
+            .ciphertext
+            .len()
+            .checked_add(AUTH_TAG_LEN)
+            .ok_or(VaultError::InvalidLength)?,
+        TlvRecord::Unknown { raw_bytes, .. } => raw_bytes.len(),
+    };
+    u8::try_from(len).map_err(|_| VaultError::InvalidLength)
+}
+
 /// `TlvRecord` 単体のシリアライズ結果のバイト長を計算する。
 ///
 /// # Errors
@@ -419,29 +437,10 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
 /// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn record_serialized_len(record: &TlvRecord) -> Result<usize, VaultError> {
-    match record {
-        TlvRecord::Entry(payload) => {
-            let payload_len = payload
-                .ciphertext
-                .len()
-                .checked_add(AUTH_TAG_LEN)
-                .ok_or(VaultError::InvalidLength)?;
-            if payload_len > u8::MAX as usize {
-                return Err(VaultError::InvalidLength);
-            }
-            TLV_HEADER_LEN
-                .checked_add(payload_len)
-                .ok_or(VaultError::InvalidLength)
-        }
-        TlvRecord::Unknown { raw_bytes, .. } => {
-            if raw_bytes.len() > u8::MAX as usize {
-                return Err(VaultError::InvalidLength);
-            }
-            TLV_HEADER_LEN
-                .checked_add(raw_bytes.len())
-                .ok_or(VaultError::InvalidLength)
-        }
-    }
+    let payload_len = record_payload_len(record)? as usize;
+    TLV_HEADER_LEN
+        .checked_add(payload_len)
+        .ok_or(VaultError::InvalidLength)
 }
 
 /// `TlvRecord` 単体の純粋関数型シリアライザー。
@@ -458,36 +457,20 @@ pub fn serialize_record_into(
     record: &TlvRecord,
     out: &mut alloc::vec::Vec<u8>,
 ) -> Result<(), VaultError> {
+    let payload_len = record_payload_len(record)?;
+    out.reserve(TLV_HEADER_LEN + payload_len as usize);
+    out.push(record.tag());
+    out.push(payload_len);
     match record {
         TlvRecord::Entry(payload) => {
-            let payload_len = payload
-                .ciphertext
-                .len()
-                .checked_add(AUTH_TAG_LEN)
-                .ok_or(VaultError::InvalidLength)?;
-            if payload_len > u8::MAX as usize {
-                return Err(VaultError::InvalidLength);
-            }
-            let length = payload_len as u8;
-            out.reserve(TLV_HEADER_LEN + payload_len);
-            out.push(TAG_ENTRY);
-            out.push(length);
             out.extend_from_slice(&payload.ciphertext);
             out.extend_from_slice(&payload.auth_tag);
-            Ok(())
         }
-        TlvRecord::Unknown { tag, raw_bytes } => {
-            if raw_bytes.len() > u8::MAX as usize {
-                return Err(VaultError::InvalidLength);
-            }
-            let length = raw_bytes.len() as u8;
-            out.reserve(TLV_HEADER_LEN + raw_bytes.len());
-            out.push(*tag);
-            out.push(length);
+        TlvRecord::Unknown { raw_bytes, .. } => {
             out.extend_from_slice(raw_bytes);
-            Ok(())
         }
     }
+    Ok(())
 }
 
 /// `TlvRecord` 単体の純粋関数型シリアライザー。
