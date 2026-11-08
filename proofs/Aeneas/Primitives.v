@@ -917,9 +917,22 @@ Definition core_slice_index_Slice_index
   | Some x => Ok x
   end.
 
-Axiom array_to_slice_range_from_end : forall {T Idx : Type}
+(** スライス開始位置を取得可能なレンジ型クラス。 *)
+Class SliceRangeFrom (Idx : Type) := {
+  slice_range_from_start : Idx -> usize;
+}.
+
+#[global] Instance SliceRangeFrom_RangeFrom :
+  SliceRangeFrom (core_ops_range_RangeFrom usize) := {|
+  slice_range_from_start := core_ops_range_RangeFrom_start;
+|}.
+
+(** 配列をスライス化したバイト列において、配列長と一致する末尾レンジ (n..) の参照は空スライスを返す。
+    インデックス r の開始位置が配列長 n に一致することを事前条件として要求し、健全性を担保する。 *)
+Axiom array_to_slice_range_from_end : forall {T Idx : Type} `{SliceRangeFrom Idx}
   (inst : core_slice_index_SliceIndex Idx (slice T) (slice T))
   {n : usize} (a : array T n) (r : Idx),
+  slice_range_from_start r = n ->
   core_slice_index_Slice_index inst (array_to_slice a) r = Ok slice_empty.
 
 (* [core::slice::index::Range:::get]: forward function *)

@@ -54,6 +54,12 @@ Proof.
   reflexivity.
 Qed.
 
+(** FidelogicCore 抽出型 core_ops_range_RangeFrom_t に対する末尾レンジ型クラスインスタンス。 *)
+#[global] Instance SliceRangeFrom_RangeFrom_t :
+  SliceRangeFrom (core_ops_range_RangeFrom_t usize) := {|
+  slice_range_from_start := core_ops_range_RangeFrom_start;
+|}.
+
 (** ** TLV デシリアライズ特化 Ltac 自動化タクティック *)
 
 (** スライス範囲指定レコードの型正規化。
@@ -569,7 +575,8 @@ Proof.
     apply (mk_array_index_nth 4%usize _ 2%usize 65%u8); reflexivity.
   - unfold tlv_VAULT_MAGIC.
     apply (mk_array_index_nth 4%usize _ 3%usize 85%u8); reflexivity.
-  - apply array_to_slice_range_from_end.
+  - eapply array_to_slice_range_from_end.
+    reflexivity.
 Qed.
 
 (** [SPEC]
