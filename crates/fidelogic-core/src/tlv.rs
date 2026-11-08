@@ -397,12 +397,12 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
             return Err(VaultError::InvalidLength);
         }
         let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
-        let ciphertext = alloc::vec::Vec::from(&payload_bytes[..ciphertext_len]);
+        let ciphertext = payload_bytes[..ciphertext_len].to_vec();
         let mut auth_tag = [0u8; AUTH_TAG_LEN];
         auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
         TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
     } else {
-        let raw_bytes = alloc::vec::Vec::from(payload_bytes);
+        let raw_bytes = payload_bytes.to_vec();
         TlvRecord::Unknown {
             tag: header.tag,
             raw_bytes,
