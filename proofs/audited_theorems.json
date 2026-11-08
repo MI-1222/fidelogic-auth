@@ -1,0 +1,158 @@
+[
+  {
+    "module": "Fidelogic.Sanity",
+    "theorem": "sanity_add_comm",
+    "allow_aeneas_axioms": false,
+    "description": "加算の可換性に関する疎通確認用補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvSoundness",
+    "theorem": "tlv_parse_tlv_header_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "スライス長が2未満の場合、tlv_parse_tlv_header は必ず Ok None を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvSoundness",
+    "theorem": "tlv_validate_tlv_bounds_implies_header_some",
+    "allow_aeneas_axioms": true,
+    "description": "tlv_validate_tlv_bounds が true を返す場合、ヘッダーのパースは必ず成功(Some)している"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_header_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "スライス長がヘッダー長(6バイト)未満の場合、tlv_deserialize_header は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_header_totality",
+    "allow_aeneas_axioms": true,
+    "description": "任意長バイト列に対し tlv_deserialize_header は必ず Ok または Fail_ で停止する(全域性)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_record_header_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "スライス長がヘッダー長(2バイト)未満の場合、tlv_deserialize_record は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_record_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "レコード長ヘッダー値 length に対してスライスの残余長が不足している場合、tlv_deserialize_record は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_record_bounds_violation",
+    "allow_aeneas_axioms": true,
+    "description": "2 + length > bytes.length の場合、tlv_deserialize_record は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_slots_totality",
+    "allow_aeneas_axioms": true,
+    "description": "スロット数 n に対する構造帰納法により、tlv_deserialize_slots は必ず Ok または Fail_ で停止する(全域性)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_records_totality",
+    "allow_aeneas_axioms": true,
+    "description": "レコード数 n に対する構造帰納法により、tlv_deserialize_records は必ず Ok または Fail_ で停止する(全域性)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_totality",
+    "allow_aeneas_axioms": true,
+    "description": "任意長バイト列に対し、tlv_deserialize は必ず停止して Ok または Fail_ を返す(最上位全域性保証)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_entry_minimal",
+    "allow_aeneas_axioms": true,
+    "description": "シリアライズされた EntryPayload に対してデシリアライズを行うと元のペイロードが復元される"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_known",
+    "allow_aeneas_axioms": true,
+    "description": "TlvRecord レベルでの既知タグ最小ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_unknown_minimal",
+    "allow_aeneas_axioms": true,
+    "description": "シリアライズされた未知タグレコードに対してデシリアライズを行うと、元の未知タグレコードが復元される"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_unknown",
+    "allow_aeneas_axioms": true,
+    "description": "TlvRecord レベルでの未知タグ最小ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_header_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "VaultHeader のシリアライズ・デシリアライズのラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_header_roundtrip_sound",
+    "allow_aeneas_axioms": true,
+    "description": "Rust シリアライズ関数とデシリアライズ関数の真の関数合成を直接検証するラウンドトリップ定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_slot_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "単一 KekSlotEntry に対するラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_slots_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "スロットリスト全体に対するリスト帰納的ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_chain_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "残余スライスを保持する単一 TlvRecord に対するラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_records_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "未知・既知混在レコードリスト全体に対するリスト帰納的ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_vault_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "Vault 全体の完全なシリアライズ・デシリアライズ往復ラウンドトリップ定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_unknown_tag_structure_preservation",
+    "allow_aeneas_axioms": true,
+    "description": "未知タグフィールドのデシリアライズにおいて構造・タグ・バイト列が保存される"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_unknown_tag_structure_preservation_minimal",
+    "allow_aeneas_axioms": true,
+    "description": "単一未知タグレコードの最小構造保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_records_preserve_unknown_fields",
+    "allow_aeneas_axioms": true,
+    "description": "複数レコード列における未知タグフィールドの完全保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_vault_preserve_unknown_fields",
+    "allow_aeneas_axioms": true,
+    "description": "Vault レベルでの前方互換性(未知フィールド完全保存)定理"
+  }
+]

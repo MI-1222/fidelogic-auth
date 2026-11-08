@@ -466,13 +466,15 @@ def parse_arguments() -> argparse.Namespace:
         description="Axiom soundness and kernel assumption auditor for Rocq and Coq theorems.",
     )
     parser.add_argument(
+        "--manifest",
+        help="Path to JSON manifest specifying a list of theorems to audit.",
+    )
+    parser.add_argument(
         "--module",
-        required=True,
         help="Logical module path containing the theorem (e.g., LF.Basics or MyProject.Core).",
     )
     parser.add_argument(
         "--theorem",
-        required=True,
         help="Identifier of the target theorem or lemma (e.g., mult_S_1).",
     )
     parser.add_argument(
@@ -501,33 +503,33 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Allow approved Aeneas primitive axioms (slice bounds and architecture scalars).",
     )
-    return parser.parse_args()
+    parsed = parser.parse_args()
+    if not parsed.manifest and (not parsed.module or not parsed.theorem):
+        parser.error(
+            "Either --manifest OR both --module and --theorem must be specified."
+        )
+    return parsed
 
 
-def main() -> None:
-    """Main CLI entrypoint."""
-    args = parse_arguments()
-
-    repl_cmd = find_repl_executable()
-    if not repl_cmd:
-        error_result = {
-            "sound": False,
-            "module": args.module,
-            "theorem": args.theorem,
-            "error": "No rocq or coqtop executable found in PATH.",
-        }
-        print(json.dumps(error_result, indent=2, ensure_ascii=False))
-        sys.exit(1)
-
-    project_args = load_project_arguments(args.project_dir)
-
+def audit_single_theorem(
+    repl_cmd: list[str],
+    module_path: str,
+    theorem_name: str,
+    project_args: list[str],
+    project_dir: str,
+    timeout: float,
+    allow_standard: bool,
+    allow_tlc: bool,
+    allow_aeneas: bool,
+) -> dict[str, Any]:
+    """Audit a single theorem and return result dictionary."""
     returncode, stdout_text, stderr_text = execute_print_assumptions(
         repl_command=repl_cmd,
-        module_path=args.module,
-        theorem_name=args.theorem,
+        module_path=module_path,
+        theorem_name=theorem_name,
         project_arguments=project_args,
-        working_directory=args.project_dir,
-        timeout_seconds=args.timeout,
+        working_directory=project_dir,
+        timeout_seconds=timeout,
     )
 
     combined_output = f"{stdout_text}\n{stderr_text}"
@@ -535,18 +537,17 @@ def main() -> None:
 
     # Build set of permitted axioms
     allowed_set: set[str] = set()
-    if args.allow_standard_axioms:
+    if allow_standard:
         allowed_set.update(STANDARD_APPROVED_AXIOMS)
-    if args.allow_tlc_axioms:
+    if allow_tlc:
         allowed_set.update(TLC_APPROVED_AXIOMS)
-    if args.allow_aeneas_axioms:
+    if allow_aeneas:
         allowed_set.update(AENEAS_APPROVED_AXIOMS)
-
 
     unapproved_axioms: list[str] = []
     admitted_detected = False
 
-    target_clean = args.theorem.strip()
+    target_clean = theorem_name.strip()
     for ax in summary["axioms"]:
         # If target theorem itself appears as an axiom, consider it unfinished / Admitted
         if target_clean in ax or ax.endswith(f".{target_clean}") or "Admitted" in ax:
@@ -588,10 +589,10 @@ def main() -> None:
     elif returncode != 0:
         rejection_reason = f"REPL subprocess failed with returncode {returncode}."
 
-    audit_result = {
+    return {
         "sound": is_sound,
-        "module": args.module,
-        "theorem": args.theorem,
+        "module": module_path,
+        "theorem": theorem_name,
         "all_axioms": summary["axioms"],
         "unapproved_axioms": unapproved_axioms,
         "admitted_detected": admitted_detected,
@@ -605,8 +606,86 @@ def main() -> None:
         "error": stderr_text.strip() if returncode != 0 else None,
     }
 
+
+def main() -> None:
+    """Main CLI entrypoint."""
+    args = parse_arguments()
+
+    repl_cmd = find_repl_executable()
+    if not repl_cmd:
+        error_result = {
+            "sound": False,
+            "error": "No rocq or coqtop executable found in PATH.",
+        }
+        print(json.dumps(error_result, indent=2, ensure_ascii=False))
+        sys.exit(1)
+
+    project_args = load_project_arguments(args.project_dir)
+
+    if args.manifest:
+        manifest_path = (
+            os.path.join(args.project_dir, args.manifest)
+            if not os.path.isabs(args.manifest)
+            else args.manifest
+        )
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                theorems = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Error loading manifest {manifest_path}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        all_sound = True
+        total = len(theorems)
+        for idx, item in enumerate(theorems, start=1):
+            module = item["module"]
+            theorem = item["theorem"]
+            allow_std = item.get("allow_standard_axioms", args.allow_standard_axioms)
+            allow_tlc = item.get("allow_tlc_axioms", args.allow_tlc_axioms)
+            allow_aeneas = item.get("allow_aeneas_axioms", args.allow_aeneas_axioms)
+            desc = f" ({item['description']})" if "description" in item else ""
+
+            print(
+                f"==> [{idx}/{total}] Auditing {module}.{theorem}{desc}...", flush=True
+            )
+            res = audit_single_theorem(
+                repl_cmd=repl_cmd,
+                module_path=module,
+                theorem_name=theorem,
+                project_args=project_args,
+                project_dir=args.project_dir,
+                timeout=args.timeout,
+                allow_standard=allow_std,
+                allow_tlc=allow_tlc,
+                allow_aeneas=allow_aeneas,
+            )
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            if not res["sound"]:
+                all_sound = False
+                print(
+                    f"FAILED audit on {module}.{theorem}: {res['rejection_reason']}",
+                    file=sys.stderr,
+                )
+
+        if not all_sound:
+            sys.exit(1)
+        sys.exit(0)
+
+    # Single theorem mode
+    audit_result = audit_single_theorem(
+        repl_cmd=repl_cmd,
+        module_path=args.module,
+        theorem_name=args.theorem,
+        project_args=project_args,
+        project_dir=args.project_dir,
+        timeout=args.timeout,
+        allow_standard=args.allow_standard_axioms,
+        allow_tlc=args.allow_tlc_axioms,
+        allow_aeneas=args.allow_aeneas_axioms,
+    )
+
     print(json.dumps(audit_result, indent=2, ensure_ascii=False))
-    if not is_sound:
+    if not audit_result["sound"]:
         sys.exit(1)
     sys.exit(0)
 
