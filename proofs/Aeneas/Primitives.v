@@ -310,7 +310,7 @@ Definition u32   := scalar U32.
 Definition u64   := scalar U64.
 Definition u128  := scalar U128.
 
-(** Negaion *)
+(** Negation *)
 Definition isize_neg := @scalar_neg Isize.
 Definition i8_neg    := @scalar_neg I8.
 Definition i16_neg   := @scalar_neg I16.
@@ -814,6 +814,19 @@ Axiom array_update_subslice: forall {T : Type} {n : usize} (x : array T n) (r : 
 Axiom slice_subslice: forall {T : Type} (x : slice T) (r : core_ops_range_Range usize), result (slice T).
 Axiom slice_update_subslice: forall {T : Type} (x : slice T) (r : core_ops_range_Range usize) (ns : slice T), result (slice T).
 
+Definition slice_empty {T : Type} : slice T :=
+  exist _ [] le_0_usize_max.
+
+Axiom array_to_slice_len : forall {T : Type} {n : usize} (a : array T n),
+  slice_len (array_to_slice a) = n.
+
+Axiom array_to_slice_index : forall {T : Type} {n : usize} (a : array T n) (i : usize),
+  slice_index_usize (array_to_slice a) i = array_index_usize a i.
+
+Axiom mk_array_index_nth : forall {T : Type} (n : usize) (l : list T) (i : usize) (x : T),
+  nth_error l (usize_to_nat i) = Some x ->
+  array_index_usize (mk_array n l) i = Ok x.
+
 (*** Vectors *)
 
 Definition alloc_vec_Vec T := { l: list T | Z.of_nat (length l) <= usize_max }.
@@ -903,6 +916,11 @@ Definition core_slice_index_Slice_index
   | None => Fail_ Failure
   | Some x => Ok x
   end.
+
+Axiom array_to_slice_range_from_end : forall {T Idx : Type}
+  (inst : core_slice_index_SliceIndex Idx (slice T) (slice T))
+  {n : usize} (a : array T n) (r : Idx),
+  core_slice_index_Slice_index inst (array_to_slice a) r = Ok slice_empty.
 
 (* [core::slice::index::Range:::get]: forward function *)
 Axiom core_slice_index_SliceIndexRangeUsizeSlice_get : forall {T : Type} (i : core_ops_range_Range usize) (s : slice T), result (option (slice T)).

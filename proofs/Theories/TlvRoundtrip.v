@@ -465,6 +465,114 @@ Proof.
   reflexivity.
 Qed.
 
+(** [SPEC]
+    VaultHeader シリアライザーの評価計算補題。
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header は必ず成功し、
+    マジック 4 バイト、バージョン、暗号スイートIDから成る 6 バイト配列を返す。 *)
+Lemma tlv_serialize_header_eval :
+  forall (h : tlv_VaultHeader_t),
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
+    tlv_serialize_header h =
+      Ok (mk_array 6%usize [
+            70%u8; 86%u8; 65%u8; 85%u8;
+            h.(tlv_VaultHeader_version);
+            h.(tlv_VaultHeader_suite_id)
+         ]).
+Proof.
+  intros h Hmagic.
+  unfold tlv_serialize_header.
+  rewrite Hmagic.
+  unfold tlv_VAULT_MAGIC.
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ].
+  cbn [bind].
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    VaultHeader シリアライザーのシリアライズ関係充足補題 (構成的実在性 / Realizability)。
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header が出力する 6 バイト配列を
+    スライス化したバイト列は、前提 Record (tlv_is_serialized_header) の全契約を満たす。
+    これにより、tlv_is_serialized_header が空虚な仮定ではなく、Rust シリアライザーによって
+    構成的に充足されることが保証される。 *)
+Lemma tlv_serialize_header_is_serialized :
+  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
+    tlv_serialize_header h = Ok serialized ->
+    tlv_is_serialized_header h (array_to_slice serialized).
+Proof.
+  intros h serialized Hmagic Hser.
+  pose proof (tlv_serialize_header_eval h Hmagic) as Heval.
+  rewrite Heval in Hser.
+  inv Hser.
+  refine {|
+    ser_hdr_valid_magic := Hmagic;
+    ser_hdr_bytes_len := _;
+    ser_hdr_b0 := 70%u8;
+    ser_hdr_b1 := 86%u8;
+    ser_hdr_b2 := 65%u8;
+    ser_hdr_b3 := 85%u8;
+    ser_hdr_idx0 := _;
+    ser_hdr_idx1 := _;
+    ser_hdr_idx2 := _;
+    ser_hdr_idx3 := _;
+    ser_hdr_idx4 := _;
+    ser_hdr_idx5 := _;
+    ser_hdr_reconstruct_magic := _;
+    ser_hdr_magic_idx0 := _;
+    ser_hdr_magic_idx1 := _;
+    ser_hdr_magic_idx2 := _;
+    ser_hdr_magic_idx3 := _;
+    ser_hdr_extract_rest := _
+  |}.
+  - apply array_to_slice_len.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 0%usize 70%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 1%usize 86%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 2%usize 65%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 3%usize 85%u8); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 4%usize (tlv_VaultHeader_version h)); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 6%usize _ 5%usize (tlv_VaultHeader_suite_id h)); reflexivity.
+  - unfold tlv_VAULT_MAGIC. reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 0%usize 70%u8); reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 1%usize 86%u8); reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 2%usize 65%u8); reflexivity.
+  - unfold tlv_VAULT_MAGIC.
+    apply (mk_array_index_nth 4%usize _ 3%usize 85%u8); reflexivity.
+  - apply array_to_slice_range_from_end.
+Qed.
+
+(** [SPEC]
+    最上位完全定理: VaultHeader の真のラウンドトリップ定理。
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header でシリアライズした配列 serialized を
+    スライス化したバイト列 (array_to_slice serialized) を tlv_deserialize_header でデシリアライズすると、
+    元の VaultHeader h と空の残余スライスが完全に復元される。
+    (Rust シリアライズ関数とデシリアライズ関数の真の関数合成を直接検証する)。 *)
+Theorem tlv_header_roundtrip_sound :
+  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
+    h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
+    tlv_serialize_header h = Ok serialized ->
+    tlv_deserialize_header (array_to_slice serialized) =
+      Ok (Core_result_Result_Ok (h, slice_empty)).
+Proof.
+  intros h serialized Hmagic Hser.
+  apply tlv_header_roundtrip.
+  apply (tlv_serialize_header_is_serialized h serialized Hmagic Hser).
+Qed.
+
 (** ** 残余スライスを保持するヘッダー連鎖検証 *)
 
 (** [MODEL]

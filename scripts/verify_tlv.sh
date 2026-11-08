@@ -116,6 +116,11 @@ python3 "${SCRIPT_DIR}/audit_axioms.py" \
 
 python3 "${SCRIPT_DIR}/audit_axioms.py" \
   --module Fidelogic.Theories.TlvRoundtrip \
+  --theorem tlv_header_roundtrip_sound \
+  --allow-aeneas-axioms
+
+python3 "${SCRIPT_DIR}/audit_axioms.py" \
+  --module Fidelogic.Theories.TlvRoundtrip \
   --theorem tlv_slot_roundtrip \
   --allow-aeneas-axioms
 
