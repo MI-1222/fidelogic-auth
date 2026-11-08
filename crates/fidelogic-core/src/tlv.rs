@@ -70,6 +70,10 @@ pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParse
         return Err(VaultError::UnexpectedEof);
     }
     let magic = [bytes[0], bytes[1], bytes[2], bytes[3]];
+    // NOTE: 通常のRustでは、
+    // `magic != VAULT_MAGIC` や `&bytes[..4] != VAULT_MAGIC` と記述するのが自然であるが、
+    // Aeneas による形式検証用コード抽出時の配列比較型推論制約を回避するため、
+    // 各バイト要素を展開して明示的に比較している。
     if magic[0] != VAULT_MAGIC[0]
         || magic[1] != VAULT_MAGIC[1]
         || magic[2] != VAULT_MAGIC[2]
