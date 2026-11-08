@@ -283,13 +283,7 @@ pub fn serialize_slot_entry_into(
 /// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, VaultError> {
-    if entry.wrapped_dek.len() > u16::MAX as usize {
-        return Err(VaultError::InvalidLength);
-    }
-    if entry.wrapped_dek.len() != entry.wrapped_dek_len as usize {
-        return Err(VaultError::InvalidLength);
-    }
-    let mut bytes = alloc::vec::Vec::with_capacity(KEK_SLOT_HEADER_LEN + entry.wrapped_dek.len());
+    let mut bytes = alloc::vec::Vec::new();
     serialize_slot_entry_into(entry, &mut bytes)?;
     Ok(bytes)
 }
@@ -1305,6 +1299,20 @@ mod tests {
             res,
             Err(VaultError::InvalidLength),
             "スロット数が255超過時のInvalidLength返却検証に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_slot_entry_into_matches_serialize_slot_entry() {
+        let entry =
+            KekSlotEntry::new(3, 2, alloc::vec![10, 20, 30, 40]).expect("KekSlotEntry生成に成功。");
+        let mut buf = alloc::vec::Vec::new();
+        serialize_slot_entry_into(&entry, &mut buf).expect("serialize_slot_entry_into実行に成功。");
+        let direct = serialize_slot_entry(&entry).expect("serialize_slot_entry実行に成功。");
+        assert_eq!(
+            buf, direct,
+            "serialize_slot_entry_intoとserialize_slot_entryの一致検証に成功。"
         );
     }
 
