@@ -66,11 +66,31 @@ Proof.
   reflexivity.
 Qed.
 
-(** FidelogicCore 抽出型 core_ops_range_RangeFrom_t に対する末尾レンジ型クラスインスタンス。 *)
-#[global] Instance SliceRangeFrom_RangeFrom_t :
-  SliceRangeFrom (core_ops_range_RangeFrom_t usize) := {|
-  slice_range_from_start := core_ops_range_RangeFrom_start;
-|}.
+(** [core::slice::index::RangeFrom::get] に関する Rust 言語仕様モデル。
+    開始インデックスがスライス長と一致する場合、必ず空スライスの Some を返す。 *)
+Axiom core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_at_len :
+  forall {T : Type} (s : slice T) (r : core_ops_range_RangeFrom_t usize),
+    core_ops_range_RangeFrom_start r = slice_len s ->
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get r s = Ok (Some slice_empty).
+
+(** [SPEC]
+    配列をスライス化したバイト列において、配列長と一致する末尾レンジ (n..) の参照は空スライスを返す。
+    公理ではなく、配列長の一致補題 (array_to_slice_len) と RangeFrom 仕様から導出される補題。 *)
+Lemma array_to_slice_range_from_end :
+  forall {T : Type} {n : usize} (a : array T n) (r : core_ops_range_RangeFrom_t usize),
+    core_ops_range_RangeFrom_start r = n ->
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice T)
+      (array_to_slice a) r = Ok slice_empty.
+Proof.
+  intros T n a r Hstart.
+  unfold core_slice_index_Slice_index.
+  cbn [core_slice_index_SliceIndex_get core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice].
+  rewrite core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_at_len.
+  - reflexivity.
+  - rewrite array_to_slice_len.
+    exact Hstart.
+Qed.
 
 (** ** TLV デシリアライズ特化 Ltac 自動化タクティック *)
 
