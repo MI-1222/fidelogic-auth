@@ -122,12 +122,8 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_slot_entry_reexport() {
-        let entry = KekSlotEntry {
-            slot_id: 0,
-            kdf_kind: 1,
-            wrapped_dek_len: 4,
-            wrapped_dek: alloc::vec![1, 2, 3, 4],
-        };
+        let entry = KekSlotEntry::new(0, 1, alloc::vec![1, 2, 3, 4])
+            .expect("KEKスロットエントリ生成に成功。");
         let bytes = serialize_slot_entry(&entry).expect("シリアライズに成功。");
         assert_eq!(
             bytes,

@@ -134,23 +134,27 @@ pub const KEK_SLOT_ENTRY_LEN: usize = KEK_SLOT_HEADER_LEN;
 /// KEKスロット定義テーブルのエントリを表すレコード。
 ///
 /// スロットID, KDF種別, ラップ済みDEKのバイト長, および暗号化DEK本体(Wrapped DEK)を保持する。
+/// 内部不変条件 (`wrapped_dek_len == wrapped_dek.len() as u16`) を保護するため、
+/// フィールドは非公開化されており、[`KekSlotEntry::new`] または [`deserialize_slot_entry`] を介して生成される。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
 pub struct KekSlotEntry {
     /// スロット識別子。
-    pub slot_id: u8,
+    slot_id: u8,
     /// 鍵導出関数(KDF)の種別。
-    pub kdf_kind: u8,
+    kdf_kind: u8,
     /// ラップ済みDEKのバイト長。
-    pub wrapped_dek_len: u16,
+    wrapped_dek_len: u16,
     /// 暗号化DEK本体(Wrapped DEK)。
-    pub wrapped_dek: alloc::vec::Vec<u8>,
+    wrapped_dek: alloc::vec::Vec<u8>,
 }
 
 #[cfg(feature = "alloc")]
 impl KekSlotEntry {
     /// 新しいKEKスロットエントリ構造体を生成する。
+    ///
+    /// `wrapped_dek` の実体長から `wrapped_dek_len` を自動算出し、不変条件を厳格に保持する。
     ///
     /// # Errors
     ///
@@ -168,6 +172,36 @@ impl KekSlotEntry {
             wrapped_dek_len,
             wrapped_dek,
         })
+    }
+
+    /// スロット識別子を取得する。
+    #[must_use]
+    pub const fn slot_id(&self) -> u8 {
+        self.slot_id
+    }
+
+    /// 鍵導出関数(KDF)の種別識別子を取得する。
+    #[must_use]
+    pub const fn kdf_kind(&self) -> u8 {
+        self.kdf_kind
+    }
+
+    /// ラップ済みDEKのバイト長を取得する。
+    #[must_use]
+    pub const fn wrapped_dek_len(&self) -> u16 {
+        self.wrapped_dek_len
+    }
+
+    /// 暗号化DEK本体(Wrapped DEK)のスライス参照を取得する。
+    #[must_use]
+    pub fn wrapped_dek(&self) -> &[u8] {
+        &self.wrapped_dek
+    }
+
+    /// 暗号化DEK本体(Wrapped DEK)の所有権を取得する。
+    #[must_use]
+    pub fn into_wrapped_dek(self) -> alloc::vec::Vec<u8> {
+        self.wrapped_dek
     }
 }
 
@@ -659,18 +693,10 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_kek_slot_entry_equality() {
-        let entry1 = KekSlotEntry {
-            slot_id: 0,
-            kdf_kind: 1,
-            wrapped_dek_len: 4,
-            wrapped_dek: alloc::vec![0x01, 0x02, 0x03, 0x04],
-        };
-        let entry2 = KekSlotEntry {
-            slot_id: 0,
-            kdf_kind: 1,
-            wrapped_dek_len: 4,
-            wrapped_dek: alloc::vec![0x01, 0x02, 0x03, 0x04],
-        };
+        let entry1 = KekSlotEntry::new(0, 1, alloc::vec![0x01, 0x02, 0x03, 0x04])
+            .expect("エントリ生成に成功。");
+        let entry2 = KekSlotEntry::new(0, 1, alloc::vec![0x01, 0x02, 0x03, 0x04])
+            .expect("エントリ生成に成功。");
         assert_eq!(entry1, entry2, "同一パラメータのKekSlotEntry比較に成功。");
     }
 
@@ -718,12 +744,8 @@ mod tests {
             version: 1,
             suite_id: 1,
         };
-        let slot = KekSlotEntry {
-            slot_id: 0,
-            kdf_kind: 1,
-            wrapped_dek_len: 4,
-            wrapped_dek: alloc::vec![0x10, 0x20, 0x30, 0x40],
-        };
+        let slot = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20, 0x30, 0x40])
+            .expect("スロット生成に成功。");
         let payload = EntryPayload::new(alloc::vec![0x01, 0x02], [0xbb; AUTH_TAG_LEN]);
         let record = TlvRecord::Entry(payload);
         let vault1 = Vault::new(
@@ -873,12 +895,8 @@ mod tests {
         let (entry, rest) = result.unwrap();
         assert_eq!(
             entry,
-            KekSlotEntry {
-                slot_id: 1,
-                kdf_kind: 2,
-                wrapped_dek_len: 4,
-                wrapped_dek: alloc::vec![0xaa, 0xbb, 0xcc, 0xdd],
-            },
+            KekSlotEntry::new(1, 2, alloc::vec![0xaa, 0xbb, 0xcc, 0xdd])
+                .expect("KekSlotEntry生成に成功。"),
             "デシリアライズされたKekSlotEntry内容の検証に成功。"
         );
         assert_eq!(rest, &[0xff], "スロットパース後の残余スライス検証に成功。");
@@ -934,12 +952,10 @@ mod tests {
         );
         assert_eq!(
             vault.slots,
-            alloc::vec![KekSlotEntry {
-                slot_id: 0,
-                kdf_kind: 1,
-                wrapped_dek_len: 4,
-                wrapped_dek: alloc::vec![0x11, 0x22, 0x33, 0x44],
-            }],
+            alloc::vec![
+                KekSlotEntry::new(0, 1, alloc::vec![0x11, 0x22, 0x33, 0x44])
+                    .expect("KekSlotEntry生成に成功。")
+            ],
             "デシリアライズされたスロットテーブルの検証に成功。"
         );
         assert_eq!(
@@ -1093,12 +1109,8 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_slot_entry_and_roundtrip() {
-        let entry = KekSlotEntry {
-            slot_id: 2,
-            kdf_kind: 1,
-            wrapped_dek_len: 3,
-            wrapped_dek: alloc::vec![0xaa, 0xbb, 0xcc],
-        };
+        let entry = KekSlotEntry::new(2, 1, alloc::vec![0xaa, 0xbb, 0xcc])
+            .expect("KekSlotEntry生成に成功。");
         let bytes = serialize_slot_entry(&entry).expect("シリアライズに成功。");
         assert_eq!(
             bytes,
@@ -1117,6 +1129,7 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_slot_entry_mismatched_length() {
+        // 内部実装で直接不正な状態を作成した場合の防御的境界チェックを検証。
         let entry = KekSlotEntry {
             slot_id: 1,
             kdf_kind: 1,
@@ -1135,10 +1148,31 @@ mod tests {
     fn test_kek_slot_entry_new() {
         let entry = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20])
             .expect("正常なパラメータによるKekSlotEntry生成に成功。");
-        assert_eq!(entry.slot_id, 0);
-        assert_eq!(entry.kdf_kind, 1);
-        assert_eq!(entry.wrapped_dek_len, 2);
-        assert_eq!(entry.wrapped_dek, alloc::vec![0x10, 0x20]);
+        assert_eq!(entry.slot_id(), 0, "slot_idゲッターの検証に成功。");
+        assert_eq!(entry.kdf_kind(), 1, "kdf_kindゲッターの検証に成功。");
+        assert_eq!(
+            entry.wrapped_dek_len(),
+            2,
+            "wrapped_dek_lenゲッターの検証に成功。"
+        );
+        assert_eq!(
+            entry.wrapped_dek(),
+            &[0x10, 0x20],
+            "wrapped_dekゲッターの検証に成功。"
+        );
+        assert_eq!(
+            entry.into_wrapped_dek(),
+            alloc::vec![0x10, 0x20],
+            "into_wrapped_dekの検証に成功。"
+        );
+
+        // u16::MAX 超過時の不変条件保護検証
+        let large_dek = alloc::vec![0u8; (u16::MAX as usize) + 1];
+        assert_eq!(
+            KekSlotEntry::new(0, 1, large_dek),
+            Err(VaultError::InvalidLength),
+            "u16::MAX超過時のInvalidLength返却検証に成功。"
+        );
     }
 
     #[cfg(feature = "alloc")]
@@ -1216,12 +1250,8 @@ mod tests {
             version: 1,
             suite_id: 2,
         };
-        let slot = KekSlotEntry {
-            slot_id: 0,
-            kdf_kind: 1,
-            wrapped_dek_len: 4,
-            wrapped_dek: alloc::vec![0x10, 0x20, 0x30, 0x40],
-        };
+        let slot = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20, 0x30, 0x40])
+            .expect("スロット生成に成功。");
         let record1 = TlvRecord::Entry(EntryPayload::new(
             alloc::vec![0x01, 0x02, 0x03],
             [0xaa; AUTH_TAG_LEN],
@@ -1267,12 +1297,7 @@ mod tests {
             version: 1,
             suite_id: 1,
         };
-        let slot = KekSlotEntry {
-            slot_id: 0,
-            kdf_kind: 1,
-            wrapped_dek_len: 0,
-            wrapped_dek: alloc::vec::Vec::new(),
-        };
+        let slot = KekSlotEntry::new(0, 1, alloc::vec::Vec::new()).expect("スロット生成に成功。");
         let slots = alloc::vec![slot; 256];
         let vault = Vault::new(header, slots, alloc::vec::Vec::new());
         let res = serialize(&vault);
@@ -1307,12 +1332,7 @@ mod tests {
             version: 1,
             suite_id: 2,
         };
-        let slot = KekSlotEntry {
-            slot_id: 1,
-            kdf_kind: 1,
-            wrapped_dek_len: 2,
-            wrapped_dek: alloc::vec![0xaa, 0xbb],
-        };
+        let slot = KekSlotEntry::new(1, 1, alloc::vec![0xaa, 0xbb]).expect("スロット生成に成功。");
         let record1 = TlvRecord::Entry(EntryPayload::new(
             alloc::vec![0x01, 0x02],
             [0x55; AUTH_TAG_LEN],
@@ -1349,11 +1369,9 @@ mod tests {
                 any::<u8>(),
                 prop::collection::vec(any::<u8>(), 0..=256),
             )
-                .prop_map(|(slot_id, kdf_kind, wrapped_dek)| KekSlotEntry {
-                    slot_id,
-                    kdf_kind,
-                    wrapped_dek_len: wrapped_dek.len() as u16,
-                    wrapped_dek,
+                .prop_map(|(slot_id, kdf_kind, wrapped_dek)| {
+                    KekSlotEntry::new(slot_id, kdf_kind, wrapped_dek)
+                        .expect("有効なKekSlotEntryの生成に成功。")
                 })
         }
 
