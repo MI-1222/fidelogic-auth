@@ -191,9 +191,14 @@ impl KekSlotEntry {
     }
 
     /// ラップ済みDEKのバイト長を取得する。
+    ///
+    /// # Panics
+    ///
+    /// 内部の不変条件 (`wrapped_dek.len() <= u16::MAX`) が破綻している場合にパニックする。
     #[must_use]
     pub fn wrapped_dek_len(&self) -> u16 {
-        u16::try_from(self.wrapped_dek.len()).unwrap_or(u16::MAX)
+        u16::try_from(self.wrapped_dek.len())
+            .expect("wrapped_dek.len() <= u16::MAX の不変条件により成功。")
     }
 
     /// 暗号化DEK本体(Wrapped DEK)のスライス参照を取得する。
@@ -1125,6 +1130,18 @@ mod tests {
             Err(VaultError::InvalidLength),
             "slot_serialized_lenにおけるu16::MAX超過時のInvalidLength返却検証に成功。"
         );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    #[should_panic(expected = "wrapped_dek.len() <= u16::MAX の不変条件により成功。")]
+    fn test_kek_slot_entry_wrapped_dek_len_panics_on_oversized() {
+        let entry = KekSlotEntry {
+            slot_id: 1,
+            kdf_kind: 1,
+            wrapped_dek: alloc::vec![0u8; (u16::MAX as usize) + 1],
+        };
+        let _ = entry.wrapped_dek_len();
     }
 
     #[cfg(feature = "alloc")]
