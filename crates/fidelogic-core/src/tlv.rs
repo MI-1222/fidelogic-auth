@@ -133,8 +133,9 @@ pub const KEK_SLOT_ENTRY_LEN: usize = KEK_SLOT_HEADER_LEN;
 
 /// KEKスロット定義テーブルのエントリを表すレコード。
 ///
-/// スロットID, KDF種別, ラップ済みDEKのバイト長, および暗号化DEK本体(Wrapped DEK)を保持する。
-/// 内部不変条件 (`wrapped_dek_len == wrapped_dek.len() as u16`) を保護するため、
+/// スロットID, KDF種別, および暗号化DEK本体(Wrapped DEK)を保持する。
+/// ラップ済みDEKのバイト長は実体 ([`KekSlotEntry::wrapped_dek`]) から動的に導出される。
+/// 不変条件 (`wrapped_dek.len() <= u16::MAX`) を保護するため、
 /// フィールドは非公開化されており、[`KekSlotEntry::new`] または [`deserialize_slot_entry`] を介して生成される。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
@@ -144,8 +145,6 @@ pub struct KekSlotEntry {
     slot_id: u8,
     /// 鍵導出関数(KDF)の種別。
     kdf_kind: u8,
-    /// ラップ済みDEKのバイト長。
-    wrapped_dek_len: u16,
     /// 暗号化DEK本体(Wrapped DEK)。
     wrapped_dek: alloc::vec::Vec<u8>,
 }
@@ -153,8 +152,6 @@ pub struct KekSlotEntry {
 #[cfg(feature = "alloc")]
 impl KekSlotEntry {
     /// 新しいKEKスロットエントリ構造体を生成する。
-    ///
-    /// `wrapped_dek` の実体長から `wrapped_dek_len` を自動算出し、不変条件を厳格に保持する。
     ///
     /// # Errors
     ///
@@ -164,12 +161,10 @@ impl KekSlotEntry {
         kdf_kind: u8,
         wrapped_dek: alloc::vec::Vec<u8>,
     ) -> Result<Self, VaultError> {
-        let wrapped_dek_len =
-            u16::try_from(wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
+        let _ = u16::try_from(wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
         Ok(Self {
             slot_id,
             kdf_kind,
-            wrapped_dek_len,
             wrapped_dek,
         })
     }
@@ -188,8 +183,8 @@ impl KekSlotEntry {
 
     /// ラップ済みDEKのバイト長を取得する。
     #[must_use]
-    pub const fn wrapped_dek_len(&self) -> u16 {
-        self.wrapped_dek_len
+    pub fn wrapped_dek_len(&self) -> u16 {
+        u16::try_from(self.wrapped_dek.len()).unwrap_or(u16::MAX)
     }
 
     /// 暗号化DEK本体(Wrapped DEK)のスライス参照を取得する。
@@ -234,7 +229,6 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
     let entry = KekSlotEntry {
         slot_id,
         kdf_kind,
-        wrapped_dek_len,
         wrapped_dek,
     };
     Ok((entry, &payload_bytes[dek_len..]))
@@ -248,20 +242,14 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
 ///
 /// # Errors
 ///
-/// - `wrapped_dek` の実体長と `wrapped_dek_len` が一致しない場合は [`VaultError::InvalidLength`] を返す。
 /// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn serialize_slot_entry_into(
     entry: &KekSlotEntry,
     out: &mut alloc::vec::Vec<u8>,
 ) -> Result<(), VaultError> {
-    if entry.wrapped_dek.len() > u16::MAX as usize {
-        return Err(VaultError::InvalidLength);
-    }
-    if entry.wrapped_dek.len() != entry.wrapped_dek_len as usize {
-        return Err(VaultError::InvalidLength);
-    }
-    let len_bytes = entry.wrapped_dek_len.to_be_bytes();
+    let dek_len = u16::try_from(entry.wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
+    let len_bytes = dek_len.to_be_bytes();
     out.reserve(KEK_SLOT_HEADER_LEN + entry.wrapped_dek.len());
     out.push(entry.slot_id);
     out.push(entry.kdf_kind);
@@ -275,16 +263,10 @@ pub fn serialize_slot_entry_into(
 ///
 /// # Errors
 ///
-/// - `wrapped_dek` の実体長と `wrapped_dek_len` が一致しない場合は [`VaultError::InvalidLength`] を返す。
 /// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn slot_serialized_len(entry: &KekSlotEntry) -> Result<usize, VaultError> {
-    if entry.wrapped_dek.len() > u16::MAX as usize {
-        return Err(VaultError::InvalidLength);
-    }
-    if entry.wrapped_dek.len() != entry.wrapped_dek_len as usize {
-        return Err(VaultError::InvalidLength);
-    }
+    let _ = u16::try_from(entry.wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
     KEK_SLOT_HEADER_LEN
         .checked_add(entry.wrapped_dek.len())
         .ok_or(VaultError::InvalidLength)
@@ -298,7 +280,6 @@ pub fn slot_serialized_len(entry: &KekSlotEntry) -> Result<usize, VaultError> {
 ///
 /// # Errors
 ///
-/// - `wrapped_dek` の実体長と `wrapped_dek_len` が一致しない場合は [`VaultError::InvalidLength`] を返す。
 /// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, VaultError> {
@@ -1135,23 +1116,22 @@ mod tests {
 
     #[cfg(feature = "alloc")]
     #[test]
-    fn test_serialize_slot_entry_mismatched_length() {
-        // 内部実装で直接不正な状態を作成した場合の防御的境界チェックを検証。
+    fn test_serialize_slot_entry_oversized_length() {
+        // 内部構造で直接 u16::MAX 超過状態を作成した場合のシリアライズ防御チェックを検証。
         let entry = KekSlotEntry {
             slot_id: 1,
             kdf_kind: 1,
-            wrapped_dek_len: 4,
-            wrapped_dek: alloc::vec![0x01, 0x02],
+            wrapped_dek: alloc::vec![0u8; (u16::MAX as usize) + 1],
         };
         assert_eq!(
             serialize_slot_entry(&entry),
             Err(VaultError::InvalidLength),
-            "実体長と宣言長の不一致時におけるInvalidLength返却検証に成功。"
+            "u16::MAX超過時におけるInvalidLength返却検証に成功。"
         );
         assert_eq!(
             slot_serialized_len(&entry),
             Err(VaultError::InvalidLength),
-            "slot_serialized_lenにおける実体長と宣言長不一致時のInvalidLength返却検証に成功。"
+            "slot_serialized_lenにおけるu16::MAX超過時のInvalidLength返却検証に成功。"
         );
     }
 
