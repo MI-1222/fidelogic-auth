@@ -133,6 +133,11 @@ pub type TlvParseError = VaultError;
 pub const KEK_SLOT_HEADER_LEN: usize = 4;
 
 /// KEKスロットヘッダー長の後方互換用エイリアス(4バイト)。
+///
+/// **NOTE**: 本定数はヘッダー部(スロットID, KDF種別, DEK長フィールドの計4バイト)のみを指しており、
+/// 可変長の暗号化DEK本体を含むスロットエントリ全体の長さではない。
+/// 新規コードでは [`KEK_SLOT_HEADER_LEN`] の使用を推奨する。
+/// エントリ全体のシリアライズ長を計算する場合は、[`slot_serialized_len`] を使用すること。
 pub const KEK_SLOT_ENTRY_LEN: usize = KEK_SLOT_HEADER_LEN;
 
 /// KEKスロット定義テーブルのエントリを表すレコード。
@@ -238,11 +243,11 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
     Ok((entry, &payload_bytes[dek_len..]))
 }
 
-/// `KekSlotEntry` 単体の純粋関数型シリアライザー。
+/// `KekSlotEntry` 単体を指定バッファへシリアライズする純粋関数。
 ///
-/// 指定された [`KekSlotEntry`] をバイナリ形式にシリアライズする。
+/// 指定された [`KekSlotEntry`] をバイナリ形式にシリアライズし、既存の `out` バッファへ追記する。
 /// スロットID (1B), KDF種別 (1B), ラップ済みDEK長 (2B, ビッグエンディアン),
-/// および暗号化DEK本体(Wrapped DEK)のバイト列を出力する。
+/// および暗号化DEK本体(Wrapped DEK)のバイト列を追記する。
 ///
 /// # Errors
 ///
