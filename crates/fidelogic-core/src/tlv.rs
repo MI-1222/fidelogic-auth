@@ -224,6 +224,7 @@ impl KekSlotEntry {
 ///
 /// - 入力バイト列の長さがヘッダー長 ([`KEK_SLOT_HEADER_LEN`]) 未満の場合は [`VaultError::UnexpectedEof`] を返す。
 /// - 入力バイト列の長さがヘッダー長とラップ済みDEK長の合計未満の場合は [`VaultError::UnexpectedEof`] を返す。
+/// - [`KekSlotEntry::new`] の不変条件検証で失敗した場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), TlvParseError> {
     if bytes.len() < KEK_SLOT_HEADER_LEN {
@@ -240,11 +241,7 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
     }
 
     let wrapped_dek = payload_bytes[..dek_len].to_vec();
-    let entry = KekSlotEntry {
-        slot_id,
-        kdf_kind,
-        wrapped_dek,
-    };
+    let entry = KekSlotEntry::new(slot_id, kdf_kind, wrapped_dek)?;
     Ok((entry, &payload_bytes[dek_len..]))
 }
 
