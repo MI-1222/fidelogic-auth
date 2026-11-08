@@ -1213,4 +1213,25 @@ Definition U16_checked_add := scalar_checked_add U16.
 Definition U32_checked_add := scalar_checked_add U32.
 Definition U64_checked_add := scalar_checked_add U64.
 
+(** usize の飽和乗算 (saturating_mul) の境界健全性補題。 *)
+Lemma usize_saturating_mul_in_bounds (x y : usize) :
+  scalar_min Usize <= Z.min (to_Z x * to_Z y) usize_max <= scalar_max Usize.
+Proof.
+  unfold scalar_min, scalar_max, usize_min.
+  destruct x as [zx [Hxmin Hxmax]], y as [zy [Hymin Hymax]].
+  cbn in *.
+  unfold scalar_min, scalar_max, usize_min in *.
+  split.
+  - apply Z.min_glb.
+    + apply Z.mul_nonneg_nonneg; lia.
+    + apply le_0_usize_max.
+  - apply Z.le_trans with (m := usize_max).
+    + apply Z.le_min_r.
+    + lia.
+Qed.
+
+(** [core::num::<impl usize>::saturating_mul]: 飽和乗算の純粋関数型モデル。 *)
+Definition core_num_Usize_saturating_mul (x y : usize) : usize :=
+  exist _ (Z.min (to_Z x * to_Z y) usize_max) (usize_saturating_mul_in_bounds x y).
+
 End Primitives.

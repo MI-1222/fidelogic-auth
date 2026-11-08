@@ -8,6 +8,20 @@ cd "${REPO_ROOT}"
 
 echo "==> [1/4] Extracting LLBC from Rust via Charon..."
 mkdir -p target
+
+# 【Charon/Aeneas 抽出対象選定および Coq手書きモデル連携の根拠】
+# fidelogic_core::tlv::deserialize および serialize は、
+# ループ内の早期リターン・ブレイク(? 演算子による Result エラー伝播)を含んでおり、
+# 現行の Aeneas loop translation において、
+# "Returns inside of nested loops are not supported yet", "Breaks to outer loops are not supported yet"
+# として関数本体の抽出がスキップ(opaque宣言化)されます。
+#
+# そのため、トップレベルのVault全体デシリアライズ処理(deserialize)は、
+# Aeneas自動抽出の基本プリミティブ(deserialize_header, deserialize_slot_entry, deserialize_record, ...)
+# を結合する純粋関数型モデルとして、proofs/Theories/TlvTotality.v に、
+# 構造帰納モデル(tlv_deserialize_slots, tlv_deserialize_records, tlv_deserialize)
+# として形式化し、Rust側の saturating_mul 境界検査(core_num_Usize_saturating_mul)と厳密に一致させています。
+
 charon cargo --preset aeneas \
   --start-from fidelogic_core::tlv::parse_tlv_header \
   --start-from fidelogic_core::tlv::validate_tlv_bounds \

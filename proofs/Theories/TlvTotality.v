@@ -245,6 +245,8 @@ Qed.
 
 (** [MODEL]
     Vault 全体の純粋関数型デシリアライザーモデル。 *)
+(** Rust 側実装 (fidelogic_core::tlv::deserialize) の saturating_mul による境界検査と、
+    構造帰納によるループ解体に対応した仕様モデル。 *)
 Definition tlv_deserialize (bytes : slice u8) :
   result (core_result_Result_t (tlv_Vault_t * slice u8) tlv_VaultError_t) :=
   hdr_res <- tlv_deserialize_header bytes;
@@ -260,7 +262,7 @@ Definition tlv_deserialize (bytes : slice u8) :
           core_slice_index_Slice_index
             (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
             rest1 {| core_ops_range_RangeFrom_start := 1%usize |};
-        needed_slot_len <- usize_mul slot_count tlv_KEK_SLOT_HEADER_LEN;
+        let needed_slot_len := core_num_Usize_saturating_mul slot_count tlv_KEK_SLOT_HEADER_LEN in
         if slice_len rest2 s< needed_slot_len then
           Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
         else (
@@ -281,7 +283,7 @@ Definition tlv_deserialize (bytes : slice u8) :
                   core_slice_index_Slice_index
                     (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
                     rest3 {| core_ops_range_RangeFrom_start := 2%usize |};
-                needed_record_len <- usize_mul record_count tlv_TLV_HEADER_LEN;
+                let needed_record_len := core_num_Usize_saturating_mul record_count tlv_TLV_HEADER_LEN in
                 if slice_len rest4 s< needed_record_len then
                   Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
                 else (

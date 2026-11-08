@@ -1071,8 +1071,8 @@ mktlv_is_serialized_vault {
 
   ser_vault_needed_slot_len : usize;
   ser_vault_mul_needed_slot_len :
-    usize_mul ser_vault_slot_count_usize tlv_KEK_SLOT_HEADER_LEN =
-      Ok ser_vault_needed_slot_len;
+    core_num_Usize_saturating_mul ser_vault_slot_count_usize tlv_KEK_SLOT_HEADER_LEN =
+      ser_vault_needed_slot_len;
 
   ser_vault_rest2_len_ge_slots :
     (slice_len ser_vault_rest2 s< ser_vault_needed_slot_len) = false;
@@ -1109,8 +1109,8 @@ mktlv_is_serialized_vault {
 
   ser_vault_needed_record_len : usize;
   ser_vault_mul_needed_record_len :
-    usize_mul ser_vault_record_count_usize tlv_TLV_HEADER_LEN =
-      Ok ser_vault_needed_record_len;
+    core_num_Usize_saturating_mul ser_vault_record_count_usize tlv_TLV_HEADER_LEN =
+      ser_vault_needed_record_len;
 
   ser_vault_rest4_len_ge_records :
     (slice_len ser_vault_rest4 s< ser_vault_needed_record_len) = false;
@@ -1140,7 +1140,7 @@ Proof.
   rewrite (ser_vault_idx_slot_count v bytes Hser); cbn [bind].
   rewrite (ser_vault_cast_slot_count v bytes Hser); cbn [bind].
   rewrite (ser_vault_extract_rest2 v bytes Hser); cbn [bind].
-  rewrite (ser_vault_mul_needed_slot_len v bytes Hser); cbn [bind].
+  rewrite (ser_vault_mul_needed_slot_len v bytes Hser).
   rewrite (ser_vault_rest2_len_ge_slots v bytes Hser).
   (* 3. スロット列のデシリアライズ *)
   rewrite (ser_vault_slot_count_nat v bytes Hser).
@@ -1154,7 +1154,7 @@ Proof.
   rewrite (ser_vault_idx_b1 v bytes Hser); cbn [bind].
   rewrite (ser_vault_cast_record_count v bytes Hser); cbn [bind].
   rewrite (ser_vault_extract_rest4 v bytes Hser); cbn [bind].
-  rewrite (ser_vault_mul_needed_record_len v bytes Hser); cbn [bind].
+  rewrite (ser_vault_mul_needed_record_len v bytes Hser).
   rewrite (ser_vault_rest4_len_ge_records v bytes Hser).
   (* 5. レコード列のデシリアライズ *)
   rewrite (ser_vault_record_count_nat v bytes Hser).
