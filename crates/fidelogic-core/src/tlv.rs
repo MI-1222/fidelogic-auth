@@ -387,7 +387,7 @@ impl TlvRecord {
 ///
 /// # Errors
 ///
-/// - 入力バイト列の長さがヘッダー長 (2バイト) 未満、または宣言長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
+/// - 入力バイト列の長さがヘッダー長 ([`TLV_HEADER_LEN`]) 未満、または宣言長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
 /// - エントリレコードのペイロード長が認証タグ長 ([`AUTH_TAG_LEN`]) 未満の場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseError> {
@@ -395,11 +395,11 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
         return Err(VaultError::UnexpectedEof);
     };
     let length = header.length as usize;
-    let total_len = 2 + length;
+    let total_len = TLV_HEADER_LEN + length;
     if bytes.len() < total_len {
         return Err(VaultError::UnexpectedEof);
     }
-    let payload_bytes = &bytes[2..total_len];
+    let payload_bytes = &bytes[TLV_HEADER_LEN..total_len];
     let rest = &bytes[total_len..];
 
     let record = if header.tag == TAG_ENTRY {
