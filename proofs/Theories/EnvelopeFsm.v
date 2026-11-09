@@ -1201,3 +1201,229 @@ Proof.
   apply (locked_no_auth_dek_confidentiality slots trace m Hsafe Hsteps).
   apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
 Qed.
+
+(** [SPEC]
+    Zeroized状態から再初期化イベント (EventReset) を経ない単一ステップ遷移は存在しないことを示す補題。 *)
+Lemma step_zeroized_no_reset_impossible : forall (slots : KekSlots) (ev : VaultEvent) (s' : VaultState),
+  ev <> EventReset ->
+  ~ step slots Zeroized ev s'.
+Proof.
+  intros slots ev s' Hnot_reset Hstep.
+  apply step_zeroized_destinations in Hstep.
+  destruct Hstep as [Hev Hs'].
+  subst ev.
+  apply Hnot_reset.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    イベント列に再初期化イベント (EventReset) が含まれないことを表す述語。 *)
+Definition no_reset_trace (trace : list VaultEvent) : Prop :=
+  Forall (fun ev => ev <> EventReset) trace.
+
+(** [MODEL]
+    イベント列に再初期化イベント (EventReset) が含まれないかを判定するブール関数。 *)
+Definition no_reset_traceb (trace : list VaultEvent) : bool :=
+  forallb (fun ev => match ev with EventReset => false | _ => true end) trace.
+
+(** [SPEC]
+    no_reset_traceb と no_reset_trace の同値性補題。 *)
+Lemma no_reset_traceb_eq : forall (trace : list VaultEvent),
+  no_reset_traceb trace = true <-> no_reset_trace trace.
+Proof.
+  intros trace.
+  unfold no_reset_traceb, no_reset_trace.
+  rewrite forallb_forall.
+  rewrite Forall_forall.
+  split; intros H ev Hin.
+  - specialize (H ev Hin).
+    destruct ev; try discriminate; intros Heq; discriminate.
+  - specialize (H ev Hin).
+    destruct ev; try reflexivity.
+    exfalso. apply H. reflexivity.
+Qed.
+
+(** [SPEC]
+    マスター鍵消去状態の完全滞留定理 (Strict Quarantine Theorem)。
+    再初期化イベント (EventReset) を含まない任意の遷移列 (steps) において、
+    マシンは Zeroized 状態から脱出できず、終点状態は Zeroized のまま留まることを保証する。 *)
+Theorem steps_zeroized_no_reset_invariant : forall (slots : KekSlots) (trace : list VaultEvent) (s : VaultState),
+  no_reset_trace trace ->
+  steps slots Zeroized trace s ->
+  s = Zeroized.
+Proof.
+  intros slots trace s Hno_reset Hsteps.
+  inversion Hsteps as [s0 Heq1 Heq2 | s_a s_b s_c ev tr Hstep Hsteps' Heq1 Heq2]; subst.
+  - reflexivity.
+  - inversion Hno_reset as [ | ev0 tr0 Hnot_reset Hno_reset']; subst.
+    apply step_zeroized_destinations in Hstep.
+    destruct Hstep as [Hev Hs_b].
+    subst ev.
+    exfalso. apply Hnot_reset. reflexivity.
+Qed.
+
+(** [SPEC]
+    マスター鍵消去状態からの非到達性定理 (Zeroized Reachability Soundness Theorem)。
+    メモリゼロ消去状態 (Zeroized) から出発し、有効な解錠イベントを経由しない任意の遷移列 (steps) によって、
+    解錠状態 (Unlocked) に到達することは不可能であることを保証する。 *)
+Theorem zeroized_no_auth_unreachability : forall (slots : KekSlots) (trace : list VaultEvent) (s : VaultState),
+  no_valid_unlock_trace slots trace ->
+  steps slots Zeroized trace s ->
+  s <> Unlocked.
+Proof.
+  intros slots trace s Htrace Hsteps.
+  apply (steps_non_unlocked_invariant slots Zeroized trace s vault_state_zeroized_not_unlocked Htrace Hsteps).
+Qed.
+
+(** [SPEC]
+    構文的に解錠成功イベントを一切含まないトレースに対する、マスター鍵消去状態からの非到達性定理の系。 *)
+Corollary zeroized_syntax_no_auth_unreachability : forall (slots : KekSlots) (trace : list VaultEvent) (s : VaultState),
+  no_unlock_success_trace trace ->
+  steps slots Zeroized trace s ->
+  s <> Unlocked.
+Proof.
+  intros slots trace s Htrace Hsteps.
+  apply (zeroized_no_auth_unreachability slots trace s).
+  - apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
+  - exact Hsteps.
+Qed.
+
+(** [SPEC]
+    マスター鍵消去状態におけるDEK平文非露出定理 (Zeroized Data Plane Confidentiality Theorem)。
+    安全状態 (SafeState) を満たすマシンにおいて、ゼロ消去状態 (Zeroized) から出発して
+    有効な認証イベントを経ずに遷移した任意の終点状態 m においては、
+    平文DEKが観測されることはなく、常に None が保たれることを保証する。 *)
+Theorem zeroized_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
+  SafeState m ->
+  steps slots Zeroized trace m.(vms_state) ->
+  no_valid_unlock_trace slots trace ->
+  observe_dek m = None.
+Proof.
+  intros slots trace m Hsafe Hsteps Htrace.
+  assert (Hnot_unlocked : m.(vms_state) <> Unlocked).
+  {
+    apply (zeroized_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps).
+  }
+  destruct (observe_dek m) as [k | ] eqn:Eobs.
+  - assert (Hunlocked := safe_state_observe_some_implies_unlocked m k Hsafe Eobs).
+    exfalso. apply (Hnot_unlocked Hunlocked).
+  - reflexivity.
+Qed.
+
+(** [SPEC]
+    マスター鍵消去状態におけるDEK平文非露出定理の否定的帰結系 (Cannot Extract DEK from Zeroized State Corollary)。
+    ゼロ消去状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す。 *)
+Corollary zeroized_no_auth_cannot_extract_dek : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState) (k : DekBytes),
+  SafeState m ->
+  steps slots Zeroized trace m.(vms_state) ->
+  no_valid_unlock_trace slots trace ->
+  observe_dek m <> Some k.
+Proof.
+  intros slots trace m k Hsafe Hsteps Htrace.
+  assert (Hnone := zeroized_no_auth_dek_confidentiality slots trace m Hsafe Hsteps Htrace).
+  rewrite Hnone.
+  discriminate.
+Qed.
+
+(** [SPEC]
+    構文的に解錠成功イベントを一切含まないトレースに対する、マスター鍵消去状態におけるDEK平文非露出定理の系。 *)
+Corollary zeroized_syntax_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
+  SafeState m ->
+  steps slots Zeroized trace m.(vms_state) ->
+  no_unlock_success_trace trace ->
+  observe_dek m = None.
+Proof.
+  intros slots trace m Hsafe Hsteps Htrace.
+  apply (zeroized_no_auth_dek_confidentiality slots trace m Hsafe Hsteps).
+  apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
+Qed.
+
+(** [SPEC]
+    解錠状態到達における再初期化イベント必須性定理 (Reset Requirement for Unlocking Theorem)。
+    Zeroized 状態から Unlocked 状態へ到達する任意の遷移トレースには、
+    必ず EventReset イベントが含まれていなければならないことを保証する。 *)
+Theorem steps_zeroized_to_unlocked_requires_reset : forall (slots : KekSlots) (trace : list VaultEvent),
+  steps slots Zeroized trace Unlocked ->
+  In EventReset trace.
+Proof.
+  intros slots trace Hsteps.
+  destruct (in_dec vault_event_eq_dec EventReset trace) as [Hin | Hnot_in].
+  - exact Hin.
+  - exfalso.
+    assert (Hno_reset : no_reset_trace trace).
+    {
+      unfold no_reset_trace.
+      rewrite Forall_forall.
+      intros ev Hin Heq.
+      subst ev.
+      apply Hnot_in.
+      exact Hin.
+    }
+    assert (Heq := steps_zeroized_no_reset_invariant slots trace Unlocked Hno_reset Hsteps).
+    discriminate Heq.
+Qed.
+
+(** [SPEC]
+    非解錠状態から解錠状態への到達における認証イベント存在に関する一般化補題。
+    非解錠状態 (s1 <> Unlocked) から Unlocked へ到達する任意の遷移列 steps には、
+    健全なスロットに対する有効な解錠成功イベントが含まれていなければならないことを構成的に示す。 *)
+Lemma steps_to_unlocked_requires_auth_gen : forall (slots : KekSlots) (s1 s2 : VaultState) (trace : list VaultEvent),
+  steps slots s1 trace s2 ->
+  s1 <> Unlocked ->
+  s2 = Unlocked ->
+  exists (id : SlotId), In (EventUnlockSuccess id) trace /\ slot_valid slots id.
+Proof.
+  intros slots s1 s2 trace Hsteps.
+  induction Hsteps as [s | s_a s_b s_c ev tr Hstep Hsteps' IH].
+  - intros Hs1 Hs2.
+    subst s.
+    exfalso. apply Hs1. reflexivity.
+  - intros Hs_a Hs_c.
+    destruct (vault_state_eq_dec s_b Unlocked) as [Heq_b | Hneq_b].
+    + subst s_b.
+      destruct s_a.
+      * exfalso.
+        apply (step_locked_to_unlocked_impossible slots ev Hstep).
+      * apply step_unlocking_destinations in Hstep.
+        destruct Hstep as [[id [Hev [Hdest Hval]]] | [Hev Hdest]].
+        -- exists id.
+           split.
+           ++ left. exact Hev.
+           ++ exact Hval.
+        -- discriminate Hdest.
+      * exfalso. apply Hs_a. reflexivity.
+      * apply step_zeroized_destinations in Hstep.
+        destruct Hstep as [Hev Hdest].
+        discriminate Hdest.
+    + specialize (IH Hneq_b Hs_c).
+      destruct IH as [id [Hin Hval]].
+      exists id.
+      split.
+      * right. exact Hin.
+      * exact Hval.
+Qed.
+
+(** [SPEC]
+    非解錠状態から解錠状態への到達における認証イベント存在補題。
+    非解錠状態 (s1 <> Unlocked) から Unlocked へ到達する任意の遷移トレースには、
+    健全なスロットに対する有効な解錠成功イベントが含まれていなければならないことを構成的に示す。 *)
+Lemma steps_to_unlocked_requires_auth : forall (slots : KekSlots) (s1 : VaultState) (trace : list VaultEvent),
+  s1 <> Unlocked ->
+  steps slots s1 trace Unlocked ->
+  exists (id : SlotId), In (EventUnlockSuccess id) trace /\ slot_valid slots id.
+Proof.
+  intros slots s1 trace Hs1 Hsteps.
+  apply (steps_to_unlocked_requires_auth_gen slots s1 Unlocked trace Hsteps Hs1 eq_refl).
+Qed.
+
+(** [SPEC]
+    マスター鍵消去状態から解錠状態到達における有効認証イベント必須性定理 (Authentication Requirement Theorem)。
+    Zeroized 状態から Unlocked 状態へ到達する任意の遷移トレースには、
+    健全なスロットに対する有効な解錠成功イベントが含まれていなければならないことを保証する。 *)
+Theorem steps_zeroized_to_unlocked_requires_auth : forall (slots : KekSlots) (trace : list VaultEvent),
+  steps slots Zeroized trace Unlocked ->
+  exists (id : SlotId), In (EventUnlockSuccess id) trace /\ slot_valid slots id.
+Proof.
+  intros slots trace Hsteps.
+  apply (steps_to_unlocked_requires_auth slots Zeroized trace vault_state_zeroized_not_unlocked Hsteps).
+Qed.

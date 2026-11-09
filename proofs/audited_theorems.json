@@ -634,5 +634,77 @@
     "theorem": "locked_syntax_no_auth_dek_confidentiality",
     "allow_aeneas_axioms": false,
     "description": "構文的に解錠成功イベントを含まないトレースに対するDEK平文非露出定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_zeroized_no_reset_impossible",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態から再初期化イベント (EventReset) を経ない単一ステップ遷移は存在しないことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "no_reset_traceb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "no_reset_traceb と no_reset_trace の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_zeroized_no_reset_invariant",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態の完全滞留定理: 再初期化イベントを含まない遷移列においてマシンはZeroized状態に留まることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態からの非到達性定理: メモリゼロ消去状態から有効な解錠イベントを経ない任意の遷移列によって解錠状態に到達することは不可能であることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_syntax_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを一切含まないトレースに対するマスター鍵消去状態からの非到達性定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態におけるDEK平文非露出定理: ゼロ消去状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_no_auth_cannot_extract_dek",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態におけるDEK平文非露出定理の系: ゼロ消去状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す否定的帰結系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_syntax_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを一切含まないトレースに対するマスター鍵消去状態におけるDEK平文非露出定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_zeroized_to_unlocked_requires_reset",
+    "allow_aeneas_axioms": false,
+    "description": "解錠状態到達における再初期化イベント必須性定理: Zeroized状態からUnlocked状態へ到達する任意の遷移トレースには必ずEventResetが含まれていなければならないことを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_to_unlocked_requires_auth_gen",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から解錠状態への到達における認証イベント存在に関する一般化補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_to_unlocked_requires_auth",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から解錠状態への到達における認証イベント存在補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_zeroized_to_unlocked_requires_auth",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態から解錠状態到達における有効認証イベント必須性定理: Zeroized状態からUnlocked状態へ到達する任意の遷移トレースには健全なスロットに対する有効な解錠成功イベントが含まれていなければならないことを保証する定理"
   }
 ]
