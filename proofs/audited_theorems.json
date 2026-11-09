@@ -220,5 +220,131 @@
     "theorem": "vault_state_locked_not_zeroized",
     "allow_aeneas_axioms": false,
     "description": "Locked と Zeroized の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_eq",
+    "allow_aeneas_axioms": false,
+    "description": "有効スロット判定関数 is_valid_slot_id と有効スロット命題 valid_slot_id の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_kind_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SlotKind 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_kind_to_id_valid",
+    "allow_aeneas_axioms": false,
+    "description": "slot_kind_to_id が生成するスロットIDは常に有効(valid_slot_id)であることの健全性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_eqb_refl",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus ブール値等価判定関数の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_eqb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus ブール値等価判定関数と等号命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_cases",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus の有限網羅性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_valid_not_invalid",
+    "allow_aeneas_axioms": false,
+    "description": "SlotValid と SlotInvalid の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_valid_not_unset",
+    "allow_aeneas_axioms": false,
+    "description": "SlotValid と SlotUnset の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_invalid_not_unset",
+    "allow_aeneas_axioms": false,
+    "description": "SlotInvalid と SlotUnset の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "is_slot_status_valid_eq",
+    "allow_aeneas_axioms": false,
+    "description": "is_slot_status_valid が true であることと SlotValid であることの同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "kek_slots_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "KekSlots 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "get_slot_status_argon2id",
+    "allow_aeneas_axioms": false,
+    "description": "get_slot_status の Slot 0 (Argon2id) に対する簡約補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "get_slot_status_prf",
+    "allow_aeneas_axioms": false,
+    "description": "get_slot_status の Slot 1 (WebAuthn PRF) に対する簡約補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "get_slot_status_recovery",
+    "allow_aeneas_axioms": false,
+    "description": "get_slot_status の Slot 2 (リカバリーコード) に対する簡約補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_validb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "slot_validb と slot_valid の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_valid_out_of_bounds",
+    "allow_aeneas_axioms": false,
+    "description": "境界外(3以上)のスロット識別子は常に健全でないことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_validb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "any_slot_validb と any_slot_valid の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_valid_exists_eq",
+    "allow_aeneas_axioms": false,
+    "description": "any_slot_valid と有効スロットに対する存在量化の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_valid_argon2id_robust",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRFスロットが無効・破損時でもArgon2idスロット健全性により全体健全性が維持される補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_valid_recovery_robust",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRFスロットが無効・破損時でもリカバリーコードスロット健全性により全体健全性が維持される補題"
   }
 ]
