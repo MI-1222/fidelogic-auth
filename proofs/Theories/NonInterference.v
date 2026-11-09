@@ -408,20 +408,11 @@ Record HighSecret : Type := mkHighSecret {
 Lemma high_secret_eq_dec : forall (h1 h2 : HighSecret),
   {h1 = h2} + {h1 <> h2}.
 Proof.
-  intros [k1 p1 u1 e1] [k2 p2 u2 e2].
-  destruct (list_eq_dec Z.eq_dec p1 p2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (bool_dec u1 u2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (bool_dec e1 e2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct k1 as [dek1 |]; destruct k2 as [dek2 |].
-  - destruct (list_eq_dec Z.eq_dec dek1 dek2).
-    + subst. left. reflexivity.
-    + right. intros H. inv H. contradiction.
-  - right. intros H. discriminate H.
-  - right. intros H. discriminate H.
-  - left. reflexivity.
+  decide equality.
+  - apply bool_dec.
+  - apply bool_dec.
+  - apply list_eq_dec, Z.eq_dec.
+  - decide equality; apply list_eq_dec, Z.eq_dec.
 Qed.
 
 (** [SPEC]
@@ -447,11 +438,7 @@ Record LowHeader : Type := mkLowHeader {
 Lemma low_header_eq_dec : forall (h1 h2 : LowHeader),
   {h1 = h2} + {h1 <> h2}.
 Proof.
-  intros [m1 v1 c1] [m2 v2 c2].
-  destruct (Z.eq_dec m1 m2); [subst | right; intros H; inv H; contradiction].
-  destruct (Z.eq_dec v1 v2); [subst | right; intros H; inv H; contradiction].
-  destruct (Z.eq_dec c1 c2); [subst | right; intros H; inv H; contradiction].
-  left. reflexivity.
+  decide equality; apply Z.eq_dec.
 Qed.
 
 (** [SPEC]
@@ -459,13 +446,7 @@ Qed.
 Lemma option_eq_dec : forall {A : Type} (eq_dec_A : forall (x y : A), {x = y} + {x <> y}) (o1 o2 : option A),
   {o1 = o2} + {o1 <> o2}.
 Proof.
-  intros A eq_dec_A [x1 |] [x2 |].
-  - destruct (eq_dec_A x1 x2) as [Heq | Hneq].
-    + subst. left. reflexivity.
-    + right. intros H. inv H. contradiction.
-  - right. intros H. discriminate H.
-  - right. intros H. discriminate H.
-  - left. reflexivity.
+  decide equality.
 Qed.
 
 (** [MODEL]
@@ -483,16 +464,11 @@ Record LowObservation : Type := mkLowObservation {
 Lemma low_observation_eq_dec : forall (o1 o2 : LowObservation),
   {o1 = o2} + {o1 <> o2}.
 Proof.
-  intros [e1 l1 h1 s1] [e2 l2 h2 s2].
-  destruct (option_eq_dec tlv_vault_error_eq_dec e1 e2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (PeanoNat.Nat.eq_dec l1 l2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (low_header_eq_dec h1 h2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (option_eq_dec PeanoNat.Nat.eq_dec s1 s2);
-    [subst | right; intros H; inv H; contradiction].
-  left. reflexivity.
+  decide equality.
+  - decide equality; apply Nat.eq_dec.
+  - apply low_header_eq_dec.
+  - apply Nat.eq_dec.
+  - decide equality; apply tlv_vault_error_eq_dec.
 Qed.
 
 (** [MODEL]
@@ -515,12 +491,9 @@ Record VaultSecurityState : Type := mkVaultSecurityState {
 Lemma vault_security_state_eq_dec : forall (s1 s2 : VaultSecurityState),
   {s1 = s2} + {s1 <> s2}.
 Proof.
-  intros [h1 o1] [h2 o2].
-  destruct (high_secret_eq_dec h1 h2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (low_observation_eq_dec o1 o2);
-    [subst | right; intros H; inv H; contradiction].
-  left. reflexivity.
+  decide equality.
+  - apply low_observation_eq_dec.
+  - apply high_secret_eq_dec.
 Qed.
 
 (** [MODEL]
@@ -815,14 +788,10 @@ Qed.
 Lemma low_public_eq_dec : forall (p1 p2 : LowPublic),
   {p1 = p2} + {p1 <> p2}.
 Proof.
-  intros [h1 s1 l1] [h2 s2 l2].
-  destruct (low_header_eq_dec h1 h2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (option_eq_dec PeanoNat.Nat.eq_dec s1 s2);
-    [subst | right; intros H; inv H; contradiction].
-  destruct (PeanoNat.Nat.eq_dec l1 l2);
-    [subst | right; intros H; inv H; contradiction].
-  left. reflexivity.
+  decide equality.
+  - apply Nat.eq_dec.
+  - decide equality; apply Nat.eq_dec.
+  - apply low_header_eq_dec.
 Qed.
 
 (** [MODEL]
