@@ -706,5 +706,125 @@
     "theorem": "steps_zeroized_to_unlocked_requires_auth",
     "allow_aeneas_axioms": false,
     "description": "マスター鍵消去状態から解錠状態到達における有効認証イベント必須性定理: Zeroized状態からUnlocked状態へ到達する任意の遷移トレースには健全なスロットに対する有効な解錠成功イベントが含まれていなければならないことを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "in_range_true",
+    "allow_aeneas_axioms": false,
+    "description": "閉区間内コードポイントに対する範囲判定関数の真偽性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "in_range_iff",
+    "allow_aeneas_axioms": false,
+    "description": "閉区間内コードポイントに対する範囲判定関数と同値命題のReflection補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "in_range_false",
+    "allow_aeneas_axioms": false,
+    "description": "閉区間外コードポイントに対する範囲判定関数の偽値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "is_disallowed_cp_eq",
+    "allow_aeneas_axioms": false,
+    "description": "総合禁止判定関数と禁止コードポイント命題のReflection補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "disallowed_cp_dec",
+    "allow_aeneas_axioms": false,
+    "description": "任意のコードポイントに対する禁止判定の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "単一コードポイントに対するCase Folding写像関数の不動点性(冪等性)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "small_noncharacter_false",
+    "allow_aeneas_axioms": false,
+    "description": "基本多言語面(BMP)低位コードポイントに対する非文字判定偽値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "folded_code_point_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "Case Folding写像後の小文字領域コードポイントに対する許可性(非禁止性)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_preserves_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "許可コードポイントに対するCase Folding写像の許可性保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_preserves_allowed_prop",
+    "allow_aeneas_axioms": false,
+    "description": "許可コードポイント命題に対するCase Folding写像の不変性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_string_length",
+    "allow_aeneas_axioms": false,
+    "description": "文字列に対するCase Folding写像適用時の長さ不変補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_string_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "文字列に対するCase Folding写像の不動点性(冪等性)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_allowed_folded",
+    "allow_aeneas_axioms": false,
+    "description": "文字列中の全文字許可性に対するCase Folding写像適用後の許可性保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_allowed_forall",
+    "allow_aeneas_axioms": false,
+    "description": "文字列全文字許可判定関数とリスト全要素非禁止命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_not_empty",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の非空性保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_length",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における入出力文字列の長さ保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_all_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字許可判定保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_no_disallowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字非禁止性保証定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedプロファイル正準化関数の冪等性主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_case_insensitive",
+    "allow_aeneas_axioms": false,
+    "description": "大文字小文字の差異しかない2つの入力文字列に対する正準化結果の一致性(大文字小文字不変性)主定理"
   }
 ]
