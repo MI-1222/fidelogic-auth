@@ -717,6 +717,7 @@ Definition pad_to_bucket (bucket_size : nat) (len : nat) : nat :=
   | O => len
   | S _ => (((len + bucket_size - 1) / bucket_size) * bucket_size)%nat
   end.
+Arguments pad_to_bucket : simpl never.
 
 (** [SPEC]
     パディングサイズが 0 の場合は元の長さを維持する補題。 *)
@@ -724,6 +725,7 @@ Lemma pad_to_bucket_zero : forall (len : nat),
   pad_to_bucket 0 len = len.
 Proof.
   intros len.
+  unfold pad_to_bucket.
   reflexivity.
 Qed.
 
@@ -992,22 +994,60 @@ Qed.
 Definition default_dummy_len : nat := 32%nat.
 
 (** [MODEL]
+    防護的評価におけるシステム既定のバケットパディングサイズ (バイト数)。
+    低位観測者 (攻撃者) が公開入力 pub_req_length に 0 などを指定して
+    pad_to_bucket 0 len = len とすることでバケットパディングを無効化し、
+    平文長や実鍵長を直接観測・漏洩させる情報漏洩攻撃を防止するため、
+    バケットサイズは外部公開入力に委ねず、システム既定の安全定数 (32バイト) を強制する。 *)
+Definition default_bucket_size : nat := 32%nat.
+Arguments default_bucket_size : simpl never.
+
+(** [SPEC]
+    システム既定バケットサイズが正の整数であることの健全性補題。 *)
+Lemma default_bucket_size_pos : (default_bucket_size > 0)%nat.
+Proof.
+  unfold default_bucket_size; lia.
+Qed.
+
+(** [MODEL]
+    公開入力長に対する安全バケットサイズクランプ関数 (clamp_bucket_size)。
+    外部要求長を受け入れるプロトコル拡張において、最小安全長 (default_bucket_size) を
+    下回る値 (0 や極小サイズ) が指定されても強制的に default_bucket_size でクランプし、
+    パディング無効化を防ぐ。 *)
+Definition clamp_bucket_size (req_len : nat) : nat :=
+  if (req_len <? default_bucket_size)%nat then default_bucket_size else req_len.
+
+(** [SPEC]
+    クランプされたバケットサイズが常に正の整数を維持することの健全性補題。 *)
+Lemma clamp_bucket_size_pos : forall (req_len : nat),
+  (clamp_bucket_size req_len > 0)%nat.
+Proof.
+  intros req_len.
+  unfold clamp_bucket_size.
+  destruct (req_len <? default_bucket_size)%nat eqn:E.
+  - apply default_bucket_size_pos.
+  - apply Nat.ltb_ge in E.
+    pose proof default_bucket_size_pos as Hpos.
+    lia.
+Qed.
+
+(** [MODEL]
     ダミー長を考慮したユーザー認証評価関数 (eval_auth_lookup)。
     Vaultが廃棄状態 (Zeroized) の場合は無効マジックエラー (Some Tlv_VaultError_InvalidMagic) を返し、
-    ダミー長 (dummy_len) をバケットサイズにパディングしたレスポンスを出力して、
+    ダミー長 (dummy_len) をシステム既定バケットサイズ (default_bucket_size) にパディングしたレスポンスを出力して、
     トラフィック解析防止 (Traffic Uniformity) を維持する。
     それ以外の状態 (Locked / Unlocking / Unlocked) では、
     ユーザーが存在し (sec_user_exists = true) かつマスター鍵が登録されている (Some k) 場合は、
     実際の鍵長 (length k) を採用し、ユーザーが存在しない場合やマスター鍵が未登録の場合は、
     固定ダミー長 (dummy_len) を採用する。
     防護的マスキングにより低位エラーを発生させず (None)、
-    指定バケットサイズにパディングしたレスポンスを出力することでユーザー列挙オラクルを排除する。 *)
+    システム既定バケットサイズに強制パディングしたレスポンスを出力することでユーザー列挙オラクルを排除する。 *)
 Definition eval_auth_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowObservation :=
   match input_fsm inp with
   | Zeroized =>
       mkLowObservation
         (Some Tlv_VaultError_InvalidMagic)
-        (pad_to_bucket (pub_req_length (input_public inp)) dummy_len)
+        (pad_to_bucket default_bucket_size dummy_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   | _ =>
@@ -1023,7 +1063,7 @@ Definition eval_auth_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowOb
       in
       mkLowObservation
         None
-        (pad_to_bucket (pub_req_length (input_public inp)) raw_len)
+        (pad_to_bucket default_bucket_size raw_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   end.
@@ -1038,7 +1078,7 @@ Definition eval_auth (inp : VaultSecurityInput) : LowObservation :=
     ダミー長を考慮したエントリ照会評価関数 (eval_entry_lookup)。
     Vaultマシンのコントロール状態 (input_fsm) と連動し、
     - 解錠状態 (Unlocked): エントリが存在する場合は平文長、非存在時は固定ダミー長を採用し、
-      指定バケットサイズにパディングしたレスポンス長を出力する (エラーなし: None)。
+      システム既定バケットサイズ (default_bucket_size) にパディングしたレスポンス長を出力する (エラーなし: None)。
     - 施錠・認証中状態 (Locked / Unlocking): 平文アクセスを完全に遮断し、施錠時拒絶エラー (Some Tlv_VaultError_InvalidFormat)
       およびダミー長 (dummy_len) を出力する。
     - 廃棄状態 (Zeroized): ゼロ消去・無効マジックエラー (Some Tlv_VaultError_InvalidMagic) およびダミー長 (dummy_len) を出力する。 *)
@@ -1050,19 +1090,19 @@ Definition eval_entry_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowO
                  else dummy_len in
       mkLowObservation
         None
-        (pad_to_bucket (pub_req_length (input_public inp)) len)
+        (pad_to_bucket default_bucket_size len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   | Zeroized =>
       mkLowObservation
         (Some Tlv_VaultError_InvalidMagic)
-        (pad_to_bucket (pub_req_length (input_public inp)) dummy_len)
+        (pad_to_bucket default_bucket_size dummy_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   | Locked | Unlocking =>
       mkLowObservation
         (Some Tlv_VaultError_InvalidFormat)
-        (pad_to_bucket (pub_req_length (input_public inp)) dummy_len)
+        (pad_to_bucket default_bucket_size dummy_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   end.
@@ -1099,11 +1139,11 @@ Definition vault_security_step (s : VaultSecurityState) (req : LowPublic) : Vaul
     評価後の低位観測値は常に完全に同値 (low_obs_eq) である。 *)
 Theorem auth_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_user_exists (input_high inp1)
      then match sec_master_key (input_high inp1) with Some k => length k | None => default_dummy_len end
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_user_exists (input_high inp2)
      then match sec_master_key (input_high inp2) with Some k => length k | None => default_dummy_len end
      else default_dummy_len) ->
@@ -1130,12 +1170,12 @@ Theorem user_existence_non_interference : forall (inp1 inp2 : VaultSecurityInput
   low_input_equiv inp1 inp2 ->
   sec_user_exists (input_high inp1) = true ->
   sec_user_exists (input_high inp2) = false ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (match sec_master_key (input_high inp1) with
      | Some k => length k
      | None => default_dummy_len
      end) =
-  pad_to_bucket (pub_req_length (input_public inp1)) default_dummy_len ->
+  pad_to_bucket default_bucket_size default_dummy_len ->
   low_obs_eq (eval_auth inp1) (eval_auth inp2).
 Proof.
   intros inp1 inp2 Hequiv Hu1 Hu2 Hpad.
@@ -1151,11 +1191,11 @@ Qed.
 Lemma user_perturbed_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   user_perturbed (input_high inp1) (input_high inp2) ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_user_exists (input_high inp1)
      then match sec_master_key (input_high inp1) with Some k => length k | None => default_dummy_len end
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_user_exists (input_high inp2)
      then match sec_master_key (input_high inp2) with Some k => length k | None => default_dummy_len end
      else default_dummy_len) ->
@@ -1173,8 +1213,8 @@ Theorem entry_lookup_non_interference : forall (inp1 inp2 : VaultSecurityInput) 
   low_input_equiv inp1 inp2 ->
   sec_entry_exists (input_high inp1) = true ->
   sec_entry_exists (input_high inp2) = false ->
-  pad_to_bucket (pub_req_length (input_public inp1)) (length (sec_plaintext (input_high inp1))) =
-  pad_to_bucket (pub_req_length (input_public inp1)) dummy_len ->
+  pad_to_bucket default_bucket_size (length (sec_plaintext (input_high inp1))) =
+  pad_to_bucket default_bucket_size dummy_len ->
   low_obs_eq (eval_entry_lookup inp1 dummy_len) (eval_entry_lookup inp2 dummy_len).
 Proof.
   intros inp1 inp2 dummy_len [Hequiv Hfsm] He1 He2 Hpad.
@@ -1197,8 +1237,8 @@ Theorem entry_existence_non_interference : forall (inp1 inp2 : VaultSecurityInpu
   low_input_equiv inp1 inp2 ->
   sec_entry_exists (input_high inp1) = true ->
   sec_entry_exists (input_high inp2) = false ->
-  pad_to_bucket (pub_req_length (input_public inp1)) (length (sec_plaintext (input_high inp1))) =
-  pad_to_bucket (pub_req_length (input_public inp1)) default_dummy_len ->
+  pad_to_bucket default_bucket_size (length (sec_plaintext (input_high inp1))) =
+  pad_to_bucket default_bucket_size default_dummy_len ->
   low_obs_eq (eval_query inp1) (eval_query inp2).
 Proof.
   intros inp1 inp2 Hequiv He1 He2 Hpad.
@@ -1213,11 +1253,11 @@ Qed.
 Lemma entry_perturbed_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   entry_perturbed (input_high inp1) (input_high inp2) ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp1)
      then length (sec_plaintext (input_high inp1))
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp2)
      then length (sec_plaintext (input_high inp2))
      else default_dummy_len) ->
@@ -1240,11 +1280,11 @@ Qed.
     評価後の低位観測値は常に完全に同値 (low_obs_eq) である。 *)
 Theorem vault_security_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp1)
      then length (sec_plaintext (input_high inp1))
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp2)
      then length (sec_plaintext (input_high inp2))
      else default_dummy_len) ->
@@ -1267,11 +1307,11 @@ Qed.
 Theorem vault_step_non_interference : forall (s1 s2 : VaultSecurityState) (req : LowPublic),
   low_equiv s1 s2 ->
   vms_state (state_fsm s1) = vms_state (state_fsm s2) ->
-  pad_to_bucket (pub_req_length req)
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (state_high s1)
      then length (sec_plaintext (state_high s1))
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length req)
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (state_high s2)
      then length (sec_plaintext (state_high s2))
      else default_dummy_len) ->
@@ -1294,11 +1334,11 @@ Qed.
     ユーザー存在フラグやマスター鍵の真偽に依存しない。 *)
 Corollary no_user_enumeration_oracle : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_user_exists (input_high inp1)
      then match sec_master_key (input_high inp1) with Some k => length k | None => default_dummy_len end
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_user_exists (input_high inp2)
      then match sec_master_key (input_high inp2) with Some k => length k | None => default_dummy_len end
      else default_dummy_len) ->
@@ -1315,11 +1355,11 @@ Qed.
     低位公開入力およびFSM状態が等しい場合、パディング長一致条件下で観測されるエラー型およびレスポンス長はエントリ存在フラグの真偽に依存しない。 *)
 Corollary no_entry_existence_oracle : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp1)
      then length (sec_plaintext (input_high inp1))
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp2)
      then length (sec_plaintext (input_high inp2))
      else default_dummy_len) ->
@@ -1337,11 +1377,11 @@ Qed.
     同一バケット境界にパディングされたレスポンス長は、平文の実長に依存せず完全に一致する。 *)
 Corollary no_length_oracle : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp1)
      then length (sec_plaintext (input_high inp1))
      else default_dummy_len) =
-  pad_to_bucket (pub_req_length (input_public inp1))
+  pad_to_bucket default_bucket_size
     (if sec_entry_exists (input_high inp2)
      then length (sec_plaintext (input_high inp2))
      else default_dummy_len) ->
@@ -1350,6 +1390,55 @@ Proof.
   intros inp1 inp2 Hequiv Hpad.
   destruct (vault_security_non_interference inp1 inp2 Hequiv Hpad) as [_ [Hlen _]].
   exact Hlen.
+Qed.
+
+(** [SPEC]
+    バケットパディング無効化攻撃耐性補題 (eval_auth_bucket_size_constant):
+    公開要求長 pub_req_length が 0 であるリクエストを攻撃者が与えた場合でも、
+    eval_auth_lookup で適用されるバケットサイズはシステム既定の安全定数 (default_bucket_size) に
+    強制され、0 に縮退して生平文長をそのまま露出することがないことを保証する。 *)
+Lemma eval_auth_bucket_size_constant : forall (inp : VaultSecurityInput) (dummy_len : nat),
+  obs_length (eval_auth_lookup inp dummy_len) =
+  match input_fsm inp with
+  | Zeroized => pad_to_bucket default_bucket_size dummy_len
+  | _ =>
+      let raw_len :=
+        if sec_user_exists (input_high inp)
+        then
+          match sec_master_key (input_high inp) with
+          | Some k => length k
+          | None   => dummy_len
+          end
+        else
+          dummy_len
+      in
+      pad_to_bucket default_bucket_size raw_len
+  end.
+Proof.
+  intros inp dummy_len.
+  unfold eval_auth_lookup.
+  destruct (input_fsm inp); reflexivity.
+Qed.
+
+(** [SPEC]
+    エントリ照会におけるバケットパディング無効化攻撃耐性補題 (eval_entry_bucket_size_constant):
+    公開要求長 pub_req_length の値によらず、eval_entry_lookup で適用されるバケットサイズは
+    常にシステム既定定数 (default_bucket_size) に強制される。 *)
+Lemma eval_entry_bucket_size_constant : forall (inp : VaultSecurityInput) (dummy_len : nat),
+  obs_length (eval_entry_lookup inp dummy_len) =
+  match input_fsm inp with
+  | Unlocked =>
+      let len := if sec_entry_exists (input_high inp)
+                 then length (sec_plaintext (input_high inp))
+                 else dummy_len in
+      pad_to_bucket default_bucket_size len
+  | Zeroized | Locked | Unlocking =>
+      pad_to_bucket default_bucket_size dummy_len
+  end.
+Proof.
+  intros inp dummy_len.
+  unfold eval_entry_lookup.
+  destruct (input_fsm inp); reflexivity.
 Qed.
 
 

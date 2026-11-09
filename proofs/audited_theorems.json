@@ -1672,5 +1672,29 @@
     "theorem": "fsm_confidentiality_bridge",
     "allow_aeneas_axioms": false,
     "description": "EnvelopeFsm と NonInterference の統合機密性架橋定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "default_bucket_size_pos",
+    "allow_aeneas_axioms": false,
+    "description": "システム既定バケットサイズが正の整数であることの健全性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "clamp_bucket_size_pos",
+    "allow_aeneas_axioms": false,
+    "description": "クランプされたバケットサイズが常に正の整数を維持することの健全性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "eval_auth_bucket_size_constant",
+    "allow_aeneas_axioms": false,
+    "description": "認証照会におけるバケットパディング無効化攻撃耐性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "eval_entry_bucket_size_constant",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ照会におけるバケットパディング無効化攻撃耐性補題"
   }
 ]
