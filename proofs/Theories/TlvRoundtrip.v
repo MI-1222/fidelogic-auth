@@ -810,6 +810,151 @@ Proof.
 Qed.
 
 (** [MODEL]
+    1バイトプレフィックスと残余スライスの分割結合関係。
+    スライスの先頭要素へのインデックスアクセスと 1 以降の RangeFrom 抽出契約をモデル化する。 *)
+Record slice_split_at_1 (bytes : slice u8) (b0 : u8) (rest : slice u8) : Type :=
+mkslice_split_at_1 {
+  split_1_len_ge_1 :
+    (slice_len bytes s< 1%usize) = false;
+  split_1_idx_0 :
+    slice_index_usize bytes 0%usize = Ok b0;
+  split_1_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      bytes {| core_ops_range_RangeFrom_start := 1%usize |} = Ok rest;
+}.
+
+(** [MODEL]
+    2バイトプレフィックスと残余スライスの分割結合関係。
+    スライスの先頭2要素へのインデックスアクセスと 2 以降の RangeFrom 抽出契約をモデル化する。 *)
+Record slice_split_at_2 (bytes : slice u8) (b0 b1 : u8) (rest : slice u8) : Type :=
+mkslice_split_at_2 {
+  split_2_len_ge_2 :
+    (slice_len bytes s< 2%usize) = false;
+  split_2_idx_0 :
+    slice_index_usize bytes 0%usize = Ok b0;
+  split_2_idx_1 :
+    slice_index_usize bytes 1%usize = Ok b1;
+  split_2_rest :
+    core_slice_index_Slice_index
+      (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+      bytes {| core_ops_range_RangeFrom_start := 2%usize |} = Ok rest;
+}.
+
+(** [MODEL]
+    スロットセクション全体のシリアライズ関係。
+    スロット数 (1バイト) のプレフィックス、必要長判定、およびスロット列の直列化を束ねる階層化仕様。 *)
+Record tlv_is_serialized_slots_section
+  (slots : list tlv_KekSlotEntry_t) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_slots_section {
+  ser_slots_sec_count_u8 : u8;
+  ser_slots_sec_data_slice : slice u8;
+  ser_slots_sec_split :
+    slice_split_at_1 bytes ser_slots_sec_count_u8 ser_slots_sec_data_slice;
+
+  ser_slots_sec_count_usize : usize;
+  ser_slots_sec_cast_count :
+    scalar_cast U8 Usize ser_slots_sec_count_u8 = Ok ser_slots_sec_count_usize;
+
+  ser_slots_sec_count_nat :
+    usize_to_nat ser_slots_sec_count_usize = length slots;
+
+  ser_slots_sec_needed_len : usize;
+  ser_slots_sec_mul_needed_len :
+    core_num_Usize_saturating_mul ser_slots_sec_count_usize tlv_KEK_SLOT_HEADER_LEN =
+      ser_slots_sec_needed_len;
+
+  ser_slots_sec_len_ge_needed :
+    (slice_len ser_slots_sec_data_slice s< ser_slots_sec_needed_len) = false;
+
+  ser_slots_sec_chain :
+    tlv_is_serialized_slots slots ser_slots_sec_data_slice rest;
+}.
+
+(** [MODEL]
+    レコードセクション全体のシリアライズ関係。
+    レコード数 (2バイト big-endian) のプレフィックス、必要長判定、およびレコード列の直列化を束ねる階層化仕様。 *)
+Record tlv_is_serialized_records_section
+  (records : list tlv_TlvRecord_t) (bytes rest : slice u8) : Type :=
+mktlv_is_serialized_records_section {
+  ser_records_sec_b0 : u8;
+  ser_records_sec_b1 : u8;
+  ser_records_sec_data_slice : slice u8;
+  ser_records_sec_split :
+    slice_split_at_2 bytes ser_records_sec_b0 ser_records_sec_b1 ser_records_sec_data_slice;
+
+  ser_records_sec_count_usize : usize;
+  ser_records_sec_cast_count :
+    scalar_cast U16 Usize
+      (core_num_U16_from_be_bytes (mk_array 2%usize [ser_records_sec_b0; ser_records_sec_b1])) =
+      Ok ser_records_sec_count_usize;
+
+  ser_records_sec_count_nat :
+    usize_to_nat ser_records_sec_count_usize = length records;
+
+  ser_records_sec_needed_len : usize;
+  ser_records_sec_mul_needed_len :
+    core_num_Usize_saturating_mul ser_records_sec_count_usize tlv_TLV_HEADER_LEN =
+      ser_records_sec_needed_len;
+
+  ser_records_sec_len_ge_needed :
+    (slice_len ser_records_sec_data_slice s< ser_records_sec_needed_len) = false;
+
+  ser_records_sec_chain :
+    tlv_is_serialized_records records ser_records_sec_data_slice rest;
+}.
+
+(** [MODEL]
+    未知タグと既知タグが混在する Vault 構造全体に対する構造化シリアライズ結果仕様。
+    ヘッダーチェーン、スロットセクション、およびレコードセクションの3階層で構成される。 *)
+Record tlv_is_serialized_vault_structured
+  (v : tlv_Vault_t) (bytes : slice u8) : Type :=
+mktlv_is_serialized_vault_structured {
+  ser_vault_struct_rest_header : slice u8;
+  ser_vault_struct_header :
+    tlv_is_serialized_header_chain v.(tlv_Vault_header) bytes ser_vault_struct_rest_header;
+
+  ser_vault_struct_rest_slots : slice u8;
+  ser_vault_struct_slots_sec :
+    tlv_is_serialized_slots_section v.(tlv_Vault_slots) ser_vault_struct_rest_header ser_vault_struct_rest_slots;
+
+  ser_vault_struct_records_sec :
+    tlv_is_serialized_records_section v.(tlv_Vault_records) ser_vault_struct_rest_slots slice_empty;
+}.
+
+(** [SPEC]
+    構造化 Vault シリアライズ仕様に対する完全ラウンドトリップ定理。
+    ヘッダー・スロット・レコードの各階層的セクション仕様を満たすバイト列から、
+    元の Vault 構造体 v と空の残余スライスが完全に復元される。 *)
+Theorem tlv_vault_roundtrip_structured :
+  forall (v : tlv_Vault_t) (bytes : slice u8),
+    tlv_is_serialized_vault_structured v bytes ->
+    tlv_deserialize bytes = Ok (Core_result_Result_Ok (v, slice_empty)).
+Proof.
+  intros v bytes Hstruct.
+  destruct Hstruct as [rest1 Hhdr rest3 Hslots_sec Hrecords_sec].
+  destruct Hslots_sec as [
+    slot_count_u8 rest2 [Hlen1 Hidx_slot_count Hext_rest2]
+    slot_count_usize Hcast_slot_count Hnat_slot_count
+    needed_slot_len Hmul_slot_len Hlen_slots
+    Hslots
+  ].
+  destruct Hrecords_sec as [
+    b0 b1 rest4 [Hlen3 Hidx_b0 Hidx_b1 Hext_rest4]
+    rec_count_usize Hcast_rec_count Hnat_rec_count
+    needed_record_len Hmul_rec_len Hlen_records
+    Hrecords
+  ].
+  pose proof (tlv_header_chain_roundtrip _ _ _ Hhdr) as Hhdr_rt.
+  pose proof (tlv_slots_roundtrip _ _ _ Hslots) as Hslots_rt.
+  pose proof (tlv_records_roundtrip _ _ _ Hrecords) as Hrecords_rt.
+  unfold tlv_deserialize.
+  repeat tlv_monad_step.
+  rewrite tlv_vault_eta.
+  reflexivity.
+Qed.
+
+(** [MODEL]
     未知タグと既知タグが混在する Vault 構造全体に対するシリアライズ結果バイト列 bytes の振る舞い規定。 *)
 Record tlv_is_serialized_vault
   (v : tlv_Vault_t) (bytes : slice u8) : Type :=
@@ -890,13 +1035,11 @@ mktlv_is_serialized_vault {
 }.
 
 (** [SPEC]
-    最上位定理: 未知タグと既知タグが混在する Vault 構造全体に対する完全ラウンドトリップ定理。
-    シリアライズ仕様を満たすバイト列 bytes に対し、tlv_deserialize を実行すると、
-    元の Vault 構造体 v と空の残余スライスが完全に復元される。 *)
-Theorem tlv_vault_roundtrip :
+    フラットな Vault シリアライズ関係から構造化シリアライズ関係への射影・変換補題。 *)
+Lemma tlv_is_serialized_vault_to_structured :
   forall (v : tlv_Vault_t) (bytes : slice u8),
     tlv_is_serialized_vault v bytes ->
-    tlv_deserialize bytes = Ok (Core_result_Result_Ok (v, slice_empty)).
+    tlv_is_serialized_vault_structured v bytes.
 Proof.
   intros v bytes Hser.
   destruct Hser as [
@@ -908,13 +1051,113 @@ Proof.
     rest4 Hext_rest4 needed_record_len Hmul_rec_len Hlen_records
     Hrecords
   ].
-  pose proof (tlv_header_chain_roundtrip _ _ _ Hhdr) as Hhdr_rt.
-  pose proof (tlv_slots_roundtrip _ _ _ Hslots) as Hslots_rt.
-  pose proof (tlv_records_roundtrip _ _ _ Hrecords) as Hrecords_rt.
-  unfold tlv_deserialize.
-  repeat tlv_monad_step.
-  rewrite tlv_vault_eta.
-  reflexivity.
+  refine {|
+    ser_vault_struct_rest_header := rest1;
+    ser_vault_struct_header := Hhdr;
+    ser_vault_struct_rest_slots := rest3;
+    ser_vault_struct_slots_sec := {|
+      ser_slots_sec_count_u8 := slot_count_u8;
+      ser_slots_sec_data_slice := rest2;
+      ser_slots_sec_split := {|
+        split_1_len_ge_1 := Hlen1;
+        split_1_idx_0 := Hidx_slot_count;
+        split_1_rest := Hext_rest2
+      |};
+      ser_slots_sec_count_usize := slot_count_usize;
+      ser_slots_sec_cast_count := Hcast_slot_count;
+      ser_slots_sec_count_nat := Hnat_slot_count;
+      ser_slots_sec_needed_len := needed_slot_len;
+      ser_slots_sec_mul_needed_len := Hmul_slot_len;
+      ser_slots_sec_len_ge_needed := Hlen_slots;
+      ser_slots_sec_chain := Hslots
+    |};
+    ser_vault_struct_records_sec := {|
+      ser_records_sec_b0 := b0;
+      ser_records_sec_b1 := b1;
+      ser_records_sec_data_slice := rest4;
+      ser_records_sec_split := {|
+        split_2_len_ge_2 := Hlen3;
+        split_2_idx_0 := Hidx_b0;
+        split_2_idx_1 := Hidx_b1;
+        split_2_rest := Hext_rest4
+      |};
+      ser_records_sec_count_usize := rec_count_usize;
+      ser_records_sec_cast_count := Hcast_rec_count;
+      ser_records_sec_count_nat := Hnat_rec_count;
+      ser_records_sec_needed_len := needed_record_len;
+      ser_records_sec_mul_needed_len := Hmul_rec_len;
+      ser_records_sec_len_ge_needed := Hlen_records;
+      ser_records_sec_chain := Hrecords
+    |}
+  |}.
+Qed.
+
+(** [SPEC]
+    構造化 Vault シリアライズ関係からフラットなシリアライズ関係への復元・変換補題。 *)
+Lemma tlv_is_serialized_vault_of_structured :
+  forall (v : tlv_Vault_t) (bytes : slice u8),
+    tlv_is_serialized_vault_structured v bytes ->
+    tlv_is_serialized_vault v bytes.
+Proof.
+  intros v bytes Hstruct.
+  destruct Hstruct as [rest1 Hhdr rest3 Hslots_sec Hrecords_sec].
+  destruct Hslots_sec as [
+    slot_count_u8 rest2 [Hlen1 Hidx_slot_count Hext_rest2]
+    slot_count_usize Hcast_slot_count Hnat_slot_count
+    needed_slot_len Hmul_slot_len Hlen_slots
+    Hslots
+  ].
+  destruct Hrecords_sec as [
+    b0 b1 rest4 [Hlen3 Hidx_b0 Hidx_b1 Hext_rest4]
+    rec_count_usize Hcast_rec_count Hnat_rec_count
+    needed_record_len Hmul_rec_len Hlen_records
+    Hrecords
+  ].
+  refine {|
+    ser_vault_rest1 := rest1;
+    ser_vault_header := Hhdr;
+    ser_vault_rest1_len_ge_1 := Hlen1;
+    ser_vault_slot_count_u8 := slot_count_u8;
+    ser_vault_idx_slot_count := Hidx_slot_count;
+    ser_vault_slot_count_usize := slot_count_usize;
+    ser_vault_cast_slot_count := Hcast_slot_count;
+    ser_vault_slot_count_nat := Hnat_slot_count;
+    ser_vault_rest2 := rest2;
+    ser_vault_extract_rest2 := Hext_rest2;
+    ser_vault_needed_slot_len := needed_slot_len;
+    ser_vault_mul_needed_slot_len := Hmul_slot_len;
+    ser_vault_rest2_len_ge_slots := Hlen_slots;
+    ser_vault_rest3 := rest3;
+    ser_vault_slots_chain := Hslots;
+    ser_vault_rest3_len_ge_2 := Hlen3;
+    ser_vault_b0 := b0;
+    ser_vault_b1 := b1;
+    ser_vault_idx_b0 := Hidx_b0;
+    ser_vault_idx_b1 := Hidx_b1;
+    ser_vault_record_count_usize := rec_count_usize;
+    ser_vault_cast_record_count := Hcast_rec_count;
+    ser_vault_record_count_nat := Hnat_rec_count;
+    ser_vault_rest4 := rest4;
+    ser_vault_extract_rest4 := Hext_rest4;
+    ser_vault_needed_record_len := needed_record_len;
+    ser_vault_mul_needed_record_len := Hmul_rec_len;
+    ser_vault_rest4_len_ge_records := Hlen_records;
+    ser_vault_records_chain := Hrecords
+  |}.
+Qed.
+
+(** [SPEC]
+    最上位定理: 未知タグと既知タグが混在する Vault 構造全体に対する完全ラウンドトリップ定理。
+    シリアライズ仕様を満たすバイト列 bytes に対し、tlv_deserialize を実行すると、
+    元の Vault 構造体 v と空の残余スライスが完全に復元される。 *)
+Theorem tlv_vault_roundtrip :
+  forall (v : tlv_Vault_t) (bytes : slice u8),
+    tlv_is_serialized_vault v bytes ->
+    tlv_deserialize bytes = Ok (Core_result_Result_Ok (v, slice_empty)).
+Proof.
+  intros v bytes Hser.
+  apply tlv_vault_roundtrip_structured.
+  apply (tlv_is_serialized_vault_to_structured v bytes Hser).
 Qed.
 
 (** ** 未知タグ構造保存 (UnknownTag Preservation) の検証。 *)
