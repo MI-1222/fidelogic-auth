@@ -5,6 +5,7 @@
 
 From Stdlib Require Import Bool.
 From Stdlib Require Import List.
+Import ListNotations.
 From Stdlib Require Import ZArith.ZArith.
 From Stdlib Require Import Arith.PeanoNat.
 From Fidelogic Require Import Tactics.
@@ -155,6 +156,27 @@ Proof.
   - split; intro H.
     + discriminate H.
     + destruct H as [H | [H | H]]; inversion H.
+Qed.
+
+(** [SPEC]
+    Argon2id スロット識別子が有効であることを示す補題。 *)
+Lemma valid_slot_id_argon2id : valid_slot_id slot_argon2id.
+Proof.
+  left. reflexivity.
+Qed.
+
+(** [SPEC]
+    WebAuthn PRF スロット識別子が有効であることを示す補題。 *)
+Lemma valid_slot_id_prf : valid_slot_id slot_prf.
+Proof.
+  right. left. reflexivity.
+Qed.
+
+(** [SPEC]
+    リカバリーコード スロット識別子が有効であることを示す補題。 *)
+Lemma valid_slot_id_recovery : valid_slot_id slot_recovery.
+Proof.
+  right. right. reflexivity.
 Qed.
 
 (** [MODEL]
@@ -785,3 +807,133 @@ Proof.
   reflexivity.
 Qed.
 
+(** [SPEC]
+    DEKライフサイクルにおける多段階状態遷移を表す帰納的関係述語。
+    入力イベント列 (トレース) を先頭から順次消費しながら状態を更新する。 *)
+Inductive steps (slots : KekSlots) : VaultState -> list VaultEvent -> VaultState -> Prop :=
+  | StepsNil : forall (s : VaultState),
+      steps slots s [] s
+  | StepsCons : forall (s1 s2 s3 : VaultState) (ev : VaultEvent) (trace : list VaultEvent),
+      step slots s1 ev s2 ->
+      steps slots s2 trace s3 ->
+      steps slots s1 (ev :: trace) s3.
+
+(** [SPEC]
+    多段階状態遷移 steps の反射性補題。
+    空のイベント列において状態は変化しない。 *)
+Lemma steps_refl : forall (slots : KekSlots) (s : VaultState),
+  steps slots s [] s.
+Proof.
+  intros slots s.
+  apply StepsNil.
+Qed.
+
+(** [SPEC]
+    単一ステップ遷移 step を長さ1のイベント列による多段階遷移 steps へ持ち上げる補題。 *)
+Lemma steps_step : forall (slots : KekSlots) (s1 : VaultState) (ev : VaultEvent) (s2 : VaultState),
+  step slots s1 ev s2 ->
+  steps slots s1 [ev] s2.
+Proof.
+  intros slots s1 ev s2 Hstep.
+  apply (StepsCons slots s1 s2 s2 ev [] Hstep (StepsNil slots s2)).
+Qed.
+
+(** [SPEC]
+    多段階状態遷移 steps の推移性 (トレース連結) 補題。
+    2つのイベント列を連結した実行列が多段階遷移を満たすことを示す。 *)
+Lemma steps_trans : forall (slots : KekSlots) (s1 s2 s3 : VaultState) (tr1 tr2 : list VaultEvent),
+  steps slots s1 tr1 s2 ->
+  steps slots s2 tr2 s3 ->
+  steps slots s1 (tr1 ++ tr2) s3.
+Proof.
+  intros slots s1 s2 s3 tr1 tr2 H1 H2.
+  induction H1 as [s | s_a s_b s_c ev tr Hstep Hsteps IH].
+  - cbn. exact H2.
+  - cbn.
+    apply (StepsCons slots s_a s_b s3 ev (tr ++ tr2) Hstep (IH H2)).
+Qed.
+
+(** [MODEL]
+    ある初期状態から目標状態へ到達可能であることを表す到達可能性述語。 *)
+Definition can_reach (slots : KekSlots) (from to : VaultState) : Prop :=
+  exists (trace : list VaultEvent), steps slots from trace to.
+
+(** [SPEC]
+    指定されたスロットIDが有効範囲内かつ健全であるならば、
+    EventStartUnlock と EventUnlockSuccess からなる2ステップトレースによって
+    Locked状態からUnlocked状態へ到達可能であることを示す補題。 *)
+Lemma slot_unlock_trace : forall (slots : KekSlots) (id : SlotId),
+  valid_slot_id id ->
+  slot_valid slots id ->
+  steps slots Locked [EventStartUnlock id; EventUnlockSuccess id] Unlocked.
+Proof.
+  intros slots id Hvalid Hslot.
+  apply (StepsCons slots Locked Unlocking Unlocked (EventStartUnlock id) [EventUnlockSuccess id]).
+  - apply StepStartUnlock. exact Hvalid.
+  - apply (StepsCons slots Unlocking Unlocked Unlocked (EventUnlockSuccess id) []).
+    + apply StepUnlockSuccess. exact Hslot.
+    + apply StepsNil.
+Qed.
+
+(** [SPEC]
+    Argon2idスロットが健全であるならば、Locked状態からUnlocked状態へ2ステップで到達可能であることを示す補題。 *)
+Lemma slot_unlock_argon2id : forall (slots : KekSlots),
+  slot_valid slots slot_argon2id ->
+  steps slots Locked [EventStartUnlock slot_argon2id; EventUnlockSuccess slot_argon2id] Unlocked.
+Proof.
+  intros slots Hslot.
+  apply slot_unlock_trace.
+  - apply valid_slot_id_argon2id.
+  - exact Hslot.
+Qed.
+
+(** [SPEC]
+    WebAuthn PRFスロットが健全であるならば、Locked状態からUnlocked状態へ2ステップで到達可能であることを示す補題。 *)
+Lemma slot_unlock_prf : forall (slots : KekSlots),
+  slot_valid slots slot_prf ->
+  steps slots Locked [EventStartUnlock slot_prf; EventUnlockSuccess slot_prf] Unlocked.
+Proof.
+  intros slots Hslot.
+  apply slot_unlock_trace.
+  - apply valid_slot_id_prf.
+  - exact Hslot.
+Qed.
+
+(** [SPEC]
+    リカバリーコードスロットが健全であるならば、Locked状態からUnlocked状態へ2ステップで到達可能であることを示す補題。 *)
+Lemma slot_unlock_recovery : forall (slots : KekSlots),
+  slot_valid slots slot_recovery ->
+  steps slots Locked [EventStartUnlock slot_recovery; EventUnlockSuccess slot_recovery] Unlocked.
+Proof.
+  intros slots Hslot.
+  apply slot_unlock_trace.
+  - apply valid_slot_id_recovery.
+  - exact Hslot.
+Qed.
+
+(** [SPEC]
+    スロット多重化健全性定理 (Slot Multiplexing Completeness Theorem)。
+    3つのKEKスロット (Argon2id, WebAuthn PRF, リカバリーコード) のうちいずれか1つが健全 (slot_valid) であれば、
+    実行時マシンは合法的状態遷移列 (steps) により Locked 状態から Unlocked 状態へ到達可能であることを保証する。 *)
+Theorem slot_multiplexing_soundness : forall (slots : KekSlots),
+  any_slot_valid slots ->
+  exists (trace : list VaultEvent), steps slots Locked trace Unlocked.
+Proof.
+  intros slots Hany.
+  apply any_slot_valid_exists_eq in Hany.
+  destruct Hany as [id [Hvalid Hslot]].
+  exists [EventStartUnlock id; EventUnlockSuccess id].
+  apply (slot_unlock_trace slots id Hvalid Hslot).
+Qed.
+
+(** [SPEC]
+    到達可能性述語 can_reach を用いたスロット多重化健全性定理の系。
+    いずれかのスロットが健全であれば can_reach により Locked から Unlocked への到達可能性が成立する。 *)
+Corollary slot_multiplexing_can_reach : forall (slots : KekSlots),
+  any_slot_valid slots ->
+  can_reach slots Locked Unlocked.
+Proof.
+  intros slots Hany.
+  unfold can_reach.
+  apply (slot_multiplexing_soundness slots Hany).
+Qed.

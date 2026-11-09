@@ -490,5 +490,77 @@
     "theorem": "safe_state_init",
     "allow_aeneas_axioms": false,
     "description": "初期マシン状態 (Locked かつ平文DEK None) は常に SafeState を満たすことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_argon2id",
+    "allow_aeneas_axioms": false,
+    "description": "Argon2id スロット識別子が有効であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_prf",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRF スロット識別子が有効であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_recovery",
+    "allow_aeneas_axioms": false,
+    "description": "リカバリーコード スロット識別子が有効であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_refl",
+    "allow_aeneas_axioms": false,
+    "description": "多段階状態遷移 steps の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_step",
+    "allow_aeneas_axioms": false,
+    "description": "単一ステップ遷移 step を長さ1のイベント列による多段階遷移 steps へ持ち上げる補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_trans",
+    "allow_aeneas_axioms": false,
+    "description": "多段階状態遷移 steps の推移性 (トレース連結) 補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_trace",
+    "allow_aeneas_axioms": false,
+    "description": "有効かつ健全なスロットIDに対する2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_argon2id",
+    "allow_aeneas_axioms": false,
+    "description": "Argon2idスロットが健全な場合の2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_prf",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRFスロットが健全な場合の2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_recovery",
+    "allow_aeneas_axioms": false,
+    "description": "リカバリーコードスロットが健全な場合の2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_multiplexing_soundness",
+    "allow_aeneas_axioms": false,
+    "description": "スロット多重化健全性定理: 3スロット中いずれか1つが健全であればLockedからUnlockedへ到達可能であることを保証する完全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_multiplexing_can_reach",
+    "allow_aeneas_axioms": false,
+    "description": "到達可能性述語 can_reach を用いたスロット多重化健全性定理の系"
   }
 ]
