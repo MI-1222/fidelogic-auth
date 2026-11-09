@@ -581,3 +581,207 @@ Proof.
   - left. exists id0. split; [reflexivity | split; [reflexivity | exact Hval]].
   - right. split; reflexivity.
 Qed.
+
+(** [MODEL]
+    暗号化Vaultマシンの安全状態を表すブール判定関数。
+    Locked, Unlocking, Zeroized 状態において平文DEKが None であることを検査する。
+    Unlocked 状態では平文DEKの有無を問わず true を返す。 *)
+Definition safe_stateb (m : VaultMachineState) : bool :=
+  match m.(vms_state) with
+  | Locked => match m.(vms_dek) with None => true | Some _ => false end
+  | Unlocking => match m.(vms_dek) with None => true | Some _ => false end
+  | Zeroized => match m.(vms_dek) with None => true | Some _ => false end
+  | Unlocked => true
+  end.
+
+(** [SPEC]
+    暗号化Vaultマシンの安全状態を表す述語。
+    Locked, Unlocking, Zeroized 状態において平文DEKが None であることを構造的に保証する。
+    Unlocked 状態では平文DEKの保持が許容される。 *)
+Definition SafeState (m : VaultMachineState) : Prop :=
+  match m.(vms_state) with
+  | Locked => m.(vms_dek) = None
+  | Unlocking => m.(vms_dek) = None
+  | Zeroized => m.(vms_dek) = None
+  | Unlocked => True
+  end.
+
+(** [SPEC]
+    SafeState の別名表記 (スネークケース表記)。 *)
+Notation safe_state := SafeState.
+
+(** [SPEC]
+    safe_stateb と SafeState の同値性補題。 *)
+Lemma safe_stateb_eq : forall (m : VaultMachineState),
+  safe_stateb m = true <-> SafeState m.
+Proof.
+  intro m.
+  destruct m as [s dek].
+  unfold safe_stateb, SafeState.
+  destruct s; cbn.
+  - destruct dek; split; intro H; try reflexivity; try discriminate H.
+  - destruct dek; split; intro H; try reflexivity; try discriminate H.
+  - split; intro H; [exact I | reflexivity].
+  - destruct dek; split; intro H; try reflexivity; try discriminate H.
+Qed.
+
+(** [SPEC]
+    SafeState の決定可能性補題。 *)
+Lemma safe_state_dec : forall (m : VaultMachineState),
+  {SafeState m} + {~ SafeState m}.
+Proof.
+  intro m.
+  destruct (safe_stateb m) eqn:Eb.
+  - left. apply safe_stateb_eq. exact Eb.
+  - right. intro H.
+    apply safe_stateb_eq in H.
+    rewrite H in Eb.
+    discriminate Eb.
+Qed.
+
+(** [SPEC]
+    Locked状態において SafeState が成立しているならば平文DEKは None であることを示す補題。 *)
+Lemma safe_state_locked : forall (m : VaultMachineState),
+  m.(vms_state) = Locked ->
+  SafeState m ->
+  m.(vms_dek) = None.
+Proof.
+  intros [s dek] Hs Hsafe.
+  cbn in Hs. subst s.
+  exact Hsafe.
+Qed.
+
+(** [SPEC]
+    Unlocking状態において SafeState が成立しているならば平文DEKは None であることを示す補題。 *)
+Lemma safe_state_unlocking : forall (m : VaultMachineState),
+  m.(vms_state) = Unlocking ->
+  SafeState m ->
+  m.(vms_dek) = None.
+Proof.
+  intros [s dek] Hs Hsafe.
+  cbn in Hs. subst s.
+  exact Hsafe.
+Qed.
+
+(** [SPEC]
+    Zeroized状態において SafeState が成立しているならば平文DEKは None であることを示す補題。 *)
+Lemma safe_state_zeroized : forall (m : VaultMachineState),
+  m.(vms_state) = Zeroized ->
+  SafeState m ->
+  m.(vms_dek) = None.
+Proof.
+  intros [s dek] Hs Hsafe.
+  cbn in Hs. subst s.
+  exact Hsafe.
+Qed.
+
+(** [SPEC]
+    Unlocked状態においては常に SafeState が成立することを示す補題。 *)
+Lemma safe_state_unlocked : forall (m : VaultMachineState),
+  m.(vms_state) = Unlocked ->
+  SafeState m.
+Proof.
+  intros [s dek] Hs.
+  cbn in Hs. subst s.
+  exact I.
+Qed.
+
+(** [SPEC]
+    Locked または Zeroized 状態において SafeState が成立しているならば平文DEKは None であることを示す補題。 *)
+Lemma safe_state_locked_or_zeroized : forall (m : VaultMachineState),
+  (m.(vms_state) = Locked \/ m.(vms_state) = Zeroized) ->
+  SafeState m ->
+  m.(vms_dek) = None.
+Proof.
+  intros m [Hl | Hz] Hsafe.
+  - apply (safe_state_locked m Hl Hsafe).
+  - apply (safe_state_zeroized m Hz Hsafe).
+Qed.
+
+(** [SPEC]
+    Locked状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題。 *)
+Lemma safe_state_observe_locked : forall (m : VaultMachineState),
+  SafeState m ->
+  m.(vms_state) = Locked ->
+  observe_dek m = None.
+Proof.
+  intros m Hsafe Hs.
+  unfold observe_dek.
+  apply (safe_state_locked m Hs Hsafe).
+Qed.
+
+(** [SPEC]
+    Unlocking状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題。 *)
+Lemma safe_state_observe_unlocking : forall (m : VaultMachineState),
+  SafeState m ->
+  m.(vms_state) = Unlocking ->
+  observe_dek m = None.
+Proof.
+  intros m Hsafe Hs.
+  unfold observe_dek.
+  apply (safe_state_unlocking m Hs Hsafe).
+Qed.
+
+(** [SPEC]
+    Zeroized状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題。 *)
+Lemma safe_state_observe_zeroized : forall (m : VaultMachineState),
+  SafeState m ->
+  m.(vms_state) = Zeroized ->
+  observe_dek m = None.
+Proof.
+  intros m Hsafe Hs.
+  unfold observe_dek.
+  apply (safe_state_zeroized m Hs Hsafe).
+Qed.
+
+(** [SPEC]
+    Locked または Zeroized 状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題。 *)
+Lemma safe_state_observe_locked_or_zeroized : forall (m : VaultMachineState),
+  SafeState m ->
+  (m.(vms_state) = Locked \/ m.(vms_state) = Zeroized) ->
+  observe_dek m = None.
+Proof.
+  intros m Hsafe [Hl | Hz].
+  - apply (safe_state_observe_locked m Hsafe Hl).
+  - apply (safe_state_observe_zeroized m Hsafe Hz).
+Qed.
+
+(** [SPEC]
+    SafeState を満たすマシン状態において平文DEKが観測される場合、状態は必ず Unlocked であることを示す補題。 *)
+Lemma safe_state_observe_some_implies_unlocked : forall (m : VaultMachineState) (k : DekBytes),
+  SafeState m ->
+  observe_dek m = Some k ->
+  m.(vms_state) = Unlocked.
+Proof.
+  intros [s dek] k Hsafe Hobs.
+  unfold observe_dek in Hobs. cbn in Hobs.
+  destruct s.
+  - assert (Hnone := safe_state_locked {| vms_state := Locked; vms_dek := dek |} eq_refl Hsafe).
+    cbn in Hnone. rewrite Hnone in Hobs. discriminate Hobs.
+  - assert (Hnone := safe_state_unlocking {| vms_state := Unlocking; vms_dek := dek |} eq_refl Hsafe).
+    cbn in Hnone. rewrite Hnone in Hobs. discriminate Hobs.
+  - reflexivity.
+  - assert (Hnone := safe_state_zeroized {| vms_state := Zeroized; vms_dek := dek |} eq_refl Hsafe).
+    cbn in Hnone. rewrite Hnone in Hobs. discriminate Hobs.
+Qed.
+
+(** [SPEC]
+    メモリ内平文DEKバッファが None であるならば、いかなる状態であっても常に SafeState を満たすことを示す補題。 *)
+Lemma safe_state_intro_none : forall (m : VaultMachineState),
+  m.(vms_dek) = None ->
+  SafeState m.
+Proof.
+  intros [s dek] Hdek.
+  cbn in Hdek.
+  destruct s; cbn; try exact Hdek; try exact I.
+Qed.
+
+(** [SPEC]
+    初期マシン状態 (Locked かつ平文DEK None) は常に SafeState を満たすことを示す補題。 *)
+Lemma safe_state_init :
+  SafeState (mkVaultMachineState Locked None).
+Proof.
+  apply safe_state_intro_none.
+  reflexivity.
+Qed.
+

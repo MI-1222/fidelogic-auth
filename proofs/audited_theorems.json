@@ -406,5 +406,89 @@
     "theorem": "step_unlocking_destinations",
     "allow_aeneas_axioms": false,
     "description": "Unlocking状態からの遷移先は健全なスロットによるEventUnlockSuccessまたはEventUnlockFailのみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_stateb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "safe_stateb と SafeState の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SafeState の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_locked",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_unlocking",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocking状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocked状態においては常に SafeState が成立することを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_locked_or_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Locked または Zeroized 状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_locked",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_unlocking",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocking状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_locked_or_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Locked または Zeroized 状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_some_implies_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "SafeState を満たすマシン状態において平文DEKが観測される場合、状態は必ず Unlocked であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_intro_none",
+    "allow_aeneas_axioms": false,
+    "description": "メモリ内平文DEKバッファが None であるならば、いかなる状態であっても常に SafeState を満たすことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_init",
+    "allow_aeneas_axioms": false,
+    "description": "初期マシン状態 (Locked かつ平文DEK None) は常に SafeState を満たすことを示す補題"
   }
 ]
