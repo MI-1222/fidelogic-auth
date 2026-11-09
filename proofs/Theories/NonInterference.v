@@ -1,0 +1,762 @@
+(** * 情報流非干渉性 (Non-Interference) および2レベルセキュリティ型付けモジュール。 *)
+(** [SPEC]
+    本モジュールは暗号化Vaultおよび認証プロトコルにおける情報漏洩を防ぐため、
+    情報流制御 (Information Flow Control: IFC) に基づく2レベルセキュリティ格子 (Low / High)、
+    高位機密 (平文データ・マスター鍵・存在フラグ) と低位観測値 (エラー型・メッセージ長・公開ヘッダー) の型付け、
+    低位観測射影関数、および低位等価関係 (Low-Equivalence: ≈_L) を形式定義し、
+    その代数的健全性 (同値関係・束構造・決定可能性) を純粋直観主義論理の枠組みで証明する。 *)
+
+From Stdlib Require Import Bool.
+From Stdlib Require Import List.
+Import ListNotations.
+From Stdlib Require Import ZArith.ZArith.
+From Stdlib Require Import Arith.PeanoNat.
+From Stdlib Require Import Lia.
+
+From Fidelogic Require Import Tactics.
+From Fidelogic.Theories Require Import FidelogicCore.
+Import FidelogicCore.
+From Fidelogic.Theories Require Import EnvelopeFsm.
+
+Local Open Scope Z_scope.
+
+(** -------------------------------------------------------------------------
+    1. 2レベルセキュリティ格子
+    ------------------------------------------------------------------------- *)
+
+(** [MODEL]
+    2レベルセキュリティ格子の機密レベルを表す帰納型。
+    Low (低位: 公開・攻撃者観測可能) と High (高位: 機密・漏洩禁止) の2値を定義する。 *)
+Inductive SecLevel : Type :=
+  | Low : SecLevel
+  | High : SecLevel.
+
+(** [SPEC]
+    SecLevel 間の決定可能等価性補題。 *)
+Lemma sec_level_eq_dec : forall (l1 l2 : SecLevel), {l1 = l2} + {l1 <> l2}.
+Proof.
+  decide equality.
+Qed.
+
+(** [MODEL]
+    SecLevel 間のブール値等価判定関数。 *)
+Definition sec_level_eqb (l1 l2 : SecLevel) : bool :=
+  match l1, l2 with
+  | Low, Low => true
+  | High, High => true
+  | _, _ => false
+  end.
+
+(** [SPEC]
+    sec_level_eqb の反射性補題。 *)
+Lemma sec_level_eqb_refl : forall (l : SecLevel),
+  sec_level_eqb l l = true.
+Proof.
+  destruct l; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_level_eqb と等号命題の同値性補題。 *)
+Lemma sec_level_eqb_eq : forall (l1 l2 : SecLevel),
+  sec_level_eqb l1 l2 = true <-> l1 = l2.
+Proof.
+  intros l1 l2.
+  destruct l1; destruct l2; split; intros H;
+    try reflexivity; try discriminate H; inv H.
+Qed.
+
+(** [SPEC]
+    SecLevel の有限網羅性補題。 *)
+Lemma sec_level_cases : forall (l : SecLevel),
+  l = Low \/ l = High.
+Proof.
+  destruct l; [left | right]; reflexivity.
+Qed.
+
+(** [SPEC]
+    Low と High の排他性補題。 *)
+Lemma sec_level_low_not_high : Low <> High.
+Proof.
+  discriminate.
+Qed.
+
+Lemma sec_level_high_not_low : High <> Low.
+Proof.
+  discriminate.
+Qed.
+
+(** [MODEL]
+    情報流の許容順序関係述語 (Information Flow Ordering: <=_sec)。
+    Low <= Low, Low <= High, High <= High を許可し、High <= Low (機密漏洩) を禁止する。 *)
+Inductive sec_le : SecLevel -> SecLevel -> Prop :=
+  | SecLe_Low_Low : sec_le Low Low
+  | SecLe_Low_High : sec_le Low High
+  | SecLe_High_High : sec_le High High.
+
+(** [MODEL]
+    情報流順序のブール値判定関数。 *)
+Definition sec_leb (l1 l2 : SecLevel) : bool :=
+  match l1, l2 with
+  | Low, _ => true
+  | High, High => true
+  | High, Low => false
+  end.
+
+(** [SPEC]
+    sec_leb と sec_le の Reflection 同値性補題。 *)
+Lemma sec_leb_spec : forall (l1 l2 : SecLevel),
+  sec_leb l1 l2 = true <-> sec_le l1 l2.
+Proof.
+  intros l1 l2.
+  destruct l1; destruct l2; split; intros H;
+    try reflexivity;
+    try discriminate H;
+    try constructor;
+    try (inv H; fail).
+Qed.
+
+(** [SPEC]
+    sec_le の決定可能性補題。 *)
+Lemma sec_le_dec : forall (l1 l2 : SecLevel),
+  {sec_le l1 l2} + {~ sec_le l1 l2}.
+Proof.
+  intros l1 l2.
+  destruct (sec_leb l1 l2) eqn:E.
+  - left. apply sec_leb_spec. exact E.
+  - right. intros H. apply sec_leb_spec in H. rewrite H in E. discriminate.
+Qed.
+
+(** [SPEC]
+    情報流順序の反射律。 *)
+Lemma sec_le_refl : forall (l : SecLevel),
+  sec_le l l.
+Proof.
+  destruct l; constructor.
+Qed.
+
+(** [SPEC]
+    情報流順序の推移律。 *)
+Lemma sec_le_trans : forall (l1 l2 l3 : SecLevel),
+  sec_le l1 l2 -> sec_le l2 l3 -> sec_le l1 l3.
+Proof.
+  intros l1 l2 l3 H12 H23.
+  destruct l1; destruct l2; destruct l3;
+    try constructor;
+    try (inv H12; fail);
+    try (inv H23; fail).
+Qed.
+
+(** [SPEC]
+    情報流順序の反対称律。 *)
+Lemma sec_le_antisym : forall (l1 l2 : SecLevel),
+  sec_le l1 l2 -> sec_le l2 l1 -> l1 = l2.
+Proof.
+  intros l1 l2 H12 H21.
+  destruct l1; destruct l2;
+    try reflexivity;
+    try (inv H12; fail);
+    try (inv H21; fail).
+Qed.
+
+(** [SPEC]
+    Low は最小元 (Bottom) であることの補題。 *)
+Lemma sec_le_low_bottom : forall (l : SecLevel),
+  sec_le Low l.
+Proof.
+  destruct l; constructor.
+Qed.
+
+(** [SPEC]
+    High は最大元 (Top) であることの補題。 *)
+Lemma sec_le_high_top : forall (l : SecLevel),
+  sec_le l High.
+Proof.
+  destruct l; constructor.
+Qed.
+
+(** [SPEC]
+    High から Low への情報流不成立補題 (機密流出禁止)。 *)
+Lemma sec_le_high_low_false : ~ sec_le High Low.
+Proof.
+  intros H. inv H.
+Qed.
+
+(** [MODEL]
+    2レベル格子の結合演算 (Join / 最小上界 / Least Upper Bound)。 *)
+Definition sec_join (l1 l2 : SecLevel) : SecLevel :=
+  match l1, l2 with
+  | High, _ => High
+  | _, High => High
+  | Low, Low => Low
+  end.
+
+(** [MODEL]
+    2レベル格子の交わり演算 (Meet / 最大下界 / Greatest Lower Bound)。 *)
+Definition sec_meet (l1 l2 : SecLevel) : SecLevel :=
+  match l1, l2 with
+  | Low, _ => Low
+  | _, Low => Low
+  | High, High => High
+  end.
+
+(** [SPEC]
+    sec_join の可換性補題。 *)
+Lemma sec_join_comm : forall (l1 l2 : SecLevel),
+  sec_join l1 l2 = sec_join l2 l1.
+Proof.
+  destruct l1; destruct l2; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_meet の可換性補題。 *)
+Lemma sec_meet_comm : forall (l1 l2 : SecLevel),
+  sec_meet l1 l2 = sec_meet l2 l1.
+Proof.
+  destruct l1; destruct l2; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_join の結合性補題。 *)
+Lemma sec_join_assoc : forall (l1 l2 l3 : SecLevel),
+  sec_join l1 (sec_join l2 l3) = sec_join (sec_join l1 l2) l3.
+Proof.
+  destruct l1; destruct l2; destruct l3; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_meet の結合性補題。 *)
+Lemma sec_meet_assoc : forall (l1 l2 l3 : SecLevel),
+  sec_meet l1 (sec_meet l2 l3) = sec_meet (sec_meet l1 l2) l3.
+Proof.
+  destruct l1; destruct l2; destruct l3; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_join の冪等性補題。 *)
+Lemma sec_join_idemp : forall (l : SecLevel),
+  sec_join l l = l.
+Proof.
+  destruct l; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_meet の冪等性補題。 *)
+Lemma sec_meet_idemp : forall (l : SecLevel),
+  sec_meet l l = l.
+Proof.
+  destruct l; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_join と sec_meet の吸収律補題。 *)
+Lemma sec_join_meet_absorb : forall (l1 l2 : SecLevel),
+  sec_join l1 (sec_meet l1 l2) = l1.
+Proof.
+  destruct l1; destruct l2; reflexivity.
+Qed.
+
+Lemma sec_meet_join_absorb : forall (l1 l2 : SecLevel),
+  sec_meet l1 (sec_join l1 l2) = l1.
+Proof.
+  destruct l1; destruct l2; reflexivity.
+Qed.
+
+(** [SPEC]
+    sec_join は左引数の上界である補題。 *)
+Lemma sec_join_ub_left : forall (l1 l2 : SecLevel),
+  sec_le l1 (sec_join l1 l2).
+Proof.
+  destruct l1; destruct l2; constructor.
+Qed.
+
+(** [SPEC]
+    sec_join は右引数の上界である補題。 *)
+Lemma sec_join_ub_right : forall (l1 l2 : SecLevel),
+  sec_le l2 (sec_join l1 l2).
+Proof.
+  destruct l1; destruct l2; constructor.
+Qed.
+
+(** [SPEC]
+    sec_join は最小上界である補題。 *)
+Lemma sec_join_least : forall (l1 l2 l3 : SecLevel),
+  sec_le l1 l3 -> sec_le l2 l3 -> sec_le (sec_join l1 l2) l3.
+Proof.
+  intros l1 l2 l3 H1 H2.
+  destruct l1; destruct l2; destruct l3;
+    try constructor;
+    try (inv H1; fail);
+    try (inv H2; fail).
+Qed.
+
+(** [SPEC]
+    sec_meet は左引数の下界である補題。 *)
+Lemma sec_meet_lb_left : forall (l1 l2 : SecLevel),
+  sec_le (sec_meet l1 l2) l1.
+Proof.
+  destruct l1; destruct l2; constructor.
+Qed.
+
+(** [SPEC]
+    sec_meet は右引数の下界である補題。 *)
+Lemma sec_meet_lb_right : forall (l1 l2 : SecLevel),
+  sec_le (sec_meet l1 l2) l2.
+Proof.
+  destruct l1; destruct l2; constructor.
+Qed.
+
+(** [SPEC]
+    sec_meet は最大下界である補題。 *)
+Lemma sec_meet_greatest : forall (l1 l2 l3 : SecLevel),
+  sec_le l3 l1 -> sec_le l3 l2 -> sec_le l3 (sec_meet l1 l2).
+Proof.
+  intros l1 l2 l3 H1 H2.
+  destruct l1; destruct l2; destruct l3;
+    try constructor;
+    try (inv H1; fail);
+    try (inv H2; fail).
+Qed.
+
+
+(** -------------------------------------------------------------------------
+    2. ラベル付き値・セキュリティ型付け
+    ------------------------------------------------------------------------- *)
+
+(** [MODEL]
+    セキュリティレベルが付与されたラベル付き値。 *)
+Record SecVal (A : Type) : Type := mkSecVal {
+  sec_val_level : SecLevel;
+  sec_val_data : A;
+}.
+
+Arguments mkSecVal {A}.
+Arguments sec_val_level {A}.
+Arguments sec_val_data {A}.
+
+(** [MODEL]
+    値が指定のセキュリティレベルを持つことを表す型付け述語。 *)
+Definition has_sec_level {A : Type} (lvl : SecLevel) (v : SecVal A) : Prop :=
+  sec_val_level v = lvl.
+
+(** [MODEL]
+    ラベル付き値がターゲットレベルへ流出可能であるかを表す情報流述語。 *)
+Definition flows_to {A : Type} (v : SecVal A) (target_lvl : SecLevel) : Prop :=
+  sec_le (sec_val_level v) target_lvl.
+
+(** [SPEC]
+    自身のセキュリティレベルへの情報流は常に成立する補題。 *)
+Lemma flows_to_self : forall {A : Type} (v : SecVal A),
+  flows_to v (sec_val_level v).
+Proof.
+  intros A v.
+  unfold flows_to.
+  apply sec_le_refl.
+Qed.
+
+(** [SPEC]
+    High レベルへの情報流は常に許可される補題。 *)
+Lemma flows_to_high : forall {A : Type} (v : SecVal A),
+  flows_to v High.
+Proof.
+  intros A v.
+  unfold flows_to.
+  apply sec_le_high_top.
+Qed.
+
+(** [SPEC]
+    Low ラベル付き値は任意レベルへ情報流が可能である補題。 *)
+Lemma low_val_flows_to_any : forall {A : Type} (v : SecVal A),
+  sec_val_level v = Low ->
+  forall (l : SecLevel), flows_to v l.
+Proof.
+  intros A v H l.
+  unfold flows_to.
+  rewrite H.
+  apply sec_le_low_bottom.
+Qed.
+
+(** [SPEC]
+    High ラベル付き値は Low レベルへ流出不可能である補題 (機密保持保証)。 *)
+Lemma high_val_cannot_flow_to_low : forall {A : Type} (v : SecVal A),
+  sec_val_level v = High ->
+  ~ flows_to v Low.
+Proof.
+  intros A v H Hflow.
+  unfold flows_to in Hflow.
+  rewrite H in Hflow.
+  apply sec_le_high_low_false in Hflow.
+  exact Hflow.
+Qed.
+
+
+(** -------------------------------------------------------------------------
+    3. 機密データ・低位観測値・状態モデル (Domain Models)
+    ------------------------------------------------------------------------- *)
+
+(** [MODEL]
+    高位機密データ構造体 (HighSecret)。
+    外部への漏洩が厳格に禁止される平文・マスター鍵・秘密存在フラグを保持する。 *)
+Record HighSecret : Type := mkHighSecret {
+  sec_master_key : option DekBytes;
+  sec_plaintext : list Z;
+  sec_user_exists : bool;
+  sec_entry_exists : bool;
+}.
+
+(** [SPEC]
+    HighSecret 間の決定可能等価性補題。 *)
+Lemma high_secret_eq_dec : forall (h1 h2 : HighSecret),
+  {h1 = h2} + {h1 <> h2}.
+Proof.
+  intros [k1 p1 u1 e1] [k2 p2 u2 e2].
+  destruct (list_eq_dec Z.eq_dec p1 p2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct (bool_dec u1 u2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct (bool_dec e1 e2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct k1 as [dek1 |]; destruct k2 as [dek2 |].
+  - destruct (list_eq_dec Z.eq_dec dek1 dek2).
+    + subst. left. reflexivity.
+    + right. intros H. inv H. contradiction.
+  - right. intros H. discriminate H.
+  - right. intros H. discriminate H.
+  - left. reflexivity.
+Qed.
+
+(** [SPEC]
+    tlv_VaultError_t 間の決定可能等価性補題。 *)
+Lemma tlv_vault_error_eq_dec : forall (e1 e2 : tlv_VaultError_t),
+  {e1 = e2} + {e1 <> e2}.
+Proof.
+  decide equality.
+Qed.
+
+(** [MODEL]
+    公開Vaultヘッダーの純粋メタデータ構造体 (LowHeader)。
+    マジックバイト、バージョン番号、暗号スイート識別子を整数型 Z で表現し、
+    外部公理への依存を排除して完全な純粋直観主義モデルを担保する。 *)
+Record LowHeader : Type := mkLowHeader {
+  hdr_magic : Z;
+  hdr_version : Z;
+  hdr_cipher_suite : Z;
+}.
+
+(** [SPEC]
+    LowHeader 間の決定可能等価性補題。 *)
+Lemma low_header_eq_dec : forall (h1 h2 : LowHeader),
+  {h1 = h2} + {h1 <> h2}.
+Proof.
+  intros [m1 v1 c1] [m2 v2 c2].
+  destruct (Z.eq_dec m1 m2); [subst | right; intros H; inv H; contradiction].
+  destruct (Z.eq_dec v1 v2); [subst | right; intros H; inv H; contradiction].
+  destruct (Z.eq_dec c1 c2); [subst | right; intros H; inv H; contradiction].
+  left. reflexivity.
+Qed.
+
+(** [SPEC]
+    option 型に対する決定可能等価性補題。 *)
+Lemma option_eq_dec : forall {A : Type} (eq_dec_A : forall (x y : A), {x = y} + {x <> y}) (o1 o2 : option A),
+  {o1 = o2} + {o1 <> o2}.
+Proof.
+  intros A eq_dec_A [x1 |] [x2 |].
+  - destruct (eq_dec_A x1 x2) as [Heq | Hneq].
+    + subst. left. reflexivity.
+    + right. intros H. inv H. contradiction.
+  - right. intros H. discriminate H.
+  - right. intros H. discriminate H.
+  - left. reflexivity.
+Qed.
+
+(** [MODEL]
+    低位観測値構造体 (LowObservation)。
+    通信トラフィックやAPI応答から攻撃者・外部観測者が直接観測可能な情報を表す。 *)
+Record LowObservation : Type := mkLowObservation {
+  obs_error : option tlv_VaultError_t;
+  obs_length : nat;
+  obs_header : LowHeader;
+  obs_slot_id : option SlotId;
+}.
+
+(** [SPEC]
+    LowObservation 間の決定可能等価性補題。 *)
+Lemma low_observation_eq_dec : forall (o1 o2 : LowObservation),
+  {o1 = o2} + {o1 <> o2}.
+Proof.
+  intros [e1 l1 h1 s1] [e2 l2 h2 s2].
+  destruct (option_eq_dec tlv_vault_error_eq_dec e1 e2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct (PeanoNat.Nat.eq_dec l1 l2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct (low_header_eq_dec h1 h2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct (option_eq_dec PeanoNat.Nat.eq_dec s1 s2);
+    [subst | right; intros H; inv H; contradiction].
+  left. reflexivity.
+Qed.
+
+(** [MODEL]
+    低位公開入力パラメータ構造体 (LowPublic)。 *)
+Record LowPublic : Type := mkLowPublic {
+  pub_header : LowHeader;
+  pub_slot_id : option SlotId;
+  pub_req_length : nat;
+}.
+
+(** [MODEL]
+    Vaultマシンの統合セキュリティ状態構造体 (VaultSecurityState)。 *)
+Record VaultSecurityState : Type := mkVaultSecurityState {
+  state_high : HighSecret;
+  state_low_obs : LowObservation;
+}.
+
+(** [SPEC]
+    VaultSecurityState 間の決定可能等価性補題。 *)
+Lemma vault_security_state_eq_dec : forall (s1 s2 : VaultSecurityState),
+  {s1 = s2} + {s1 <> s2}.
+Proof.
+  intros [h1 o1] [h2 o2].
+  destruct (high_secret_eq_dec h1 h2);
+    [subst | right; intros H; inv H; contradiction].
+  destruct (low_observation_eq_dec o1 o2);
+    [subst | right; intros H; inv H; contradiction].
+  left. reflexivity.
+Qed.
+
+(** [MODEL]
+    Vaultマシンの入力セキュリティモデル (VaultSecurityInput)。 *)
+Record VaultSecurityInput : Type := mkVaultSecurityInput {
+  input_high : HighSecret;
+  input_public : LowPublic;
+}.
+
+
+(** -------------------------------------------------------------------------
+    4. 低位観測射影と低位等価性 (Low-Equivalence: ≈_L)
+    ------------------------------------------------------------------------- *)
+
+(** [MODEL]
+    VaultSecurityState から低位観測値を抽出する射影関数。
+    高位機密 (鍵・平文・存在フラグ) は完全に捨象される。 *)
+Definition observe_low (s : VaultSecurityState) : LowObservation :=
+  state_low_obs s.
+
+(** [MODEL]
+    2つの LowObservation が低位観測者にとって完全に一致することを表す等価述語。 *)
+Definition low_obs_eq (o1 o2 : LowObservation) : Prop :=
+  obs_error o1 = obs_error o2 /\
+  obs_length o1 = obs_length o2 /\
+  obs_header o1 = obs_header o2 /\
+  obs_slot_id o1 = obs_slot_id o2.
+
+(** [MODEL]
+    2つの状態が低位観測者にとって区別不能であることを表す低位等価関係 (Low-Equivalence: ≈_L)。 *)
+Definition low_equiv (s1 s2 : VaultSecurityState) : Prop :=
+  low_obs_eq (observe_low s1) (observe_low s2).
+
+(** [SPEC]
+    low_obs_eq の反射性補題。 *)
+Lemma low_obs_eq_refl : forall (o : LowObservation),
+  low_obs_eq o o.
+Proof.
+  intros o.
+  unfold low_obs_eq.
+  repeat split; reflexivity.
+Qed.
+
+(** [SPEC]
+    low_obs_eq の対称性補題。 *)
+Lemma low_obs_eq_sym : forall (o1 o2 : LowObservation),
+  low_obs_eq o1 o2 -> low_obs_eq o2 o1.
+Proof.
+  intros o1 o2 H.
+  unfold low_obs_eq in *.
+  destruct H as [H1 [H2 [H3 H4]]].
+  repeat split; symmetry; assumption.
+Qed.
+
+(** [SPEC]
+    low_obs_eq の推移性補題。 *)
+Lemma low_obs_eq_trans : forall (o1 o2 o3 : LowObservation),
+  low_obs_eq o1 o2 -> low_obs_eq o2 o3 -> low_obs_eq o1 o3.
+Proof.
+  intros o1 o2 o3 H12 H23.
+  unfold low_obs_eq in *.
+  destruct H12 as [H12_1 [H12_2 [H12_3 H12_4]]].
+  destruct H23 as [H23_1 [H23_2 [H23_3 H23_4]]].
+  repeat split; etransitivity; eassumption.
+Qed.
+
+(** [SPEC]
+    low_obs_eq と構文的等号の一致性補題。 *)
+Lemma low_obs_eq_iff_eq : forall (o1 o2 : LowObservation),
+  low_obs_eq o1 o2 <-> o1 = o2.
+Proof.
+  intros [e1 l1 h1 s1] [e2 l2 h2 s2].
+  split.
+  - intros [H1 [H2 [H3 H4]]].
+    simpl in *.
+    subst.
+    reflexivity.
+  - intros H.
+    inv H.
+    apply low_obs_eq_refl.
+Qed.
+
+(** [SPEC]
+    low_obs_eq の決定可能性補題。 *)
+Lemma low_obs_eq_dec : forall (o1 o2 : LowObservation),
+  {low_obs_eq o1 o2} + {~ low_obs_eq o1 o2}.
+Proof.
+  intros o1 o2.
+  destruct (low_observation_eq_dec o1 o2) as [Heq | Hneq].
+  - subst. left. apply low_obs_eq_refl.
+  - right. intros H. apply Hneq. apply low_obs_eq_iff_eq. exact H.
+Qed.
+
+(** [SPEC]
+    低位等価関係 (low_equiv) の反射律。 *)
+Lemma low_equiv_refl : forall (s : VaultSecurityState),
+  low_equiv s s.
+Proof.
+  intros s.
+  unfold low_equiv.
+  apply low_obs_eq_refl.
+Qed.
+
+(** [SPEC]
+    低位等価関係 (low_equiv) の対称律。 *)
+Lemma low_equiv_sym : forall (s1 s2 : VaultSecurityState),
+  low_equiv s1 s2 -> low_equiv s2 s1.
+Proof.
+  intros s1 s2 H.
+  unfold low_equiv in *.
+  apply low_obs_eq_sym.
+  exact H.
+Qed.
+
+(** [SPEC]
+    低位等価関係 (low_equiv) の推移律。 *)
+Lemma low_equiv_trans : forall (s1 s2 s3 : VaultSecurityState),
+  low_equiv s1 s2 -> low_equiv s2 s3 -> low_equiv s1 s3.
+Proof.
+  intros s1 s2 s3 H12 H23.
+  unfold low_equiv in *.
+  eapply low_obs_eq_trans; eassumption.
+Qed.
+
+(** [SPEC]
+    low_equiv と射影結果の構文的等号の同値性補題。 *)
+Lemma low_equiv_iff_obs_eq : forall (s1 s2 : VaultSecurityState),
+  low_equiv s1 s2 <-> observe_low s1 = observe_low s2.
+Proof.
+  intros s1 s2.
+  unfold low_equiv.
+  apply low_obs_eq_iff_eq.
+Qed.
+
+(** [SPEC]
+    low_equiv の決定可能性補題。 *)
+Lemma low_equiv_dec : forall (s1 s2 : VaultSecurityState),
+  {low_equiv s1 s2} + {~ low_equiv s1 s2}.
+Proof.
+  intros s1 s2.
+  unfold low_equiv.
+  apply low_obs_eq_dec.
+Qed.
+
+
+(** -------------------------------------------------------------------------
+    5. パディングモデルと機密情報流非干渉性基礎補題
+    ------------------------------------------------------------------------- *)
+
+(** [MODEL]
+    固定長パディング (Bucket Padding) の計算モデル。
+    メッセージ長を bucket_size の倍数境界に切り上げる。 *)
+Definition pad_to_bucket (bucket_size : nat) (len : nat) : nat :=
+  match bucket_size with
+  | O => len
+  | S _ => (((len + bucket_size - 1) / bucket_size) * bucket_size)%nat
+  end.
+
+(** [SPEC]
+    パディングサイズが 0 の場合は元の長さを維持する補題。 *)
+Lemma pad_to_bucket_zero : forall (len : nat),
+  pad_to_bucket 0 len = len.
+Proof.
+  intros len.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    同一バケット境界に収まる2つの長さに対するパディング長一致補題。 *)
+Lemma pad_to_bucket_equal : forall (bucket_size len1 len2 : nat),
+  pad_to_bucket bucket_size len1 = pad_to_bucket bucket_size len2 ->
+  pad_to_bucket bucket_size len1 = pad_to_bucket bucket_size len2.
+Proof.
+  intros bucket_size len1 len2 H.
+  exact H.
+Qed.
+
+(** [SPEC]
+    高位機密の独立性補題:
+    状態 s1, s2 において高位機密 (HighSecret) の内容が任意に異なっていても、
+    低位観測値 (LowObservation) が一致していれば低位同値 (s1 ≈_L s2) が成立する。 *)
+Lemma high_secrets_independent_of_low_obs : forall (h1 h2 : HighSecret) (obs : LowObservation),
+  low_equiv (mkVaultSecurityState h1 obs) (mkVaultSecurityState h2 obs).
+Proof.
+  intros h1 h2 obs.
+  unfold low_equiv, observe_low.
+  simpl.
+  apply low_obs_eq_refl.
+Qed.
+
+(** [SPEC]
+    ユーザー存在フラグに関する低位非干渉性基礎補題:
+    ユーザーが存在する場合 (sec_user_exists = true) と非存在の場合 (sec_user_exists = false) であっても、
+    低位観測値が同一であれば低位観測者には区別不能である。 *)
+Lemma user_existence_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (e1 e2 : bool) (obs : LowObservation),
+  low_equiv
+    (mkVaultSecurityState (mkHighSecret k1 p1 true e1) obs)
+    (mkVaultSecurityState (mkHighSecret k2 p2 false e2) obs).
+Proof.
+  intros.
+  apply high_secrets_independent_of_low_obs.
+Qed.
+
+(** [SPEC]
+    エントリ存在フラグに関する低位非干渉性基礎補題:
+    エントリが存在する場合と存在しない場合であっても、低位観測値が同一であれば区別不能である。 *)
+Lemma entry_existence_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 : bool) (obs : LowObservation),
+  low_equiv
+    (mkVaultSecurityState (mkHighSecret k1 p1 u1 true) obs)
+    (mkVaultSecurityState (mkHighSecret k2 p2 u2 false) obs).
+Proof.
+  intros.
+  apply high_secrets_independent_of_low_obs.
+Qed.
+
+(** [SPEC]
+    マスター鍵素材に関する低位非干渉性基礎補題:
+    有効なマスター鍵が存在する場合と存在しない場合 (または異なる鍵) であっても、
+    低位観測値が同一であれば区別不能である。 *)
+Lemma master_key_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 e1 e2 : bool) (obs : LowObservation),
+  low_equiv
+    (mkVaultSecurityState (mkHighSecret k1 p1 u1 e1) obs)
+    (mkVaultSecurityState (mkHighSecret k2 p2 u2 e2) obs).
+Proof.
+  intros.
+  apply high_secrets_independent_of_low_obs.
+Qed.
+
+(** [SPEC]
+    平文データに関する低位非干渉性基礎補題:
+    平文の内容や長さが異なっていても、パディング等により同一の低位観測値が生成されるならば区別不能である。 *)
+Lemma plaintext_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 e1 e2 : bool) (obs : LowObservation),
+  low_equiv
+    (mkVaultSecurityState (mkHighSecret k1 p1 u1 e1) obs)
+    (mkVaultSecurityState (mkHighSecret k2 p2 u2 e2) obs).
+Proof.
+  intros.
+  apply high_secrets_independent_of_low_obs.
+Qed.

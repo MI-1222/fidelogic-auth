@@ -1144,5 +1144,335 @@
     "theorem": "precis_golden_suite_conformance",
     "allow_aeneas_axioms": false,
     "description": "テストベクタ一括適合性定理(Golden Test Suiteの完全一致保証)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SecLevel 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_eqb_refl",
+    "allow_aeneas_axioms": false,
+    "description": "sec_level_eqb の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_eqb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "sec_level_eqb と等号命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_cases",
+    "allow_aeneas_axioms": false,
+    "description": "SecLevel の有限網羅性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_low_not_high",
+    "allow_aeneas_axioms": false,
+    "description": "Low と High の非等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_high_not_low",
+    "allow_aeneas_axioms": false,
+    "description": "High と Low の非等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_leb_spec",
+    "allow_aeneas_axioms": false,
+    "description": "sec_leb と sec_le の Reflection 同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_dec",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序述語 sec_le の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_refl",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序の反射律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_trans",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序の推移律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_antisym",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序の反対称律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_low_bottom",
+    "allow_aeneas_axioms": false,
+    "description": "Low が最小元 (Bottom) であることの補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_high_top",
+    "allow_aeneas_axioms": false,
+    "description": "High が最大元 (Top) であることの補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_high_low_false",
+    "allow_aeneas_axioms": false,
+    "description": "High から Low への情報流不成立補題 (機密漏洩禁止)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_comm",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join の可換性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_comm",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet の可換性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_assoc",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join の結合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_assoc",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet の結合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_idemp",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join の冪等性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_idemp",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet の冪等性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_meet_absorb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join と sec_meet の吸収律補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_join_absorb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet と sec_join の吸収律補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_ub_left",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join が左引数の上界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_ub_right",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join が右引数の上界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_least",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join が最小上界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_lb_left",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet が左引数の下界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_lb_right",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet が右引数の下界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_greatest",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet が最大下界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "flows_to_self",
+    "allow_aeneas_axioms": false,
+    "description": "自身のセキュリティレベルへの情報流成立補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "flows_to_high",
+    "allow_aeneas_axioms": false,
+    "description": "High レベルへの情報流許可補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_val_flows_to_any",
+    "allow_aeneas_axioms": false,
+    "description": "Low ラベル付き値の任意レベル情報流可能補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "high_val_cannot_flow_to_low",
+    "allow_aeneas_axioms": false,
+    "description": "High ラベル付き値の Low レベル流出不可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "high_secret_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "HighSecret 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "tlv_vault_error_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "tlv_VaultError_t 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_header_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "LowHeader 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "option_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "option 型に対する決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_observation_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "LowObservation 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_security_state_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultSecurityState 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_refl",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_sym",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_trans",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の推移性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_iff_eq",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq と構文的等号の一致性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_refl",
+    "allow_aeneas_axioms": false,
+    "description": "低位等価関係 low_equiv の反射律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_sym",
+    "allow_aeneas_axioms": false,
+    "description": "低位等価関係 low_equiv の対称律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_trans",
+    "allow_aeneas_axioms": false,
+    "description": "低位等価関係 low_equiv の推移律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_iff_obs_eq",
+    "allow_aeneas_axioms": false,
+    "description": "low_equiv と射影結果構文的等号の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_dec",
+    "allow_aeneas_axioms": false,
+    "description": "low_equiv の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "pad_to_bucket_zero",
+    "allow_aeneas_axioms": false,
+    "description": "バケットサイズ0におけるパディング長不変補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "pad_to_bucket_equal",
+    "allow_aeneas_axioms": false,
+    "description": "同一バケット境界パディング長一致補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "high_secrets_independent_of_low_obs",
+    "allow_aeneas_axioms": false,
+    "description": "高位機密の独立性補題 (低位観測値一致による低位同値保証)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_existence_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー存在フラグに関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_existence_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ存在フラグに関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "master_key_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵素材に関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "plaintext_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "平文データに関する低位非干渉性基礎補題"
   }
 ]
