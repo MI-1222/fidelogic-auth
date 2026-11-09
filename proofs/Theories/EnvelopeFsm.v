@@ -6,6 +6,7 @@
 From Stdlib Require Import Bool.
 From Stdlib Require Import List.
 From Stdlib Require Import ZArith.ZArith.
+From Stdlib Require Import Arith.PeanoNat.
 From Fidelogic Require Import Tactics.
 
 Local Open Scope Z_scope.
@@ -442,3 +443,141 @@ Proof.
   exact H.
 Qed.
 
+(** [MODEL]
+    暗号化Vaultマシンの状態遷移を駆動するイベント (入力記号) を表す帰納型。 *)
+Inductive VaultEvent : Type :=
+  | EventStartUnlock : SlotId -> VaultEvent
+  | EventUnlockSuccess : SlotId -> VaultEvent
+  | EventUnlockFail : VaultEvent
+  | EventLock : VaultEvent
+  | EventZeroize : VaultEvent
+  | EventReset : VaultEvent.
+
+(** [SPEC]
+    VaultEvent 間の決定可能等価性補題。 *)
+Lemma vault_event_eq_dec : forall (e1 e2 : VaultEvent), {e1 = e2} + {e1 <> e2}.
+Proof.
+  decide equality.
+  - apply Nat.eq_dec.
+  - apply Nat.eq_dec.
+Qed.
+
+(** [SPEC]
+    DEKライフサイクルにおける合法的かつ安全な状態遷移を規定する帰納的関係述語。
+    スロット構成 (KekSlots) を環境パラメータとし、
+    始点状態、入力イベント、終点状態の組が正当な遷移である条件を定義する。 *)
+Inductive step (slots : KekSlots) : VaultState -> VaultEvent -> VaultState -> Prop :=
+  | StepStartUnlock : forall (id : SlotId),
+      valid_slot_id id ->
+      step slots Locked (EventStartUnlock id) Unlocking
+  | StepUnlockSuccess : forall (id : SlotId),
+      slot_valid slots id ->
+      step slots Unlocking (EventUnlockSuccess id) Unlocked
+  | StepUnlockFail :
+      step slots Unlocking EventUnlockFail Locked
+  | StepLock :
+      step slots Unlocked EventLock Locked
+  | StepZeroize :
+      step slots Unlocked EventZeroize Zeroized
+  | StepReset :
+      step slots Zeroized EventReset Locked.
+
+(** [SPEC]
+    状態遷移関係 step の決定論性補題。
+    同一のスロット構成、始点状態、および入力イベントから遷移する終点状態は一意に定まる。 *)
+Lemma step_deterministic : forall (slots : KekSlots) (s : VaultState) (ev : VaultEvent) (s1 s2 : VaultState),
+  step slots s ev s1 ->
+  step slots s ev s2 ->
+  s1 = s2.
+Proof.
+  intros slots s ev s1 s2 H1 H2.
+  inversion H1; subst; inversion H2; subst; reflexivity.
+Qed.
+
+(** [SPEC]
+    Locked状態から任意の単一ステップ遷移によって直接Unlocked状態へ到達することは不可能であることを示す補題。 *)
+Lemma step_locked_to_unlocked_impossible : forall (slots : KekSlots) (ev : VaultEvent),
+  ~ step slots Locked ev Unlocked.
+Proof.
+  intros slots ev Hstep.
+  inversion Hstep.
+Qed.
+
+(** [SPEC]
+    Zeroized状態から任意の単一ステップ遷移によって直接Unlocked状態へ到達することは不可能であることを示す補題。 *)
+Lemma step_zeroized_to_unlocked_impossible : forall (slots : KekSlots) (ev : VaultEvent),
+  ~ step slots Zeroized ev Unlocked.
+Proof.
+  intros slots ev Hstep.
+  inversion Hstep.
+Qed.
+
+(** [SPEC]
+    EventUnlockSuccess による遷移が成立するためには、指定されたスロットが健全 (slot_valid) でなければならないことを示す補題。 *)
+Lemma step_unlock_success_requires_valid : forall (slots : KekSlots) (id : SlotId) (s' : VaultState),
+  step slots Unlocking (EventUnlockSuccess id) s' ->
+  slot_valid slots id.
+Proof.
+  intros slots id s' Hstep.
+  inversion Hstep as [ | id0 Hval | | | | ]; subst.
+  exact Hval.
+Qed.
+
+(** [SPEC]
+    EventStartUnlock による遷移が成立するためには、指定されたスロットIDが有効範囲内 (valid_slot_id) でなければならないことを示す補題。 *)
+Lemma step_start_unlock_requires_valid_id : forall (slots : KekSlots) (id : SlotId) (s' : VaultState),
+  step slots Locked (EventStartUnlock id) s' ->
+  valid_slot_id id.
+Proof.
+  intros slots id s' Hstep.
+  inversion Hstep as [ id0 Hval | | | | | ]; subst.
+  exact Hval.
+Qed.
+
+(** [SPEC]
+    Unlocked状態から退行する遷移は施錠 (EventLock) またはゼロ消去 (EventZeroize) のみであることを示す補題。 *)
+Lemma step_unlocked_destinations : forall (slots : KekSlots) (ev : VaultEvent) (s' : VaultState),
+  step slots Unlocked ev s' ->
+  (ev = EventLock /\ s' = Locked) \/ (ev = EventZeroize /\ s' = Zeroized).
+Proof.
+  intros slots ev s' Hstep.
+  inversion Hstep; subst.
+  - left. split; reflexivity.
+  - right. split; reflexivity.
+Qed.
+
+(** [SPEC]
+    Locked状態からの遷移先は有効なスロットIDに対するEventStartUnlockによるUnlocking状態のみであることを示す補題。 *)
+Lemma step_locked_destinations : forall (slots : KekSlots) (ev : VaultEvent) (s' : VaultState),
+  step slots Locked ev s' ->
+  exists (id : SlotId), ev = EventStartUnlock id /\ s' = Unlocking /\ valid_slot_id id.
+Proof.
+  intros slots ev s' Hstep.
+  inversion Hstep as [ id0 Hval | | | | | ]; subst.
+  exists id0.
+  split; [reflexivity | split; [reflexivity | exact Hval]].
+Qed.
+
+(** [SPEC]
+    Zeroized状態からの遷移先はEventResetによるLocked状態のみであることを示す補題。 *)
+Lemma step_zeroized_destinations : forall (slots : KekSlots) (ev : VaultEvent) (s' : VaultState),
+  step slots Zeroized ev s' ->
+  ev = EventReset /\ s' = Locked.
+Proof.
+  intros slots ev s' Hstep.
+  inversion Hstep; subst.
+  split; reflexivity.
+Qed.
+
+(** [SPEC]
+    Unlocking状態からの遷移先は健全なスロットによるEventUnlockSuccess (Unlockedへ) またはEventUnlockFail (Lockedへ) のみであることを示す補題。 *)
+Lemma step_unlocking_destinations : forall (slots : KekSlots) (ev : VaultEvent) (s' : VaultState),
+  step slots Unlocking ev s' ->
+  (exists (id : SlotId), ev = EventUnlockSuccess id /\ s' = Unlocked /\ slot_valid slots id) \/
+  (ev = EventUnlockFail /\ s' = Locked).
+Proof.
+  intros slots ev s' Hstep.
+  inversion Hstep as [ | id0 Hval | | | | ]; subst.
+  - left. exists id0. split; [reflexivity | split; [reflexivity | exact Hval]].
+  - right. split; reflexivity.
+Qed.

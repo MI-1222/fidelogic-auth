@@ -346,5 +346,65 @@
     "theorem": "any_slot_valid_recovery_robust",
     "allow_aeneas_axioms": false,
     "description": "WebAuthn PRFスロットが無効・破損時でもリカバリーコードスロット健全性により全体健全性が維持される補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_event_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultEvent 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_deterministic",
+    "allow_aeneas_axioms": false,
+    "description": "状態遷移関係 step の決定論性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_locked_to_unlocked_impossible",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態から直接Unlocked状態へ到達不可能であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_zeroized_to_unlocked_impossible",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態から直接Unlocked状態へ到達不可能であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_unlock_success_requires_valid",
+    "allow_aeneas_axioms": false,
+    "description": "EventUnlockSuccess による遷移成立にはスロット健全性が必要であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_start_unlock_requires_valid_id",
+    "allow_aeneas_axioms": false,
+    "description": "EventStartUnlock による遷移成立にはスロットIDが有効範囲内であることが必要であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_unlocked_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocked状態からの退行遷移は施錠またはゼロ消去のみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_locked_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態からの遷移先は有効なスロットIDに対するEventStartUnlockによるUnlocking状態のみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_zeroized_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態からの遷移先はEventResetによるLocked状態のみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_unlocking_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocking状態からの遷移先は健全なスロットによるEventUnlockSuccessまたはEventUnlockFailのみであることを示す補題"
   }
 ]
