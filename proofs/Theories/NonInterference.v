@@ -689,13 +689,57 @@ Proof.
 Qed.
 
 (** [SPEC]
-    同一バケット境界に収まる2つの長さに対するパディング長一致補題。 *)
-Lemma pad_to_bucket_equal : forall (bucket_size len1 len2 : nat),
-  pad_to_bucket bucket_size len1 = pad_to_bucket bucket_size len2 ->
+    同一バケット境界内の任意の長さに対するパディング値決定補題。
+    k * bucket_size < len <= (k + 1) * bucket_size を満たすとき、
+    パディング結果は正確に (k + 1) * bucket_size となる。 *)
+Lemma pad_to_bucket_step : forall (bucket_size k len : nat),
+  (bucket_size > 0)%nat ->
+  (k * bucket_size < len)%nat ->
+  (len <= (k + 1) * bucket_size)%nat ->
+  pad_to_bucket bucket_size len = ((k + 1) * bucket_size)%nat.
+Proof.
+  intros bucket_size k len Hbs Hlow Hhigh.
+  destruct bucket_size as [| b]; [lia |].
+  unfold pad_to_bucket.
+  assert (Hdiv: ((len + S b - 1) / S b = k + 1)%nat).
+  {
+    symmetry.
+    apply Nat.div_unique with (r := (len + S b - 1 - (k + 1) * S b)%nat); lia.
+  }
+  rewrite Hdiv.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    同一バケット境界に収まる2つの長さに対するパディング長一致補題。
+    len1, len2 が同一のバケット区間 (k * bucket_size, (k + 1) * bucket_size] に収まるならば、
+    パディング後の長さは完全に一致する。 *)
+Lemma pad_to_bucket_equal : forall (bucket_size k len1 len2 : nat),
+  (bucket_size > 0)%nat ->
+  (k * bucket_size < len1)%nat ->
+  (len1 <= (k + 1) * bucket_size)%nat ->
+  (k * bucket_size < len2)%nat ->
+  (len2 <= (k + 1) * bucket_size)%nat ->
   pad_to_bucket bucket_size len1 = pad_to_bucket bucket_size len2.
 Proof.
-  intros bucket_size len1 len2 H.
-  exact H.
+  intros bucket_size k len1 len2 Hbs Hlow1 Hhigh1 Hlow2 Hhigh2.
+  rewrite (pad_to_bucket_step bucket_size k len1); try assumption.
+  rewrite (pad_to_bucket_step bucket_size k len2); try assumption.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    第1バケット区間 (0 < len <= bucket_size) におけるパディング長一致系。 *)
+Corollary pad_to_bucket_first_bucket_equal : forall (bucket_size len1 len2 : nat),
+  (bucket_size > 0)%nat ->
+  (len1 > 0)%nat ->
+  (len1 <= bucket_size)%nat ->
+  (len2 > 0)%nat ->
+  (len2 <= bucket_size)%nat ->
+  pad_to_bucket bucket_size len1 = pad_to_bucket bucket_size len2.
+Proof.
+  intros bucket_size len1 len2 Hbs Hlow1 Hhigh1 Hlow2 Hhigh2.
+  apply (pad_to_bucket_equal bucket_size 0 len1 len2); lia.
 Qed.
 
 (** [SPEC]
