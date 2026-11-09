@@ -178,5 +178,47 @@
     "theorem": "tlv_vault_roundtrip_sound",
     "allow_aeneas_axioms": true,
     "description": "Vault 全体のシリアライズ仕様モデルとデシリアライズ関数の往復健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_eqb_refl",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState ブール値等価判定関数の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_eqb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState ブール値等価判定関数と等号命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_cases",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState の有限網羅性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_locked_not_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "Locked と Unlocked の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_zeroized_not_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized と Unlocked の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_locked_not_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Locked と Zeroized の状態排他性補題"
   }
 ]
