@@ -1243,6 +1243,36 @@
   },
   {
     "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_to_bool_inverse",
+    "allow_aeneas_axioms": false,
+    "description": "SecLevel と bool の対合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "bool_to_sec_level_inverse",
+    "allow_aeneas_axioms": false,
+    "description": "bool と SecLevel の対合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_to_orb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join とブール論理和 (orb) の同型準同型補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_to_andb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet とブール論理積 (andb) の同型準同型補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_leb_to_implb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_leb とブール論理含意 (implb) の同型補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
     "theorem": "sec_join_comm",
     "allow_aeneas_axioms": false,
     "description": "sec_join の可換性補題"

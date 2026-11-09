@@ -126,12 +126,53 @@ Proof.
   - right. intros H. apply sec_leb_spec in H. rewrite H in E. discriminate.
 Qed.
 
+(** [TACTIC]
+    有限2値セキュリティレベル (SecLevel) 上の命題を一括自動解決する戦術。
+    コンテキスト内の SecLevel 変数をすべて網羅展開し、自明な等号、コンストラクタ適用、
+    および High <= Low の矛盾仮定の排除を自動実行する。 *)
+Ltac solve_sec_level :=
+  intros;
+  repeat match goal with
+  | [ l : SecLevel |- _ ] => destruct l
+  end;
+  try reflexivity;
+  try constructor;
+  repeat match goal with
+  | [ H : sec_le High Low |- _ ] => inv H
+  end.
+
+(** [MODEL]
+    SecLevel と bool の相互変換関数 (ブール束同型写像)。
+    Low を false (底元)、High を true (頂元) に対応付ける。 *)
+Definition sec_level_to_bool (l : SecLevel) : bool :=
+  match l with
+  | Low => false
+  | High => true
+  end.
+
+Definition bool_to_sec_level (b : bool) : SecLevel :=
+  if b then High else Low.
+
+(** [SPEC]
+    SecLevel と bool の対合 (Involution)・全単射性補題。 *)
+Lemma sec_level_to_bool_inverse : forall (l : SecLevel),
+  bool_to_sec_level (sec_level_to_bool l) = l.
+Proof.
+  solve_sec_level.
+Qed.
+
+Lemma bool_to_sec_level_inverse : forall (b : bool),
+  sec_level_to_bool (bool_to_sec_level b) = b.
+Proof.
+  destruct b; reflexivity.
+Qed.
+
 (** [SPEC]
     情報流順序の反射律。 *)
 Lemma sec_le_refl : forall (l : SecLevel),
   sec_le l l.
 Proof.
-  destruct l; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -139,11 +180,7 @@ Qed.
 Lemma sec_le_trans : forall (l1 l2 l3 : SecLevel),
   sec_le l1 l2 -> sec_le l2 l3 -> sec_le l1 l3.
 Proof.
-  intros l1 l2 l3 H12 H23.
-  destruct l1; destruct l2; destruct l3;
-    try constructor;
-    try (inv H12; fail);
-    try (inv H23; fail).
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -151,11 +188,7 @@ Qed.
 Lemma sec_le_antisym : forall (l1 l2 : SecLevel),
   sec_le l1 l2 -> sec_le l2 l1 -> l1 = l2.
 Proof.
-  intros l1 l2 H12 H21.
-  destruct l1; destruct l2;
-    try reflexivity;
-    try (inv H12; fail);
-    try (inv H21; fail).
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -163,7 +196,7 @@ Qed.
 Lemma sec_le_low_bottom : forall (l : SecLevel),
   sec_le Low l.
 Proof.
-  destruct l; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -171,7 +204,7 @@ Qed.
 Lemma sec_le_high_top : forall (l : SecLevel),
   sec_le l High.
 Proof.
-  destruct l; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -200,11 +233,35 @@ Definition sec_meet (l1 l2 : SecLevel) : SecLevel :=
   end.
 
 (** [SPEC]
+    sec_join とブール論理和 (orb) の同型準同型補題。 *)
+Lemma sec_join_to_orb : forall (l1 l2 : SecLevel),
+  sec_level_to_bool (sec_join l1 l2) = orb (sec_level_to_bool l1) (sec_level_to_bool l2).
+Proof.
+  solve_sec_level.
+Qed.
+
+(** [SPEC]
+    sec_meet とブール論理積 (andb) の同型準同型補題。 *)
+Lemma sec_meet_to_andb : forall (l1 l2 : SecLevel),
+  sec_level_to_bool (sec_meet l1 l2) = andb (sec_level_to_bool l1) (sec_level_to_bool l2).
+Proof.
+  solve_sec_level.
+Qed.
+
+(** [SPEC]
+    sec_leb とブール論理含意 (implb) の同型補題。 *)
+Lemma sec_leb_to_implb : forall (l1 l2 : SecLevel),
+  sec_leb l1 l2 = implb (sec_level_to_bool l1) (sec_level_to_bool l2).
+Proof.
+  solve_sec_level.
+Qed.
+
+(** [SPEC]
     sec_join の可換性補題。 *)
 Lemma sec_join_comm : forall (l1 l2 : SecLevel),
   sec_join l1 l2 = sec_join l2 l1.
 Proof.
-  destruct l1; destruct l2; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -212,7 +269,7 @@ Qed.
 Lemma sec_meet_comm : forall (l1 l2 : SecLevel),
   sec_meet l1 l2 = sec_meet l2 l1.
 Proof.
-  destruct l1; destruct l2; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -220,7 +277,7 @@ Qed.
 Lemma sec_join_assoc : forall (l1 l2 l3 : SecLevel),
   sec_join l1 (sec_join l2 l3) = sec_join (sec_join l1 l2) l3.
 Proof.
-  destruct l1; destruct l2; destruct l3; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -228,7 +285,7 @@ Qed.
 Lemma sec_meet_assoc : forall (l1 l2 l3 : SecLevel),
   sec_meet l1 (sec_meet l2 l3) = sec_meet (sec_meet l1 l2) l3.
 Proof.
-  destruct l1; destruct l2; destruct l3; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -236,7 +293,7 @@ Qed.
 Lemma sec_join_idemp : forall (l : SecLevel),
   sec_join l l = l.
 Proof.
-  destruct l; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -244,7 +301,7 @@ Qed.
 Lemma sec_meet_idemp : forall (l : SecLevel),
   sec_meet l l = l.
 Proof.
-  destruct l; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -252,13 +309,13 @@ Qed.
 Lemma sec_join_meet_absorb : forall (l1 l2 : SecLevel),
   sec_join l1 (sec_meet l1 l2) = l1.
 Proof.
-  destruct l1; destruct l2; reflexivity.
+  solve_sec_level.
 Qed.
 
 Lemma sec_meet_join_absorb : forall (l1 l2 : SecLevel),
   sec_meet l1 (sec_join l1 l2) = l1.
 Proof.
-  destruct l1; destruct l2; reflexivity.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -266,7 +323,7 @@ Qed.
 Lemma sec_join_ub_left : forall (l1 l2 : SecLevel),
   sec_le l1 (sec_join l1 l2).
 Proof.
-  destruct l1; destruct l2; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -274,7 +331,7 @@ Qed.
 Lemma sec_join_ub_right : forall (l1 l2 : SecLevel),
   sec_le l2 (sec_join l1 l2).
 Proof.
-  destruct l1; destruct l2; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -282,11 +339,7 @@ Qed.
 Lemma sec_join_least : forall (l1 l2 l3 : SecLevel),
   sec_le l1 l3 -> sec_le l2 l3 -> sec_le (sec_join l1 l2) l3.
 Proof.
-  intros l1 l2 l3 H1 H2.
-  destruct l1; destruct l2; destruct l3;
-    try constructor;
-    try (inv H1; fail);
-    try (inv H2; fail).
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -294,7 +347,7 @@ Qed.
 Lemma sec_meet_lb_left : forall (l1 l2 : SecLevel),
   sec_le (sec_meet l1 l2) l1.
 Proof.
-  destruct l1; destruct l2; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -302,7 +355,7 @@ Qed.
 Lemma sec_meet_lb_right : forall (l1 l2 : SecLevel),
   sec_le (sec_meet l1 l2) l2.
 Proof.
-  destruct l1; destruct l2; constructor.
+  solve_sec_level.
 Qed.
 
 (** [SPEC]
@@ -310,11 +363,7 @@ Qed.
 Lemma sec_meet_greatest : forall (l1 l2 l3 : SecLevel),
   sec_le l3 l1 -> sec_le l3 l2 -> sec_le l3 (sec_meet l1 l2).
 Proof.
-  intros l1 l2 l3 H1 H2.
-  destruct l1; destruct l2; destruct l3;
-    try constructor;
-    try (inv H1; fail);
-    try (inv H2; fail).
+  solve_sec_level.
 Qed.
 
 
