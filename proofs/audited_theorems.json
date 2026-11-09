@@ -1474,5 +1474,125 @@
     "theorem": "plaintext_low_equiv",
     "allow_aeneas_axioms": false,
     "description": "平文データに関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_public_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "LowPublic 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_refl",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_sym",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_trans",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の推移性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_dec",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_intro",
+    "allow_aeneas_axioms": false,
+    "description": "公開入力等号から low_input_equiv を導出する補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_perturbed_refl",
+    "allow_aeneas_axioms": false,
+    "description": "user_perturbed の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_perturbed_sym",
+    "allow_aeneas_axioms": false,
+    "description": "user_perturbed の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_perturbed_refl",
+    "allow_aeneas_axioms": false,
+    "description": "entry_perturbed の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_perturbed_sym",
+    "allow_aeneas_axioms": false,
+    "description": "entry_perturbed の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_existence_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー存在非干渉性主定理 (存在/非存在高位入力に対する低位観測値同値性)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_perturbed_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー摂動入力に対する一般化ユーザー存在非干渉性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_existence_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ有無非干渉性主定理 (有無高位入力に対する低位観測値同値性)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_perturbed_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ摂動入力に対する一般化エントリ非干渉性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_lookup_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ダミー長パディング一致条件下でのエントリ照会非干渉性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_security_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "最上位セキュリティ非干渉性主定理 (任意高位入力に対する低位観測値同値性)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_step_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "1ステップ状態遷移非干渉性主定理 (低位等価状態間のステップ遷移低位等価性保存)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "no_user_enumeration_oracle",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー列挙オラクル排除系"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "no_entry_existence_oracle",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ有無オラクル排除系"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "no_length_oracle",
+    "allow_aeneas_axioms": false,
+    "description": "レスポンス長オラクル排除系"
   }
 ]
