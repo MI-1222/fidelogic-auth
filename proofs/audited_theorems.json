@@ -813,7 +813,7 @@
     "module": "Fidelogic.Theories.PrecisProfile",
     "theorem": "username_case_mapped_length",
     "allow_aeneas_axioms": false,
-    "description": "正準化成功時における入出力文字列の長さ保存補題"
+    "description": "正準化成功時における入出力文字列の長さ上限補題"
   },
   {
     "module": "Fidelogic.Theories.PrecisProfile",

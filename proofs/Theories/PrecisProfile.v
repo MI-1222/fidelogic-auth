@@ -353,145 +353,6 @@ Proof.
   - apply IH. exact Hrest.
 Qed.
 
-(** [MODEL]
-    UsernameCaseMapped 正準化関数 (RFC 8265 Section 3.3)。
-    1. 空文字列は拒絶 (None)。
-    2. 大文字小文字マッピング (Case Folding) を適用。
-    3. マッピング後の文字列に対して禁止コードポイント検査を実施。
-    4. 禁止文字が含まれていれば拒絶 (None)、全文字合法であれば正準化結果 (Some) を返却する。 *)
-Definition precis_username_case_mapped (s : PrecisString) : option PrecisString :=
-  match s with
-  | [] => None
-  | _ =>
-      let folded := precis_fold_string s in
-      if all_allowed folded then
-        Some folded
-      else
-        None
-  end.
-
-(** [SPEC]
-    正準化成功時における出力文字列の非空性保証補題。 *)
-Lemma username_case_mapped_not_empty : forall (s s' : PrecisString),
-  precis_username_case_mapped s = Some s' ->
-  s' <> [].
-Proof.
-  intros s s' H.
-  destruct s as [| c rest]; [discriminate H |].
-  unfold precis_username_case_mapped in H.
-  destruct (all_allowed (precis_fold_string (c :: rest))) eqn:He; [| discriminate H].
-  injection H as Heq; subst s'.
-  intro Hnil.
-  unfold precis_fold_string in Hnil.
-  discriminate Hnil.
-Qed.
-
-(** [SPEC]
-    正準化成功時における入出力文字列の長さ保存補題。 *)
-Lemma username_case_mapped_length : forall (s s' : PrecisString),
-  precis_username_case_mapped s = Some s' ->
-  length s' = length s.
-Proof.
-  intros s s' H.
-  destruct s as [| c rest]; [discriminate H |].
-  unfold precis_username_case_mapped in H.
-  destruct (all_allowed (precis_fold_string (c :: rest))) eqn:He; [| discriminate H].
-  injection H as Heq; subst s'.
-  cbn. f_equal.
-  apply case_fold_string_length.
-Qed.
-
-(** [SPEC]
-    正準化成功時における出力文字列の全文字許可判定保証補題。 *)
-Lemma username_case_mapped_all_allowed : forall (s s' : PrecisString),
-  precis_username_case_mapped s = Some s' ->
-  all_allowed s' = true.
-Proof.
-  intros s s' H.
-  destruct s as [| c rest]; [discriminate H |].
-  unfold precis_username_case_mapped in H.
-  destruct (all_allowed (precis_fold_string (c :: rest))) eqn:He; [| discriminate H].
-  injection H as Heq; subst s'.
-  exact He.
-Qed.
-
-(** [SPEC]
-    文字列全文字許可判定関数とリスト全要素非禁止命題の同値性補題。 *)
-Lemma all_allowed_forall : forall (s : PrecisString),
-  all_allowed s = true <-> Forall (fun cp => is_disallowed_cp cp = false) s.
-Proof.
-  intros s.
-  unfold all_allowed.
-  split.
-  - induction s as [| c rest IH]; [constructor |].
-    cbn. intros H.
-    apply Bool.andb_true_iff in H as [Hc Hrest].
-    apply Bool.negb_true_iff in Hc.
-    constructor; [exact Hc | apply IH; exact Hrest].
-  - induction s as [| c rest IH]; [reflexivity |].
-    intros H. inv H.
-    cbn. apply Bool.andb_true_iff.
-    split; [apply Bool.negb_true_iff | apply IH]; assumption.
-Qed.
-
-(** [SPEC]
-    正準化成功時における出力文字列の全文字非禁止性保証定理。 *)
-Lemma username_case_mapped_no_disallowed : forall (s s' : PrecisString),
-  precis_username_case_mapped s = Some s' ->
-  Forall (fun cp => ~ disallowed_cp cp) s'.
-Proof.
-  intros s s' H.
-  apply username_case_mapped_all_allowed in H.
-  apply all_allowed_forall in H.
-  induction H as [| x l Hx Hl IH].
-  - constructor.
-  - constructor.
-    + intro Hc. apply is_disallowed_cp_eq in Hc.
-      rewrite Hx in Hc. discriminate Hc.
-    + exact IH.
-Qed.
-
-(** [SPEC]
-    UsernameCaseMapped プロファイル正準化関数の冪等性主定理。
-    正準化に成功した出力文字列に対し、再度正準化関数を適用しても同一の結果が得られることを保証する。 *)
-Theorem username_case_mapped_idempotent : forall (s s' : PrecisString),
-  precis_username_case_mapped s = Some s' ->
-  precis_username_case_mapped s' = Some s'.
-Proof.
-  intros s s' H.
-  destruct s as [| c rest]; [discriminate H |].
-  unfold precis_username_case_mapped in H.
-  set (folded := precis_fold_string (c :: rest)) in *.
-  destruct (all_allowed folded) eqn:He; [| discriminate H].
-  injection H as Heq; subst s'.
-  unfold precis_username_case_mapped.
-  destruct folded as [| c' rest'] eqn:Hfolded.
-  - unfold folded, precis_fold_string in Hfolded. discriminate Hfolded.
-  - assert (Hfold_id : precis_fold_string (c' :: rest') = c' :: rest').
-    { rewrite <- Hfolded.
-      subst folded.
-      apply case_fold_string_idempotent. }
-    rewrite Hfold_id.
-    rewrite He.
-    reflexivity.
-Qed.
-
-(** [SPEC]
-    大文字小文字の差異しかない2つの入力文字列に対する正準化結果の一致性 (大文字小文字不変性) 主定理。 *)
-Theorem username_case_mapped_case_insensitive : forall (s1 s2 : PrecisString),
-  precis_fold_string s1 = precis_fold_string s2 ->
-  precis_username_case_mapped s1 = precis_username_case_mapped s2.
-Proof.
-  intros s1 s2 H.
-  destruct s1 as [| c1 r1]; destruct s2 as [| c2 r2].
-  - reflexivity.
-  - unfold precis_fold_string in H. cbn in H. discriminate H.
-  - unfold precis_fold_string in H. cbn in H. discriminate H.
-  - unfold precis_username_case_mapped.
-    rewrite H.
-    reflexivity.
-Qed.
-
 (******************************************************************************)
 (* OpaqueString プロファイル仕様 (RFC 7564 / RFC 8265 Section 4)              *)
 (******************************************************************************)
@@ -1076,6 +937,365 @@ Proof.
   apply precis_nfc_normalize_no_compose.
 Qed.
 
+(** [SPEC]
+    合成後コードポイントに対する IdentifierClass 許可性保証補題。
+    正準合成によって生成されたコードポイントは、空白や禁止領域に含まれず合法であることを示す。 *)
+Lemma composed_code_point_allowed : forall (c1 c2 c' : CodePoint),
+  compose_pair c1 c2 = Some c' ->
+  is_disallowed_cp c' = false.
+Proof.
+  intros c1 c2 c' Hcomp.
+  unfold is_disallowed_cp.
+  assert (Hopaque : is_opaque_disallowed_cp c' = false).
+  { apply (composed_code_point_opaque_allowed c1 c2 c' Hcomp). }
+  unfold is_opaque_disallowed_cp in Hopaque.
+  repeat rewrite Bool.orb_false_iff in Hopaque.
+  destruct Hopaque as [[[[[H1 H2] H3] H4] H5] H6].
+  repeat rewrite Bool.orb_false_iff.
+  repeat split; try assumption.
+  unfold is_space.
+  apply compose_pair_range in Hcomp as [Hlatin | Hhangul].
+  - destruct (c' =? 32) eqn:E; [apply Z.eqb_eq in E; lia | reflexivity].
+  - destruct (c' =? 32) eqn:E; [apply Z.eqb_eq in E; lia | reflexivity].
+Qed.
+
+(** [SPEC]
+    全文字許可文字列に対する NFC 正規化適用後の許可性保存補題。 *)
+Lemma all_allowed_nfc : forall (s : PrecisString),
+  all_allowed s = true ->
+  all_allowed (precis_nfc_normalize s) = true.
+Proof.
+  unfold all_allowed.
+  assert (Hlen : forall (n : nat) (s : PrecisString),
+    (length s <= n)%nat ->
+    forallb (fun cp => negb (is_disallowed_cp cp)) s = true ->
+    forallb (fun cp => negb (is_disallowed_cp cp)) (precis_nfc_normalize s) = true).
+  { induction n as [| n' IH].
+    - intros s Hlen_s Hallow.
+      destruct s as [| c rest]; [reflexivity |].
+      cbn in Hlen_s. lia.
+    - intros s Hlen_s Hallow.
+      destruct s as [| c1 [| c2 rest2]].
+      + reflexivity.
+      + cbn in Hallow |- *. exact Hallow.
+      + cbn in Hallow.
+        repeat rewrite Bool.andb_true_iff in Hallow.
+        destruct Hallow as [Hc1 [Hc2 Hrest2]].
+        cbn [precis_nfc_normalize].
+        destruct (compose_pair c1 c2) as [c' |] eqn:Hcomp.
+        * cbn.
+          apply Bool.andb_true_iff.
+          split.
+          { apply Bool.negb_true_iff.
+            apply (composed_code_point_allowed c1 c2 c' Hcomp). }
+          { apply (IH rest2).
+            - cbn in Hlen_s. lia.
+            - exact Hrest2. }
+        * cbn.
+          apply Bool.andb_true_iff.
+          split.
+          { exact Hc1. }
+          { apply (IH (c2 :: rest2)).
+            - cbn in Hlen_s |- *. lia.
+            - cbn.
+              apply Bool.andb_true_iff.
+              split; [ exact Hc2 | exact Hrest2 ]. } }
+  intros s Hallow.
+  apply (Hlen (length s) s); [lia | exact Hallow].
+Qed.
+
+(** [SPEC]
+    非空文字列に対する NFC 正規化結果の非空性保証補題。 *)
+Lemma precis_nfc_normalize_not_empty : forall (c : CodePoint) (rest : PrecisString),
+  precis_nfc_normalize (c :: rest) <> [].
+Proof.
+  intros c rest.
+  destruct (precis_nfc_normalize_cons c rest) as [h [t Heq]].
+  rewrite Heq.
+  discriminate.
+Qed.
+
+(** [SPEC]
+    NFC 正規化による文字列長の非増加性 (長さ上限) 補題。 *)
+Lemma precis_nfc_normalize_length_le : forall (s : PrecisString),
+  (length (precis_nfc_normalize s) <= length s)%nat.
+Proof.
+  induction s as [s IH] using (well_founded_induction (well_founded_ltof _ (@length _))).
+  unfold ltof in IH.
+  destruct s as [| c1 [| c2 rest2]].
+  - reflexivity.
+  - reflexivity.
+  - cbn [precis_nfc_normalize].
+    destruct (compose_pair c1 c2) as [c' |] eqn:Hcomp.
+    + simpl length.
+      specialize (IH rest2).
+      assert (Hlt : (length rest2 < S (S (length rest2)))%nat) by lia.
+      specialize (IH Hlt). lia.
+    + simpl length.
+      specialize (IH (c2 :: rest2)).
+      assert (Hlt : (length (c2 :: rest2) < S (S (length rest2)))%nat) by auto.
+      specialize (IH Hlt).
+      simpl length in IH. lia.
+Qed.
+
+(** [SPEC]
+    小文字化済みペアに対する正準合成結果の小文字性保存補題。 *)
+Lemma fold_preserves_composed : forall (c1 c2 c' : CodePoint),
+  precis_fold_cp c1 = c1 ->
+  compose_pair c1 c2 = Some c' ->
+  precis_fold_cp c' = c'.
+Proof.
+  intros c1 c2 c' Hfold Hcomp.
+  destruct (c1 =? 65) eqn:E65.
+  { apply Z.eqb_eq in E65. subst c1.
+    unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+  destruct (c1 =? 67) eqn:E67.
+  { apply Z.eqb_eq in E67. subst c1.
+    unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+  destruct (c1 =? 69) eqn:E69.
+  { apply Z.eqb_eq in E69. subst c1.
+    unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+  destruct (c1 =? 73) eqn:E73.
+  { apply Z.eqb_eq in E73. subst c1.
+    unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+  destruct (c1 =? 79) eqn:E79.
+  { apply Z.eqb_eq in E79. subst c1.
+    unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+  destruct (c1 =? 85) eqn:E85.
+  { apply Z.eqb_eq in E85. subst c1.
+    unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+  unfold compose_pair in Hcomp.
+  rewrite E65, E67, E69, E73, E79, E85 in Hcomp.
+  destruct (c1 =? 97) eqn:E97;
+    [| destruct (c1 =? 99) eqn:E99;
+    [| destruct (c1 =? 101) eqn:E101;
+    [| destruct (c1 =? 105) eqn:E105;
+    [| destruct (c1 =? 111) eqn:E111;
+    [| destruct (c1 =? 117) eqn:E117;
+    [| destruct (4352 <=? c1) eqn:EH1;
+    [| discriminate Hcomp ]]]]]]].
+  all: try (
+    repeat (
+      match goal with
+      | H : (if ?b then _ else _) = Some _ |- _ =>
+          destruct b eqn:?; try discriminate H
+      end
+    );
+    injection Hcomp as ?; subst c';
+    unfold precis_fold_cp; cbn; reflexivity
+  ).
+  - destruct (c1 <=? 4370) eqn:EH2; [| discriminate Hcomp].
+    destruct (4449 <=? c2) eqn:EH3; [| discriminate Hcomp].
+    destruct (c2 <=? 4469) eqn:EH4; [| discriminate Hcomp].
+    injection Hcomp as ?; subst c'.
+    apply Z.leb_le in EH1, EH2, EH3, EH4.
+    assert (Hrange := compose_hangul_syllable_range c1 c2 (conj EH1 EH2) (conj EH3 EH4)).
+    unfold precis_fold_cp.
+    assert (Hnot1 : in_range 65 90 (compose_hangul_syllable c1 c2) = false).
+    { apply in_range_false. lia. }
+    assert (Hnot2 : in_range 192 214 (compose_hangul_syllable c1 c2) = false).
+    { apply in_range_false. lia. }
+    assert (Hnot3 : in_range 216 222 (compose_hangul_syllable c1 c2) = false).
+    { apply in_range_false. lia. }
+    assert (Hnot4 : in_range 913 929 (compose_hangul_syllable c1 c2) = false).
+    { apply in_range_false. lia. }
+    assert (Hnot5 : in_range 931 939 (compose_hangul_syllable c1 c2) = false).
+    { apply in_range_false. lia. }
+    assert (Hnot6 : in_range 1040 1071 (compose_hangul_syllable c1 c2) = false).
+    { apply in_range_false. lia. }
+    rewrite Hnot1, Hnot2, Hnot3, Hnot4, Hnot5, Hnot6.
+    reflexivity.
+Qed.
+
+(** [SPEC]
+    小文字化済み文字列に対する NFC 正規化結果の小文字性保存補題。 *)
+Lemma fold_string_nfc_folded_id : forall (s : PrecisString),
+  precis_fold_string (precis_nfc_normalize (precis_fold_string s)) =
+  precis_nfc_normalize (precis_fold_string s).
+Proof.
+  intros s.
+  set (folded := precis_fold_string s).
+  assert (Hfolded_id : forall cp, In cp folded -> precis_fold_cp cp = cp).
+  { intros cp Hin. subst folded.
+    apply in_map_iff in Hin as [x [Hx Hin_s]].
+    subst cp.
+    apply case_fold_idempotent. }
+  unfold precis_fold_string.
+  induction folded as [f IH] using (well_founded_induction (well_founded_ltof _ (@length _))).
+  unfold ltof in IH.
+  destruct f as [| c1 [| c2 rest2]].
+  - reflexivity.
+  - cbn. f_equal.
+    apply Hfolded_id. left. reflexivity.
+  - cbn [precis_nfc_normalize].
+    destruct (compose_pair c1 c2) as [c' |] eqn:Hcomp.
+    + cbn [map]. f_equal.
+      * apply (fold_preserves_composed c1 c2 c').
+        { apply Hfolded_id. left. reflexivity. }
+        { exact Hcomp. }
+      * apply (IH rest2).
+        { cbn. lia. }
+        { intros cp Hin. apply Hfolded_id. right. right. exact Hin. }
+    + cbn [map]. f_equal.
+      * apply Hfolded_id. left. reflexivity.
+      * apply (IH (c2 :: rest2)).
+        { cbn. lia. }
+        { intros cp Hin. apply Hfolded_id. right. exact Hin. }
+Qed.
+
+(** [SPEC]
+    文字列全文字許可判定関数とリスト全要素非禁止命題の同値性補題。 *)
+Lemma all_allowed_forall : forall (s : PrecisString),
+  all_allowed s = true <-> Forall (fun cp => is_disallowed_cp cp = false) s.
+Proof.
+  intros s.
+  unfold all_allowed.
+  split.
+  - induction s as [| c rest IH]; [constructor |].
+    cbn. intros H.
+    apply Bool.andb_true_iff in H as [Hc Hrest].
+    apply Bool.negb_true_iff in Hc.
+    constructor; [exact Hc | apply IH; exact Hrest].
+  - induction s as [| c rest IH]; [reflexivity |].
+    intros H. inv H.
+    cbn. apply Bool.andb_true_iff.
+    split; [apply Bool.negb_true_iff | apply IH]; assumption.
+Qed.
+
+(******************************************************************************)
+(* UsernameCaseMapped プロファイル仕様 (RFC 7564 / RFC 8265 Section 3)        *)
+(******************************************************************************)
+
+(** [MODEL]
+    UsernameCaseMapped 正準化関数 (RFC 8265 Section 3.3)。
+    1. 空文字列は拒絶 (None)。
+    2. 大文字小文字マッピング (Case Folding) を適用。
+    3. Unicode 正規化形式 NFC を適用。
+    4. 正規化後の文字列に対して禁止コードポイント検査を実施。
+    5. 禁止文字が含まれていれば拒絶 (None)、全文字合法であれば正準化結果 (Some) を返却する。 *)
+Definition precis_username_case_mapped (s : PrecisString) : option PrecisString :=
+  match s with
+  | [] => None
+  | _ =>
+      let folded := precis_fold_string s in
+      let normalized := precis_nfc_normalize folded in
+      if all_allowed normalized then
+        Some normalized
+      else
+        None
+  end.
+
+(** [SPEC]
+    正準化成功時における出力文字列の非空性保証補題。 *)
+Lemma username_case_mapped_not_empty : forall (s s' : PrecisString),
+  precis_username_case_mapped s = Some s' ->
+  s' <> [].
+Proof.
+  intros s s' H.
+  destruct s as [| c rest]; [discriminate H |].
+  unfold precis_username_case_mapped in H.
+  destruct (all_allowed (precis_nfc_normalize (precis_fold_string (c :: rest)))) eqn:He; [| discriminate H].
+  injection H as Heq; subst s'.
+  cbn [precis_fold_string].
+  apply precis_nfc_normalize_not_empty.
+Qed.
+
+(** [SPEC]
+    正準化成功時における入出力文字列の長さ上限補題。 *)
+Lemma username_case_mapped_length : forall (s s' : PrecisString),
+  precis_username_case_mapped s = Some s' ->
+  (length s' <= length s)%nat.
+Proof.
+  intros s s' H.
+  destruct s as [| c rest]; [discriminate H |].
+  unfold precis_username_case_mapped in H.
+  destruct (all_allowed (precis_nfc_normalize (precis_fold_string (c :: rest)))) eqn:He; [| discriminate H].
+  injection H as Heq; subst s'.
+  assert (Hle := precis_nfc_normalize_length_le (precis_fold_string (c :: rest))).
+  rewrite case_fold_string_length in Hle.
+  exact Hle.
+Qed.
+
+(** [SPEC]
+    正準化成功時における出力文字列の全文字許可判定保証補題。 *)
+Lemma username_case_mapped_all_allowed : forall (s s' : PrecisString),
+  precis_username_case_mapped s = Some s' ->
+  all_allowed s' = true.
+Proof.
+  intros s s' H.
+  destruct s as [| c rest]; [discriminate H |].
+  unfold precis_username_case_mapped in H.
+  destruct (all_allowed (precis_nfc_normalize (precis_fold_string (c :: rest)))) eqn:He; [| discriminate H].
+  injection H as Heq; subst s'.
+  exact He.
+Qed.
+
+(** [SPEC]
+    正準化成功時における出力文字列の全文字非禁止性保証定理。 *)
+Lemma username_case_mapped_no_disallowed : forall (s s' : PrecisString),
+  precis_username_case_mapped s = Some s' ->
+  Forall (fun cp => ~ disallowed_cp cp) s'.
+Proof.
+  intros s s' H.
+  apply username_case_mapped_all_allowed in H.
+  apply all_allowed_forall in H.
+  induction H as [| x l Hx Hl IH].
+  - constructor.
+  - constructor.
+    + intro Hc. apply is_disallowed_cp_eq in Hc.
+      rewrite Hx in Hc. discriminate Hc.
+    + exact IH.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped プロファイル正準化関数の冪等性主定理。
+    正準化に成功した出力文字列に対し、再度正準化関数を適用しても同一の結果が得られることを保証する。 *)
+Theorem username_case_mapped_idempotent : forall (s s' : PrecisString),
+  precis_username_case_mapped s = Some s' ->
+  precis_username_case_mapped s' = Some s'.
+Proof.
+  intros s s' H.
+  destruct s as [| c rest]; [discriminate H |].
+  unfold precis_username_case_mapped in H.
+  set (folded := precis_fold_string (c :: rest)) in *.
+  set (normalized := precis_nfc_normalize folded) in *.
+  destruct (all_allowed normalized) eqn:He; [| discriminate H].
+  injection H as Heq; subst s'.
+  unfold precis_username_case_mapped.
+  destruct normalized as [| c' rest'] eqn:Hnorm.
+  - exfalso.
+    assert (Hnot_nil : precis_nfc_normalize folded <> []).
+    { subst folded. cbn [precis_fold_string].
+      apply precis_nfc_normalize_not_empty. }
+    apply Hnot_nil. exact Hnorm.
+  - assert (Hfold_id : precis_fold_string (c' :: rest') = c' :: rest').
+    { rewrite <- Hnorm.
+      apply fold_string_nfc_folded_id. }
+    rewrite Hfold_id.
+    assert (Hnfc_id : precis_nfc_normalize (c' :: rest') = c' :: rest').
+    { rewrite <- Hnorm.
+      apply nfc_normalize_idempotent. }
+    rewrite Hnfc_id.
+    rewrite He.
+    reflexivity.
+Qed.
+
+(** [SPEC]
+    大文字小文字の差異しかない2つの入力文字列に対する正準化結果の一致性 (大文字小文字不変性) 主定理。 *)
+Theorem username_case_mapped_case_insensitive : forall (s1 s2 : PrecisString),
+  precis_fold_string s1 = precis_fold_string s2 ->
+  precis_username_case_mapped s1 = precis_username_case_mapped s2.
+Proof.
+  intros s1 s2 H.
+  destruct s1 as [| c1 r1]; destruct s2 as [| c2 r2].
+  - reflexivity.
+  - unfold precis_fold_string in H. cbn in H. discriminate H.
+  - unfold precis_fold_string in H. cbn in H. discriminate H.
+  - unfold precis_username_case_mapped.
+    rewrite H.
+    reflexivity.
+Qed.
+
 (** [MODEL]
     OpaqueString 正準化関数 (RFC 8265 Section 4.2)。
     1. 空文字列は拒絶 (None)。
@@ -1515,16 +1735,16 @@ Definition precis_golden_suite : list PrecisTestCase := [
      tc_expected_user := None;
      tc_expected_opaque := None |};
   {| tc_input := [101; 769];
-     tc_expected_user := Some [101; 769];
+     tc_expected_user := Some [233];
      tc_expected_opaque := Some [233] |};
   {| tc_input := [65; 776];
-     tc_expected_user := Some [97; 776];
+     tc_expected_user := Some [228];
      tc_expected_opaque := Some [196] |};
   {| tc_input := [99; 807];
-     tc_expected_user := Some [99; 807];
+     tc_expected_user := Some [231];
      tc_expected_opaque := Some [231] |};
   {| tc_input := [4352; 4449];
-     tc_expected_user := Some [4352; 4449];
+     tc_expected_user := Some [44032];
      tc_expected_opaque := Some [44032] |}
 ].
 
