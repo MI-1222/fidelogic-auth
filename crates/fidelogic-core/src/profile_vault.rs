@@ -135,10 +135,8 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_serialize_record_reexport() {
-        let record = TlvRecord::Unknown {
-            tag: 99,
-            raw_bytes: alloc::vec![1, 2, 3],
-        };
+        let record =
+            TlvRecord::new_unknown(99, alloc::vec![1, 2, 3]).expect("未知レコードの生成に成功。");
         let res = serialize_record(&record);
         assert!(
             res.is_ok(),
@@ -171,10 +169,8 @@ mod tests {
             "profile_vault経由のslot_serialized_len呼び出しに成功。"
         );
 
-        let record = TlvRecord::Unknown {
-            tag: 99,
-            raw_bytes: alloc::vec![1, 2, 3],
-        };
+        let record =
+            TlvRecord::new_unknown(99, alloc::vec![1, 2, 3]).expect("未知レコードの生成に成功。");
         let record_len = record_serialized_len(&record).expect("レコード長計算に成功。");
         assert_eq!(
             record_len,

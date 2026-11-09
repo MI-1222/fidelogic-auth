@@ -342,6 +342,9 @@ pub type TlvPayload = EntryPayload;
 /// ペイロード部のTLVレコードを表す代数的データ型(ADT)。
 ///
 /// 暗号化エントリレコード([`TlvRecord::Entry`])または将来拡張用の未知タグレコード([`TlvRecord::Unknown`])を表現する。
+///
+/// 既知タグ([`TAG_ENTRY`])の混入によるラウンドトリップ破壊を防止するため、
+/// 未知タグレコードの生成にはスマートコンストラクタ [`TlvRecord::new_unknown`] の利用を推奨する。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
@@ -359,12 +362,36 @@ pub enum TlvRecord {
 
 #[cfg(feature = "alloc")]
 impl TlvRecord {
+    /// 未知タグレコードを安全に生成するスマートコンストラクタ。
+    ///
+    /// 既知のエントリタグ ([`TAG_ENTRY`]) が指定された場合は、
+    /// デシリアライズ時の型混入およびラウンドトリップ破壊を防止するため [`VaultError::InvalidFormat`] を返す。
+    ///
+    /// # Errors
+    ///
+    /// - `tag == TAG_ENTRY` の場合は [`VaultError::InvalidFormat`] を返す。
+    pub fn new_unknown(tag: u8, raw_bytes: alloc::vec::Vec<u8>) -> Result<Self, VaultError> {
+        if tag == TAG_ENTRY {
+            return Err(VaultError::InvalidFormat);
+        }
+        Ok(Self::Unknown { tag, raw_bytes })
+    }
+
     /// レコード種別タグを返す。
     #[must_use]
     pub const fn tag(&self) -> u8 {
         match *self {
             Self::Entry(_) => TAG_ENTRY,
             Self::Unknown { tag, .. } => tag,
+        }
+    }
+
+    /// 未知レコードの生バイト列スライスを返す。エントリレコードの場合は `None` を返す。
+    #[must_use]
+    pub fn raw_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Entry(_) => None,
+            Self::Unknown { raw_bytes, .. } => Some(raw_bytes),
         }
     }
 }
@@ -406,10 +433,7 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
         TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
     } else {
         let raw_bytes = payload_bytes.to_vec();
-        TlvRecord::Unknown {
-            tag: header.tag,
-            raw_bytes,
-        }
+        TlvRecord::new_unknown(header.tag, raw_bytes)?
     };
 
     Ok((record, rest))
@@ -419,6 +443,7 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
 ///
 /// # Errors
 ///
+/// - 未知レコードのタグが既知タグ ([`TAG_ENTRY`]) である場合は、ラウンドトリップ破壊防止のため [`VaultError::InvalidFormat`] を返す。
 /// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 fn record_payload_len(record: &TlvRecord) -> Result<u8, VaultError> {
@@ -428,7 +453,12 @@ fn record_payload_len(record: &TlvRecord) -> Result<u8, VaultError> {
             .len()
             .checked_add(AUTH_TAG_LEN)
             .ok_or(VaultError::InvalidLength)?,
-        TlvRecord::Unknown { raw_bytes, .. } => raw_bytes.len(),
+        TlvRecord::Unknown { tag, raw_bytes } => {
+            if *tag == TAG_ENTRY {
+                return Err(VaultError::InvalidFormat);
+            }
+            raw_bytes.len()
+        }
     };
     u8::try_from(len).map_err(|_| VaultError::InvalidLength)
 }
@@ -716,6 +746,66 @@ mod tests {
             unknown1.tag(),
             99,
             "TlvRecord::Unknownからのtag取得に成功。"
+        );
+        assert_eq!(
+            unknown1.raw_bytes(),
+            Some(&[0xde, 0xad, 0xbe, 0xef][..]),
+            "TlvRecord::Unknownからの生バイト列取得に成功。"
+        );
+        assert_eq!(
+            entry1.raw_bytes(),
+            None,
+            "TlvRecord::Entryのraw_bytesがNoneを返すことに成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_tlv_record_new_unknown_success() {
+        let rec = TlvRecord::new_unknown(99, alloc::vec![1, 2, 3, 4])
+            .expect("未知タグレコードの生成に成功。");
+        assert_eq!(rec.tag(), 99, "未知タグの取得に成功。");
+        assert_eq!(
+            rec.raw_bytes(),
+            Some(&[1, 2, 3, 4][..]),
+            "未知レコードの生バイト列取得に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_tlv_record_new_unknown_rejects_tag_entry() {
+        let err = TlvRecord::new_unknown(TAG_ENTRY, alloc::vec![1, 2, 3, 4])
+            .expect_err("TAG_ENTRYのUnknown生成は拒絶される。");
+        assert_eq!(
+            err,
+            VaultError::InvalidFormat,
+            "既知タグ混入がInvalidFormatで拒絶されることに成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_serialize_record_unknown_with_tag_entry_rejected() {
+        // 直接構築された TAG_ENTRY の Unknown レコードに対してもシリアライザが防御的に拒絶することを検証。
+        let forged_record = TlvRecord::Unknown {
+            tag: TAG_ENTRY,
+            raw_bytes: alloc::vec![1, 2, 3, 4],
+        };
+        let err_len = record_serialized_len(&forged_record)
+            .expect_err("TAG_ENTRYを持つUnknownの長計算は拒絶される。");
+        assert_eq!(
+            err_len,
+            VaultError::InvalidFormat,
+            "record_serialized_lenがInvalidFormatを返すことに成功。"
+        );
+
+        let err_ser = serialize_record(&forged_record)
+            .expect_err("TAG_ENTRYを持つUnknownのシリアライズは拒絶される。");
+        assert_eq!(
+            err_ser,
+            VaultError::InvalidFormat,
+            "serialize_recordがInvalidFormatを返すことに成功。"
         );
     }
 
