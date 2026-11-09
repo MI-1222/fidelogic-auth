@@ -964,23 +964,10 @@ Definition eval_query (inp : VaultSecurityInput) : LowObservation :=
 
 (** [MODEL]
     防護的Vault総合クエリ評価関数 (eval_vault_query)。
-    ユーザー存在・エントリ存在・マスター鍵の有無など高位機密を実際に評価・分岐し、
-    平文データまたはダミーペイロードを指定バケットサイズにパディングして低位観測値を算出する。 *)
+    防護的エントリ照会評価関数 (eval_query) のエイリアスとして定義し、
+    重複を排除して単一の防護的照会モデルに統合する。 *)
 Definition eval_vault_query (inp : VaultSecurityInput) : LowObservation :=
-  let len :=
-    if sec_user_exists (input_high inp) && sec_entry_exists (input_high inp)
-    then
-      match sec_master_key (input_high inp) with
-      | Some _ => length (sec_plaintext (input_high inp))
-      | None   => default_dummy_len
-      end
-    else default_dummy_len
-  in
-  mkLowObservation
-    None
-    (pad_to_bucket (pub_req_length (input_public inp)) len)
-    (pub_header (input_public inp))
-    (pub_slot_id (input_public inp)).
+  eval_query inp.
 
 (** [MODEL]
     統合セキュリティ状態遷移関数 (vault_security_step)。
@@ -1095,22 +1082,22 @@ Qed.
 (** [SPEC]
     最上位セキュリティ非干渉性主定理 (vault_security_non_interference):
     低位公開入力が等しい任意の2つの入力 inp1, inp2 において、
-    パディング長一致条件下では高位機密 (ユーザー存在・エントリ有無・平文データ・マスター鍵) が任意に異なっていても、
+    パディング長一致条件下では高位機密 (エントリ有無・平文データ等) が異なっていても、
     評価後の低位観測値は常に完全に同値 (low_obs_eq) である。 *)
 Theorem vault_security_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   pad_to_bucket (pub_req_length (input_public inp1))
-    (if sec_user_exists (input_high inp1) && sec_entry_exists (input_high inp1)
-     then match sec_master_key (input_high inp1) with Some _ => length (sec_plaintext (input_high inp1)) | None => default_dummy_len end
+    (if sec_entry_exists (input_high inp1)
+     then length (sec_plaintext (input_high inp1))
      else default_dummy_len) =
   pad_to_bucket (pub_req_length (input_public inp1))
-    (if sec_user_exists (input_high inp2) && sec_entry_exists (input_high inp2)
-     then match sec_master_key (input_high inp2) with Some _ => length (sec_plaintext (input_high inp2)) | None => default_dummy_len end
+    (if sec_entry_exists (input_high inp2)
+     then length (sec_plaintext (input_high inp2))
      else default_dummy_len) ->
   low_obs_eq (eval_vault_query inp1) (eval_vault_query inp2).
 Proof.
   intros inp1 inp2 Hequiv Hpad.
-  unfold eval_vault_query, low_obs_eq, low_input_equiv in *.
+  unfold eval_vault_query, eval_query, eval_entry_lookup, low_obs_eq, low_input_equiv in *.
   simpl.
   rewrite Hequiv in *.
   rewrite Hpad.
@@ -1124,19 +1111,19 @@ Qed.
 Theorem vault_step_non_interference : forall (s1 s2 : VaultSecurityState) (req : LowPublic),
   low_equiv s1 s2 ->
   pad_to_bucket (pub_req_length req)
-    (if sec_user_exists (state_high s1) && sec_entry_exists (state_high s1)
-     then match sec_master_key (state_high s1) with Some _ => length (sec_plaintext (state_high s1)) | None => default_dummy_len end
+    (if sec_entry_exists (state_high s1)
+     then length (sec_plaintext (state_high s1))
      else default_dummy_len) =
   pad_to_bucket (pub_req_length req)
-    (if sec_user_exists (state_high s2) && sec_entry_exists (state_high s2)
-     then match sec_master_key (state_high s2) with Some _ => length (sec_plaintext (state_high s2)) | None => default_dummy_len end
+    (if sec_entry_exists (state_high s2)
+     then length (sec_plaintext (state_high s2))
      else default_dummy_len) ->
   low_equiv (vault_security_step s1 req) (vault_security_step s2 req).
 Proof.
   intros s1 s2 req Hequiv Hpad.
   unfold vault_security_step, low_equiv, observe_low.
   simpl.
-  unfold eval_vault_query, low_obs_eq.
+  unfold eval_vault_query, eval_query, eval_entry_lookup, low_obs_eq.
   simpl.
   rewrite Hpad.
   repeat split; reflexivity.
@@ -1189,17 +1176,17 @@ Qed.
 Corollary no_length_oracle : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   pad_to_bucket (pub_req_length (input_public inp1))
-    (if sec_user_exists (input_high inp1) && sec_entry_exists (input_high inp1)
-     then match sec_master_key (input_high inp1) with Some _ => length (sec_plaintext (input_high inp1)) | None => default_dummy_len end
+    (if sec_entry_exists (input_high inp1)
+     then length (sec_plaintext (input_high inp1))
      else default_dummy_len) =
   pad_to_bucket (pub_req_length (input_public inp1))
-    (if sec_user_exists (input_high inp2) && sec_entry_exists (input_high inp2)
-     then match sec_master_key (input_high inp2) with Some _ => length (sec_plaintext (input_high inp2)) | None => default_dummy_len end
+    (if sec_entry_exists (input_high inp2)
+     then length (sec_plaintext (input_high inp2))
      else default_dummy_len) ->
   obs_length (eval_vault_query inp1) = obs_length (eval_vault_query inp2).
 Proof.
   intros inp1 inp2 Hequiv Hpad.
-  unfold eval_vault_query, low_input_equiv in *.
+  unfold eval_vault_query, eval_query, eval_entry_lookup, low_input_equiv in *.
   simpl.
   rewrite Hequiv in *.
   rewrite Hpad.
