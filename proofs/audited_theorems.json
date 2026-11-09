@@ -562,5 +562,77 @@
     "theorem": "slot_multiplexing_can_reach",
     "allow_aeneas_axioms": false,
     "description": "到達可能性述語 can_reach を用いたスロット多重化健全性定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "is_valid_unlock_eventb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "is_valid_unlock_eventb と valid_unlock_event の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "is_unlock_success_eventb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "is_unlock_success_eventb と unlock_success_event の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "not_unlock_success_implies_not_valid_unlock",
+    "allow_aeneas_axioms": false,
+    "description": "構文的解錠成功イベントでないならば有効な認証イベントになり得ないことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "no_valid_unlock_traceb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "no_valid_unlock_traceb と no_valid_unlock_trace の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "no_unlock_success_implies_no_valid_unlock_trace",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを含まないトレースは任意の環境において未認証トレースとなることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_non_unlocked_invariant",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から有効な認証イベントを経ない単一ステップ遷移において遷移先も非解錠状態にとどまることを示す1ステップ保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_non_unlocked_invariant",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から有効な認証イベントを含まない多段階遷移列により到達可能な任意の状態はUnlockedになり得ないことを示す一般化トレース不変性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "非到達性定理: 施錠状態から有効な認証イベントを経ない任意の遷移列によって解錠状態に到達することは不可能であることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_syntax_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを含まないトレースに対する非到達性定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "DEK平文非露出定理: 施錠状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_no_auth_cannot_extract_dek",
+    "allow_aeneas_axioms": false,
+    "description": "DEK平文非露出定理の系: 施錠状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す否定的帰結系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_syntax_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを含まないトレースに対するDEK平文非露出定理の系"
   }
 ]

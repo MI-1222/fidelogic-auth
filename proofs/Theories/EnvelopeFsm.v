@@ -937,3 +937,267 @@ Proof.
   unfold can_reach.
   apply (slot_multiplexing_soundness slots Hany).
 Qed.
+
+(** [MODEL]
+    指定されたイベントが有効な認証イベント (健全なスロットに対する解錠成功イベント) であるかを判定するブール関数。 *)
+Definition is_valid_unlock_eventb (slots : KekSlots) (ev : VaultEvent) : bool :=
+  match ev with
+  | EventUnlockSuccess id => slot_validb slots id
+  | _ => false
+  end.
+
+(** [SPEC]
+    指定されたイベントが有効な認証イベント (健全なスロットに対する解錠成功イベント) であることを表す述語。 *)
+Definition valid_unlock_event (slots : KekSlots) (ev : VaultEvent) : Prop :=
+  exists (id : SlotId), ev = EventUnlockSuccess id /\ slot_valid slots id.
+
+(** [SPEC]
+    is_valid_unlock_eventb と valid_unlock_event の同値性補題。 *)
+Lemma is_valid_unlock_eventb_eq : forall (slots : KekSlots) (ev : VaultEvent),
+  is_valid_unlock_eventb slots ev = true <-> valid_unlock_event slots ev.
+Proof.
+  intros slots ev.
+  unfold is_valid_unlock_eventb, valid_unlock_event.
+  destruct ev as [id | id | | | | ].
+  - split; intro H.
+    + discriminate H.
+    + destruct H as [id0 [Heq Hval]]. discriminate Heq.
+  - split; intro H.
+    + exists id. split; [reflexivity |].
+      apply slot_validb_eq. exact H.
+    + destruct H as [id0 [Heq Hval]].
+      inversion Heq; subst id0.
+      apply slot_validb_eq. exact Hval.
+  - split; intro H; [discriminate H | destruct H as [id0 [Heq _]]; discriminate Heq].
+  - split; intro H; [discriminate H | destruct H as [id0 [Heq _]]; discriminate Heq].
+  - split; intro H; [discriminate H | destruct H as [id0 [Heq _]]; discriminate Heq].
+  - split; intro H; [discriminate H | destruct H as [id0 [Heq _]]; discriminate Heq].
+Qed.
+
+(** [MODEL]
+    指定されたイベントが構文的に解錠成功イベント (EventUnlockSuccess) であるかを判定するブール関数。 *)
+Definition is_unlock_success_eventb (ev : VaultEvent) : bool :=
+  match ev with
+  | EventUnlockSuccess _ => true
+  | _ => false
+  end.
+
+(** [SPEC]
+    指定されたイベントが構文的に解錠成功イベント (EventUnlockSuccess) であることを表す述語。 *)
+Definition unlock_success_event (ev : VaultEvent) : Prop :=
+  exists (id : SlotId), ev = EventUnlockSuccess id.
+
+(** [SPEC]
+    is_unlock_success_eventb と unlock_success_event の同値性補題。 *)
+Lemma is_unlock_success_eventb_eq : forall (ev : VaultEvent),
+  is_unlock_success_eventb ev = true <-> unlock_success_event ev.
+Proof.
+  intro ev.
+  unfold is_unlock_success_eventb, unlock_success_event.
+  destruct ev as [id | id | | | | ].
+  - split; intro H; [discriminate H | destruct H as [id0 Heq]; discriminate Heq].
+  - split; intro H; [exists id; reflexivity | reflexivity].
+  - split; intro H; [discriminate H | destruct H as [id0 Heq]; discriminate Heq].
+  - split; intro H; [discriminate H | destruct H as [id0 Heq]; discriminate Heq].
+  - split; intro H; [discriminate H | destruct H as [id0 Heq]; discriminate Heq].
+  - split; intro H; [discriminate H | destruct H as [id0 Heq]; discriminate Heq].
+Qed.
+
+(** [SPEC]
+    構文的解錠成功イベントでないならば、いかなるスロット構成に対しても有効な認証イベントになり得ないことを示す補題。 *)
+Lemma not_unlock_success_implies_not_valid_unlock : forall (slots : KekSlots) (ev : VaultEvent),
+  ~ unlock_success_event ev ->
+  ~ valid_unlock_event slots ev.
+Proof.
+  intros slots ev Hnot [id [Heq Hval]].
+  apply Hnot.
+  exists id. exact Heq.
+Qed.
+
+(** [SPEC]
+    イベント列に有効な認証イベントが含まれないこと (未認証トレース) を表す述語。 *)
+Definition no_valid_unlock_trace (slots : KekSlots) (trace : list VaultEvent) : Prop :=
+  Forall (fun ev => ~ valid_unlock_event slots ev) trace.
+
+(** [MODEL]
+    イベント列に有効な認証イベントが含まれないかを判定するブール関数。 *)
+Definition no_valid_unlock_traceb (slots : KekSlots) (trace : list VaultEvent) : bool :=
+  forallb (fun ev => negb (is_valid_unlock_eventb slots ev)) trace.
+
+(** [SPEC]
+    no_valid_unlock_traceb と no_valid_unlock_trace の同値性補題。 *)
+Lemma no_valid_unlock_traceb_eq : forall (slots : KekSlots) (trace : list VaultEvent),
+  no_valid_unlock_traceb slots trace = true <-> no_valid_unlock_trace slots trace.
+Proof.
+  intros slots trace.
+  unfold no_valid_unlock_traceb, no_valid_unlock_trace.
+  rewrite forallb_forall.
+  rewrite Forall_forall.
+  split; intros H ev Hin.
+  - specialize (H ev Hin).
+    apply negb_true_iff in H.
+    intro Hval.
+    apply is_valid_unlock_eventb_eq in Hval.
+    rewrite Hval in H.
+    discriminate H.
+  - specialize (H ev Hin).
+    apply negb_true_iff.
+    destruct (is_valid_unlock_eventb slots ev) eqn:Eb.
+    + apply is_valid_unlock_eventb_eq in Eb.
+      exfalso. apply (H Eb).
+    + reflexivity.
+Qed.
+
+(** [SPEC]
+    イベント列に構文的な解錠成功イベントが一切含まれないことを表す述語。 *)
+Definition no_unlock_success_trace (trace : list VaultEvent) : Prop :=
+  Forall (fun ev => ~ unlock_success_event ev) trace.
+
+(** [SPEC]
+    構文的に解錠成功イベントを含まないトレースは、任意の環境において未認証トレースとなることを示す補題。 *)
+Lemma no_unlock_success_implies_no_valid_unlock_trace : forall (slots : KekSlots) (trace : list VaultEvent),
+  no_unlock_success_trace trace ->
+  no_valid_unlock_trace slots trace.
+Proof.
+  intros slots trace Htrace.
+  unfold no_unlock_success_trace in Htrace.
+  unfold no_valid_unlock_trace.
+  rewrite Forall_forall in *.
+  intros ev Hin.
+  specialize (Htrace ev Hin).
+  apply not_unlock_success_implies_not_valid_unlock.
+  exact Htrace.
+Qed.
+
+(** [SPEC]
+    非解錠状態集合 (Locked, Unlocking, Zeroized) から有効な認証イベントを経ない単一ステップ遷移において、
+    遷移先の状態も必ず非解錠状態 (Locked, Unlocking, Zeroized) にとどまることを示す1ステップ保存補題。 *)
+Lemma step_non_unlocked_invariant : forall (slots : KekSlots) (s1 : VaultState) (ev : VaultEvent) (s2 : VaultState),
+  s1 <> Unlocked ->
+  ~ valid_unlock_event slots ev ->
+  step slots s1 ev s2 ->
+  s2 <> Unlocked.
+Proof.
+  intros slots s1 ev s2 Hs1 Hnot_auth Hstep.
+  assert (Hcases : s1 = Locked \/ s1 = Unlocking \/ s1 = Zeroized).
+  {
+    destruct s1.
+    - left. reflexivity.
+    - right. left. reflexivity.
+    - exfalso. apply Hs1. reflexivity.
+    - right. right. reflexivity.
+  }
+  destruct Hcases as [HL | [HU | HZ]].
+  - subst s1.
+    apply step_locked_destinations in Hstep.
+    destruct Hstep as [id [Hev [Hs2 Hval]]].
+    subst s2. discriminate.
+  - subst s1.
+    apply step_unlocking_destinations in Hstep.
+    destruct Hstep as [[id [Hev [Hs2 Hval]]] | [Hev Hs2]].
+    + exfalso. apply Hnot_auth.
+      exists id. split; [exact Hev | exact Hval].
+    + subst s2. discriminate.
+  - subst s1.
+    apply step_zeroized_destinations in Hstep.
+    destruct Hstep as [Hev Hs2].
+    subst s2. discriminate.
+Qed.
+
+(** [SPEC]
+    非解錠状態 (s1 <> Unlocked) から有効な認証イベントを含まない多段階遷移列 (steps) により
+    到達可能な任意の状態 s2 は、決して Unlocked にはなり得ないことを示す一般化トレース不変性定理。 *)
+Theorem steps_non_unlocked_invariant : forall (slots : KekSlots) (s1 : VaultState) (trace : list VaultEvent) (s2 : VaultState),
+  s1 <> Unlocked ->
+  no_valid_unlock_trace slots trace ->
+  steps slots s1 trace s2 ->
+  s2 <> Unlocked.
+Proof.
+  intros slots s1 trace s2 Hs1 Htrace Hsteps.
+  generalize dependent Hs1.
+  induction Hsteps as [s | s_a s_b s_c ev tr Hstep Hsteps' IH].
+  - intros Hs_curr. exact Hs_curr.
+  - intros Hs_a.
+    inversion Htrace as [ | ev' tr' Hnot_ev Htrace']; subst.
+    assert (Hs_b : s_b <> Unlocked).
+    {
+      apply (step_non_unlocked_invariant slots s_a ev s_b Hs_a Hnot_ev Hstep).
+    }
+    apply (IH Htrace' Hs_b).
+Qed.
+
+(** [SPEC]
+    非到達性定理 (FSM Reachability Soundness Theorem)。
+    施錠状態 (Locked) から出発し、有効な認証イベントを経由しない任意の遷移列 (steps) によって、
+    解錠状態 (Unlocked) に到達することは不可能であることを保証する。 *)
+Theorem locked_no_auth_unreachability : forall (slots : KekSlots) (trace : list VaultEvent) (s : VaultState),
+  no_valid_unlock_trace slots trace ->
+  steps slots Locked trace s ->
+  s <> Unlocked.
+Proof.
+  intros slots trace s Htrace Hsteps.
+  apply (steps_non_unlocked_invariant slots Locked trace s vault_state_locked_not_unlocked Htrace Hsteps).
+Qed.
+
+(** [SPEC]
+    構文的に解錠成功イベントを一切含まないトレースに対する非到達性定理の系。 *)
+Corollary locked_syntax_no_auth_unreachability : forall (slots : KekSlots) (trace : list VaultEvent) (s : VaultState),
+  no_unlock_success_trace trace ->
+  steps slots Locked trace s ->
+  s <> Unlocked.
+Proof.
+  intros slots trace s Htrace Hsteps.
+  apply (locked_no_auth_unreachability slots trace s).
+  - apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
+  - exact Hsteps.
+Qed.
+
+(** [SPEC]
+    DEK平文非露出定理 (Data Plane Confidentiality Theorem)。
+    安全状態 (SafeState) を満たすマシンにおいて、施錠状態 (Locked) から出発して
+    有効な認証イベントを経ずに遷移した任意の終点状態 m においては、
+    平文DEKが観測されることはなく、常に None が保たれることを保証する。 *)
+Theorem locked_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
+  SafeState m ->
+  steps slots Locked trace m.(vms_state) ->
+  no_valid_unlock_trace slots trace ->
+  observe_dek m = None.
+Proof.
+  intros slots trace m Hsafe Hsteps Htrace.
+  assert (Hnot_unlocked : m.(vms_state) <> Unlocked).
+  {
+    apply (locked_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps).
+  }
+  destruct (observe_dek m) as [k | ] eqn:Eobs.
+  - assert (Hunlocked := safe_state_observe_some_implies_unlocked m k Hsafe Eobs).
+    exfalso. apply (Hnot_unlocked Hunlocked).
+  - reflexivity.
+Qed.
+
+(** [SPEC]
+    DEK平文非露出定理の否定的帰結系 (Cannot Extract DEK Corollary)。
+    施錠状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す。 *)
+Corollary locked_no_auth_cannot_extract_dek : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState) (k : DekBytes),
+  SafeState m ->
+  steps slots Locked trace m.(vms_state) ->
+  no_valid_unlock_trace slots trace ->
+  observe_dek m <> Some k.
+Proof.
+  intros slots trace m k Hsafe Hsteps Htrace.
+  assert (Hnone := locked_no_auth_dek_confidentiality slots trace m Hsafe Hsteps Htrace).
+  rewrite Hnone.
+  discriminate.
+Qed.
+
+(** [SPEC]
+    構文的に解錠成功イベントを一切含まないトレースに対するDEK平文非露出定理の系。 *)
+Corollary locked_syntax_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
+  SafeState m ->
+  steps slots Locked trace m.(vms_state) ->
+  no_unlock_success_trace trace ->
+  observe_dek m = None.
+Proof.
+  intros slots trace m Hsafe Hsteps Htrace.
+  apply (locked_no_auth_dek_confidentiality slots trace m Hsafe Hsteps).
+  apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
+Qed.
