@@ -9,6 +9,7 @@ From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import ZArith.ZArith.
 From Stdlib Require Import Lia.
+From Fidelogic Require Import Tactics.
 
 Local Open Scope Z_scope.
 
@@ -428,9 +429,9 @@ Proof.
     apply Bool.negb_true_iff in Hc.
     constructor; [exact Hc | apply IH; exact Hrest].
   - induction s as [| c rest IH]; [reflexivity |].
-    intros H. inversion H; subst.
+    intros H. inv H.
     cbn. apply Bool.andb_true_iff.
-    split; [apply Bool.negb_true_iff; exact H2 | apply IH; exact H3].
+    split; [apply Bool.negb_true_iff | apply IH]; assumption.
 Qed.
 
 (** [SPEC]
@@ -1136,9 +1137,9 @@ Proof.
     apply Bool.negb_true_iff in Hc.
     constructor; [exact Hc | apply IH; exact Hrest].
   - induction s as [| c rest IH]; [reflexivity |].
-    intros H. inversion H; subst.
+    intros H. inv H.
     cbn. apply Bool.andb_true_iff.
-    split; [apply Bool.negb_true_iff; exact H2 | apply IH; exact H3].
+    split; [apply Bool.negb_true_iff | apply IH]; assumption.
 Qed.
 
 (** [SPEC]

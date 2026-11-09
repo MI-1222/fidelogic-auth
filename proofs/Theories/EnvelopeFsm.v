@@ -155,7 +155,7 @@ Proof.
     + reflexivity.
   - split; intro H.
     + discriminate H.
-    + destruct H as [H | [H | H]]; inversion H.
+    + destruct H as [H | [H | H]]; inv H.
 Qed.
 
 (** [SPEC]
@@ -513,7 +513,7 @@ Lemma step_deterministic : forall (slots : KekSlots) (s : VaultState) (ev : Vaul
   s1 = s2.
 Proof.
   intros slots s ev s1 s2 H1 H2.
-  inversion H1; subst; inversion H2; subst; reflexivity.
+  inv H1; inv H2; reflexivity.
 Qed.
 
 (** [SPEC]
@@ -522,7 +522,7 @@ Lemma step_locked_to_unlocked_impossible : forall (slots : KekSlots) (ev : Vault
   ~ step slots Locked ev Unlocked.
 Proof.
   intros slots ev Hstep.
-  inversion Hstep.
+  inv Hstep.
 Qed.
 
 (** [SPEC]
@@ -531,7 +531,7 @@ Lemma step_zeroized_to_unlocked_impossible : forall (slots : KekSlots) (ev : Vau
   ~ step slots Zeroized ev Unlocked.
 Proof.
   intros slots ev Hstep.
-  inversion Hstep.
+  inv Hstep.
 Qed.
 
 (** [SPEC]
@@ -541,8 +541,8 @@ Lemma step_unlock_success_requires_valid : forall (slots : KekSlots) (id : SlotI
   slot_valid slots id.
 Proof.
   intros slots id s' Hstep.
-  inversion Hstep as [ | id0 Hval | | | | ]; subst.
-  exact Hval.
+  inv Hstep.
+  assumption.
 Qed.
 
 (** [SPEC]
@@ -552,8 +552,8 @@ Lemma step_start_unlock_requires_valid_id : forall (slots : KekSlots) (id : Slot
   valid_slot_id id.
 Proof.
   intros slots id s' Hstep.
-  inversion Hstep as [ id0 Hval | | | | | ]; subst.
-  exact Hval.
+  inv Hstep.
+  assumption.
 Qed.
 
 (** [SPEC]
@@ -563,9 +563,9 @@ Lemma step_unlocked_destinations : forall (slots : KekSlots) (ev : VaultEvent) (
   (ev = EventLock /\ s' = Locked) \/ (ev = EventZeroize /\ s' = Zeroized).
 Proof.
   intros slots ev s' Hstep.
-  inversion Hstep; subst.
-  - left. split; reflexivity.
-  - right. split; reflexivity.
+  inv Hstep.
+  - left; split; reflexivity.
+  - right; split; reflexivity.
 Qed.
 
 (** [SPEC]
@@ -575,9 +575,9 @@ Lemma step_locked_destinations : forall (slots : KekSlots) (ev : VaultEvent) (s'
   exists (id : SlotId), ev = EventStartUnlock id /\ s' = Unlocking /\ valid_slot_id id.
 Proof.
   intros slots ev s' Hstep.
-  inversion Hstep as [ id0 Hval | | | | | ]; subst.
-  exists id0.
-  split; [reflexivity | split; [reflexivity | exact Hval]].
+  inv Hstep.
+  exists id.
+  split; [reflexivity | split; [reflexivity | assumption]].
 Qed.
 
 (** [SPEC]
@@ -587,7 +587,7 @@ Lemma step_zeroized_destinations : forall (slots : KekSlots) (ev : VaultEvent) (
   ev = EventReset /\ s' = Locked.
 Proof.
   intros slots ev s' Hstep.
-  inversion Hstep; subst.
+  inv Hstep.
   split; reflexivity.
 Qed.
 
@@ -599,8 +599,8 @@ Lemma step_unlocking_destinations : forall (slots : KekSlots) (ev : VaultEvent) 
   (ev = EventUnlockFail /\ s' = Locked).
 Proof.
   intros slots ev s' Hstep.
-  inversion Hstep as [ | id0 Hval | | | | ]; subst.
-  - left. exists id0. split; [reflexivity | split; [reflexivity | exact Hval]].
+  inv Hstep.
+  - left. exists id. split; [reflexivity | split; [reflexivity | assumption]].
   - right. split; reflexivity.
 Qed.
 
@@ -907,7 +907,7 @@ Lemma machine_step_to_step : forall (slots : KekSlots) (m1 : VaultMachineState) 
   step slots m1.(vms_state) ev m2.(vms_state).
 Proof.
   intros slots m1 ev m2 Hstep.
-  inversion Hstep; subst; cbn; constructor; assumption.
+  inv Hstep; cbn; constructor; assumption.
 Qed.
 
 (** [SPEC]
@@ -933,7 +933,7 @@ Lemma machine_step_preserves_safe_state : forall (slots : KekSlots) (m1 : VaultM
   SafeState m2.
 Proof.
   intros slots m1 ev m2 Hsafe Hstep.
-  inversion Hstep; subst; cbn; try reflexivity; try exact I.
+  inv Hstep; cbn; try reflexivity; try exact I.
 Qed.
 
 (** [SPEC]
@@ -1064,7 +1064,7 @@ Proof.
     + exists id. split; [reflexivity |].
       apply slot_validb_eq. exact H.
     + destruct H as [id0 [Heq Hval]].
-      inversion Heq; subst id0.
+      inv Heq.
       apply slot_validb_eq. exact Hval.
   - split; intro H; [discriminate H | destruct H as [id0 [Heq _]]; discriminate Heq].
   - split; intro H; [discriminate H | destruct H as [id0 [Heq _]]; discriminate Heq].
@@ -1216,12 +1216,12 @@ Proof.
   induction Hsteps as [s | s_a s_b s_c ev tr Hstep Hsteps' IH].
   - intros Hs_curr. exact Hs_curr.
   - intros Hs_a.
-    inversion Htrace as [ | ev' tr' Hnot_ev Htrace']; subst.
+    inv Htrace.
     assert (Hs_b : s_b <> Unlocked).
     {
-      apply (step_non_unlocked_invariant slots s_a ev s_b Hs_a Hnot_ev Hstep).
+      apply (step_non_unlocked_invariant slots s_a ev s_b Hs_a H1 Hstep).
     }
-    apply (IH Htrace' Hs_b).
+    apply (IH H2 Hs_b).
 Qed.
 
 (** [SPEC]
@@ -1386,13 +1386,13 @@ Theorem steps_zeroized_no_reset_invariant : forall (slots : KekSlots) (trace : l
   s = Zeroized.
 Proof.
   intros slots trace s Hno_reset Hsteps.
-  inversion Hsteps as [s0 Heq1 Heq2 | s_a s_b s_c ev tr Hstep Hsteps' Heq1 Heq2]; subst.
+  inv Hsteps.
   - reflexivity.
-  - inversion Hno_reset as [ | ev0 tr0 Hnot_reset Hno_reset']; subst.
-    apply step_zeroized_destinations in Hstep.
-    destruct Hstep as [Hev Hs_b].
+  - apply step_zeroized_destinations in H.
+    destruct H as [Hev Hs2].
     subst ev.
-    exfalso. apply Hnot_reset. reflexivity.
+    inv Hno_reset.
+    contradiction.
 Qed.
 
 (** [SPEC]
