@@ -853,6 +853,104 @@ Proof.
     apply (StepsCons slots s_a s_b s3 ev (tr ++ tr2) Hstep (IH H2)).
 Qed.
 
+(** [SPEC]
+    VaultMachineState (実行時マシン状態) に対する単一ステップ遷移関係述語。
+    FSMコントロール状態遷移に伴い、メモリ内平文DEKバッファ (vms_dek) の安全なロードおよび消去を規定する。 *)
+Inductive machine_step (slots : KekSlots) : VaultMachineState -> VaultEvent -> VaultMachineState -> Prop :=
+  | MStepStartUnlock : forall (id : SlotId),
+      valid_slot_id id ->
+      machine_step slots
+        (mkVaultMachineState Locked None)
+        (EventStartUnlock id)
+        (mkVaultMachineState Unlocking None)
+  | MStepUnlockSuccess : forall (id : SlotId) (k : DekBytes),
+      slot_valid slots id ->
+      machine_step slots
+        (mkVaultMachineState Unlocking None)
+        (EventUnlockSuccess id)
+        (mkVaultMachineState Unlocked (Some k))
+  | MStepUnlockFail :
+      machine_step slots
+        (mkVaultMachineState Unlocking None)
+        EventUnlockFail
+        (mkVaultMachineState Locked None)
+  | MStepLock : forall (dek : option DekBytes),
+      machine_step slots
+        (mkVaultMachineState Unlocked dek)
+        EventLock
+        (mkVaultMachineState Locked None)
+  | MStepZeroize : forall (dek : option DekBytes),
+      machine_step slots
+        (mkVaultMachineState Unlocked dek)
+        EventZeroize
+        (mkVaultMachineState Zeroized None)
+  | MStepReset :
+      machine_step slots
+        (mkVaultMachineState Zeroized None)
+        EventReset
+        (mkVaultMachineState Locked None).
+
+(** [SPEC]
+    VaultMachineState に対する多段階状態遷移関係述語。 *)
+Inductive machine_steps (slots : KekSlots) : VaultMachineState -> list VaultEvent -> VaultMachineState -> Prop :=
+  | MStepsNil : forall (m : VaultMachineState),
+      machine_steps slots m [] m
+  | MStepsCons : forall (m1 m2 m3 : VaultMachineState) (ev : VaultEvent) (trace : list VaultEvent),
+      machine_step slots m1 ev m2 ->
+      machine_steps slots m2 trace m3 ->
+      machine_steps slots m1 (ev :: trace) m3.
+
+(** [SPEC]
+    machine_step からコントロール状態の step への射影補題。 *)
+Lemma machine_step_to_step : forall (slots : KekSlots) (m1 : VaultMachineState) (ev : VaultEvent) (m2 : VaultMachineState),
+  machine_step slots m1 ev m2 ->
+  step slots m1.(vms_state) ev m2.(vms_state).
+Proof.
+  intros slots m1 ev m2 Hstep.
+  inversion Hstep; subst; cbn; constructor; assumption.
+Qed.
+
+(** [SPEC]
+    machine_steps からコントロール状態の steps への射影補題。 *)
+Lemma machine_steps_to_steps : forall (slots : KekSlots) (m1 : VaultMachineState) (trace : list VaultEvent) (m2 : VaultMachineState),
+  machine_steps slots m1 trace m2 ->
+  steps slots m1.(vms_state) trace m2.(vms_state).
+Proof.
+  intros slots m1 trace m2 Hsteps.
+  induction Hsteps as [m | m1' m2' m3' ev tr Hstep Hsteps' IH].
+  - constructor.
+  - econstructor.
+    + apply (machine_step_to_step slots m1' ev m2' Hstep).
+    + exact IH.
+Qed.
+
+(** [SPEC]
+    machine_step に対する安全状態不変条件の保存性補題 (Invariant Preservation)。
+    始点マシン状態が SafeState を満たすならば、任意の単一ステップ遷移後の終点マシン状態も SafeState を満たす。 *)
+Lemma machine_step_preserves_safe_state : forall (slots : KekSlots) (m1 : VaultMachineState) (ev : VaultEvent) (m2 : VaultMachineState),
+  SafeState m1 ->
+  machine_step slots m1 ev m2 ->
+  SafeState m2.
+Proof.
+  intros slots m1 ev m2 Hsafe Hstep.
+  inversion Hstep; subst; cbn; try reflexivity; try exact I.
+Qed.
+
+(** [SPEC]
+    machine_steps に対する安全状態不変条件の保存性定理 (Multi-step Invariant Preservation)。
+    始点マシン状態が SafeState を満たすならば、任意の遷移列を経た終点マシン状態も常に SafeState を満たす。 *)
+Theorem machine_steps_preserves_safe_state : forall (slots : KekSlots) (m1 : VaultMachineState) (trace : list VaultEvent) (m2 : VaultMachineState),
+  SafeState m1 ->
+  machine_steps slots m1 trace m2 ->
+  SafeState m2.
+Proof.
+  intros slots m1 trace m2 Hsafe Hsteps.
+  induction Hsteps as [m | m1' m2' m3' ev tr Hstep Hsteps' IH].
+  - exact Hsafe.
+  - apply IH.
+    apply (machine_step_preserves_safe_state slots m1' ev m2' Hsafe Hstep).
+Qed.
+
 (** [MODEL]
     ある初期状態から目標状態へ到達可能であることを表す到達可能性述語。 *)
 Definition can_reach (slots : KekSlots) (from to : VaultState) : Prop :=
@@ -1154,19 +1252,56 @@ Qed.
 
 (** [SPEC]
     DEK平文非露出定理 (Data Plane Confidentiality Theorem)。
-    安全状態 (SafeState) を満たすマシンにおいて、施錠状態 (Locked) から出発して
-    有効な認証イベントを経ずに遷移した任意の終点状態 m においては、
+    施錠状態 (mkVaultMachineState Locked None) から出発して
+    有効な認証イベントを経ずに遷移した任意のマシン状態 m においては、
     平文DEKが観測されることはなく、常に None が保たれることを保証する。 *)
 Theorem locked_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
-  SafeState m ->
-  steps slots Locked trace m.(vms_state) ->
+  machine_steps slots (mkVaultMachineState Locked None) trace m ->
   no_valid_unlock_trace slots trace ->
   observe_dek m = None.
 Proof.
-  intros slots trace m Hsafe Hsteps Htrace.
+  intros slots trace m Hsteps Htrace.
+  assert (Hsteps_ctrl : steps slots Locked trace m.(vms_state)).
+  {
+    apply (machine_steps_to_steps slots (mkVaultMachineState Locked None) trace m Hsteps).
+  }
   assert (Hnot_unlocked : m.(vms_state) <> Unlocked).
   {
-    apply (locked_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps).
+    apply (locked_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps_ctrl).
+  }
+  assert (Hsafe : SafeState m).
+  {
+    apply (machine_steps_preserves_safe_state slots (mkVaultMachineState Locked None) trace m safe_state_init Hsteps).
+  }
+  destruct (observe_dek m) as [k | ] eqn:Eobs.
+  - assert (Hunlocked := safe_state_observe_some_implies_unlocked m k Hsafe Eobs).
+    exfalso. apply (Hnot_unlocked Hunlocked).
+  - reflexivity.
+Qed.
+
+(** [SPEC]
+    任意の安全な施錠状態から出発する一般化DEK平文非露出定理。 *)
+Theorem locked_no_auth_dek_confidentiality_gen : forall (slots : KekSlots) (trace : list VaultEvent) (m_init m : VaultMachineState),
+  SafeState m_init ->
+  m_init.(vms_state) = Locked ->
+  machine_steps slots m_init trace m ->
+  no_valid_unlock_trace slots trace ->
+  observe_dek m = None.
+Proof.
+  intros slots trace m_init m Hsafe_init Hlocked Hsteps Htrace.
+  assert (Hsteps_ctrl : steps slots Locked trace m.(vms_state)).
+  {
+    assert (Hs := machine_steps_to_steps slots m_init trace m Hsteps).
+    rewrite Hlocked in Hs.
+    exact Hs.
+  }
+  assert (Hnot_unlocked : m.(vms_state) <> Unlocked).
+  {
+    apply (locked_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps_ctrl).
+  }
+  assert (Hsafe : SafeState m).
+  {
+    apply (machine_steps_preserves_safe_state slots m_init trace m Hsafe_init Hsteps).
   }
   destruct (observe_dek m) as [k | ] eqn:Eobs.
   - assert (Hunlocked := safe_state_observe_some_implies_unlocked m k Hsafe Eobs).
@@ -1178,13 +1313,12 @@ Qed.
     DEK平文非露出定理の否定的帰結系 (Cannot Extract DEK Corollary)。
     施錠状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す。 *)
 Corollary locked_no_auth_cannot_extract_dek : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState) (k : DekBytes),
-  SafeState m ->
-  steps slots Locked trace m.(vms_state) ->
+  machine_steps slots (mkVaultMachineState Locked None) trace m ->
   no_valid_unlock_trace slots trace ->
   observe_dek m <> Some k.
 Proof.
-  intros slots trace m k Hsafe Hsteps Htrace.
-  assert (Hnone := locked_no_auth_dek_confidentiality slots trace m Hsafe Hsteps Htrace).
+  intros slots trace m k Hsteps Htrace.
+  assert (Hnone := locked_no_auth_dek_confidentiality slots trace m Hsteps Htrace).
   rewrite Hnone.
   discriminate.
 Qed.
@@ -1192,13 +1326,12 @@ Qed.
 (** [SPEC]
     構文的に解錠成功イベントを一切含まないトレースに対するDEK平文非露出定理の系。 *)
 Corollary locked_syntax_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
-  SafeState m ->
-  steps slots Locked trace m.(vms_state) ->
+  machine_steps slots (mkVaultMachineState Locked None) trace m ->
   no_unlock_success_trace trace ->
   observe_dek m = None.
 Proof.
-  intros slots trace m Hsafe Hsteps Htrace.
-  apply (locked_no_auth_dek_confidentiality slots trace m Hsafe Hsteps).
+  intros slots trace m Hsteps Htrace.
+  apply (locked_no_auth_dek_confidentiality slots trace m Hsteps).
   apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
 Qed.
 
@@ -1290,19 +1423,60 @@ Qed.
 
 (** [SPEC]
     マスター鍵消去状態におけるDEK平文非露出定理 (Zeroized Data Plane Confidentiality Theorem)。
-    安全状態 (SafeState) を満たすマシンにおいて、ゼロ消去状態 (Zeroized) から出発して
-    有効な認証イベントを経ずに遷移した任意の終点状態 m においては、
+    ゼロ消去状態 (mkVaultMachineState Zeroized None) から出発して
+    有効な認証イベントを経ずに遷移した任意のマシン状態 m においては、
     平文DEKが観測されることはなく、常に None が保たれることを保証する。 *)
 Theorem zeroized_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
-  SafeState m ->
-  steps slots Zeroized trace m.(vms_state) ->
+  machine_steps slots (mkVaultMachineState Zeroized None) trace m ->
   no_valid_unlock_trace slots trace ->
   observe_dek m = None.
 Proof.
-  intros slots trace m Hsafe Hsteps Htrace.
+  intros slots trace m Hsteps Htrace.
+  assert (Hsteps_ctrl : steps slots Zeroized trace m.(vms_state)).
+  {
+    apply (machine_steps_to_steps slots (mkVaultMachineState Zeroized None) trace m Hsteps).
+  }
   assert (Hnot_unlocked : m.(vms_state) <> Unlocked).
   {
-    apply (zeroized_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps).
+    apply (zeroized_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps_ctrl).
+  }
+  assert (Hsafe_init : SafeState (mkVaultMachineState Zeroized None)).
+  {
+    cbn. reflexivity.
+  }
+  assert (Hsafe : SafeState m).
+  {
+    apply (machine_steps_preserves_safe_state slots (mkVaultMachineState Zeroized None) trace m Hsafe_init Hsteps).
+  }
+  destruct (observe_dek m) as [k | ] eqn:Eobs.
+  - assert (Hunlocked := safe_state_observe_some_implies_unlocked m k Hsafe Eobs).
+    exfalso. apply (Hnot_unlocked Hunlocked).
+  - reflexivity.
+Qed.
+
+(** [SPEC]
+    任意の安全なゼロ消去状態から出発する一般化DEK平文非露出定理。 *)
+Theorem zeroized_no_auth_dek_confidentiality_gen : forall (slots : KekSlots) (trace : list VaultEvent) (m_init m : VaultMachineState),
+  SafeState m_init ->
+  m_init.(vms_state) = Zeroized ->
+  machine_steps slots m_init trace m ->
+  no_valid_unlock_trace slots trace ->
+  observe_dek m = None.
+Proof.
+  intros slots trace m_init m Hsafe_init Hzeroized Hsteps Htrace.
+  assert (Hsteps_ctrl : steps slots Zeroized trace m.(vms_state)).
+  {
+    assert (Hs := machine_steps_to_steps slots m_init trace m Hsteps).
+    rewrite Hzeroized in Hs.
+    exact Hs.
+  }
+  assert (Hnot_unlocked : m.(vms_state) <> Unlocked).
+  {
+    apply (zeroized_no_auth_unreachability slots trace m.(vms_state) Htrace Hsteps_ctrl).
+  }
+  assert (Hsafe : SafeState m).
+  {
+    apply (machine_steps_preserves_safe_state slots m_init trace m Hsafe_init Hsteps).
   }
   destruct (observe_dek m) as [k | ] eqn:Eobs.
   - assert (Hunlocked := safe_state_observe_some_implies_unlocked m k Hsafe Eobs).
@@ -1314,13 +1488,12 @@ Qed.
     マスター鍵消去状態におけるDEK平文非露出定理の否定的帰結系 (Cannot Extract DEK from Zeroized State Corollary)。
     ゼロ消去状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す。 *)
 Corollary zeroized_no_auth_cannot_extract_dek : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState) (k : DekBytes),
-  SafeState m ->
-  steps slots Zeroized trace m.(vms_state) ->
+  machine_steps slots (mkVaultMachineState Zeroized None) trace m ->
   no_valid_unlock_trace slots trace ->
   observe_dek m <> Some k.
 Proof.
-  intros slots trace m k Hsafe Hsteps Htrace.
-  assert (Hnone := zeroized_no_auth_dek_confidentiality slots trace m Hsafe Hsteps Htrace).
+  intros slots trace m k Hsteps Htrace.
+  assert (Hnone := zeroized_no_auth_dek_confidentiality slots trace m Hsteps Htrace).
   rewrite Hnone.
   discriminate.
 Qed.
@@ -1328,13 +1501,12 @@ Qed.
 (** [SPEC]
     構文的に解錠成功イベントを一切含まないトレースに対する、マスター鍵消去状態におけるDEK平文非露出定理の系。 *)
 Corollary zeroized_syntax_no_auth_dek_confidentiality : forall (slots : KekSlots) (trace : list VaultEvent) (m : VaultMachineState),
-  SafeState m ->
-  steps slots Zeroized trace m.(vms_state) ->
+  machine_steps slots (mkVaultMachineState Zeroized None) trace m ->
   no_unlock_success_trace trace ->
   observe_dek m = None.
 Proof.
-  intros slots trace m Hsafe Hsteps Htrace.
-  apply (zeroized_no_auth_dek_confidentiality slots trace m Hsafe Hsteps).
+  intros slots trace m Hsteps Htrace.
+  apply (zeroized_no_auth_dek_confidentiality slots trace m Hsteps).
   apply (no_unlock_success_implies_no_valid_unlock_trace slots trace Htrace).
 Qed.
 
