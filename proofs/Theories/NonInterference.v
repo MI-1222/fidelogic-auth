@@ -479,9 +479,22 @@ Record LowPublic : Type := mkLowPublic {
   pub_req_length : nat;
 }.
 
+(** [SPEC]
+    VaultMachineState 間の決定可能等価性補題。 *)
+Lemma vault_machine_state_eq_dec : forall (m1 m2 : VaultMachineState),
+  {m1 = m2} + {m1 <> m2}.
+Proof.
+  decide equality.
+  - decide equality; apply list_eq_dec, Z.eq_dec.
+  - apply vault_state_eq_dec.
+Qed.
+
 (** [MODEL]
-    Vaultマシンの統合セキュリティ状態構造体 (VaultSecurityState)。 *)
+    Vaultマシンの統合セキュリティ状態構造体 (VaultSecurityState)。
+    FSMの実行時状態 (VaultMachineState)、高位機密データ (HighSecret)、
+    および攻撃者観測可能な低位観測値 (LowObservation) を統合する。 *)
 Record VaultSecurityState : Type := mkVaultSecurityState {
+  state_fsm : VaultMachineState;
   state_high : HighSecret;
   state_low_obs : LowObservation;
 }.
@@ -494,11 +507,15 @@ Proof.
   decide equality.
   - apply low_observation_eq_dec.
   - apply high_secret_eq_dec.
+  - apply vault_machine_state_eq_dec.
 Qed.
 
 (** [MODEL]
-    Vaultマシンの入力セキュリティモデル (VaultSecurityInput)。 *)
+    Vaultマシンの入力セキュリティモデル (VaultSecurityInput)。
+    現在のFSMコントロール状態 (VaultState)、高位機密データ (HighSecret)、
+    および低位公開入力パラメータ (LowPublic) を保持する。 *)
 Record VaultSecurityInput : Type := mkVaultSecurityInput {
+  input_fsm : VaultState;
   input_high : HighSecret;
   input_public : LowPublic;
 }.
@@ -717,12 +734,12 @@ Qed.
 
 (** [SPEC]
     高位機密の独立性補題:
-    状態 s1, s2 において高位機密 (HighSecret) の内容が任意に異なっていても、
+    状態 s1, s2 において高位機密 (HighSecret) や実行時マシン状態 (VaultMachineState) が任意に異なっていても、
     低位観測値 (LowObservation) が一致していれば低位同値 (s1 ≈_L s2) が成立する。 *)
-Lemma high_secrets_independent_of_low_obs : forall (h1 h2 : HighSecret) (obs : LowObservation),
-  low_equiv (mkVaultSecurityState h1 obs) (mkVaultSecurityState h2 obs).
+Lemma high_secrets_independent_of_low_obs : forall (m1 m2 : VaultMachineState) (h1 h2 : HighSecret) (obs : LowObservation),
+  low_equiv (mkVaultSecurityState m1 h1 obs) (mkVaultSecurityState m2 h2 obs).
 Proof.
-  intros h1 h2 obs.
+  intros m1 m2 h1 h2 obs.
   unfold low_equiv, observe_low.
   simpl.
   apply low_obs_eq_refl.
@@ -732,10 +749,10 @@ Qed.
     ユーザー存在フラグに関する低位非干渉性基礎補題:
     ユーザーが存在する場合 (sec_user_exists = true) と非存在の場合 (sec_user_exists = false) であっても、
     低位観測値が同一であれば低位観測者には区別不能である。 *)
-Lemma user_existence_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (e1 e2 : bool) (obs : LowObservation),
+Lemma user_existence_low_equiv : forall (m : VaultMachineState) (k1 k2 : option DekBytes) (p1 p2 : list Z) (e1 e2 : bool) (obs : LowObservation),
   low_equiv
-    (mkVaultSecurityState (mkHighSecret k1 p1 true e1) obs)
-    (mkVaultSecurityState (mkHighSecret k2 p2 false e2) obs).
+    (mkVaultSecurityState m (mkHighSecret k1 p1 true e1) obs)
+    (mkVaultSecurityState m (mkHighSecret k2 p2 false e2) obs).
 Proof.
   intros.
   apply high_secrets_independent_of_low_obs.
@@ -744,10 +761,10 @@ Qed.
 (** [SPEC]
     エントリ存在フラグに関する低位非干渉性基礎補題:
     エントリが存在する場合と存在しない場合であっても、低位観測値が同一であれば区別不能である。 *)
-Lemma entry_existence_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 : bool) (obs : LowObservation),
+Lemma entry_existence_low_equiv : forall (m : VaultMachineState) (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 : bool) (obs : LowObservation),
   low_equiv
-    (mkVaultSecurityState (mkHighSecret k1 p1 u1 true) obs)
-    (mkVaultSecurityState (mkHighSecret k2 p2 u2 false) obs).
+    (mkVaultSecurityState m (mkHighSecret k1 p1 u1 true) obs)
+    (mkVaultSecurityState m (mkHighSecret k2 p2 u2 false) obs).
 Proof.
   intros.
   apply high_secrets_independent_of_low_obs.
@@ -757,10 +774,10 @@ Qed.
     マスター鍵素材に関する低位非干渉性基礎補題:
     有効なマスター鍵が存在する場合と存在しない場合 (または異なる鍵) であっても、
     低位観測値が同一であれば区別不能である。 *)
-Lemma master_key_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 e1 e2 : bool) (obs : LowObservation),
+Lemma master_key_low_equiv : forall (m : VaultMachineState) (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 e1 e2 : bool) (obs : LowObservation),
   low_equiv
-    (mkVaultSecurityState (mkHighSecret k1 p1 u1 e1) obs)
-    (mkVaultSecurityState (mkHighSecret k2 p2 u2 e2) obs).
+    (mkVaultSecurityState m (mkHighSecret k1 p1 u1 e1) obs)
+    (mkVaultSecurityState m (mkHighSecret k2 p2 u2 e2) obs).
 Proof.
   intros.
   apply high_secrets_independent_of_low_obs.
@@ -769,10 +786,10 @@ Qed.
 (** [SPEC]
     平文データに関する低位非干渉性基礎補題:
     平文の内容や長さが異なっていても、パディング等により同一の低位観測値が生成されるならば区別不能である。 *)
-Lemma plaintext_low_equiv : forall (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 e1 e2 : bool) (obs : LowObservation),
+Lemma plaintext_low_equiv : forall (m : VaultMachineState) (k1 k2 : option DekBytes) (p1 p2 : list Z) (u1 u2 e1 e2 : bool) (obs : LowObservation),
   low_equiv
-    (mkVaultSecurityState (mkHighSecret k1 p1 u1 e1) obs)
-    (mkVaultSecurityState (mkHighSecret k2 p2 u2 e2) obs).
+    (mkVaultSecurityState m (mkHighSecret k1 p1 u1 e1) obs)
+    (mkVaultSecurityState m (mkHighSecret k2 p2 u2 e2) obs).
 Proof.
   intros.
   apply high_secrets_independent_of_low_obs.
@@ -796,9 +813,11 @@ Qed.
 
 (** [MODEL]
     入力セキュリティモデル (VaultSecurityInput) における低位公開入力の等価述語。
-    攻撃者・外部観測者が制御・観測可能な公開パラメータ (LowPublic) が一致することを表す。 *)
+    攻撃者・外部観測者が制御・観測可能な公開パラメータ (LowPublic) および
+    Vaultマシンのコントロール状態 (VaultState) が一致することを表す。 *)
 Definition low_input_equiv (inp1 inp2 : VaultSecurityInput) : Prop :=
-  input_public inp1 = input_public inp2.
+  input_public inp1 = input_public inp2 /\
+  input_fsm inp1 = input_fsm inp2.
 
 (** [SPEC]
     low_input_equiv の反射性補題。 *)
@@ -807,7 +826,7 @@ Lemma low_input_equiv_refl : forall (inp : VaultSecurityInput),
 Proof.
   intros inp.
   unfold low_input_equiv.
-  reflexivity.
+  split; reflexivity.
 Qed.
 
 (** [SPEC]
@@ -816,10 +835,9 @@ Lemma low_input_equiv_sym : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   low_input_equiv inp2 inp1.
 Proof.
-  intros inp1 inp2 H.
-  unfold low_input_equiv in *.
-  symmetry.
-  exact H.
+  intros inp1 inp2 [Hp Hf].
+  unfold low_input_equiv.
+  split; symmetry; assumption.
 Qed.
 
 (** [SPEC]
@@ -829,10 +847,11 @@ Lemma low_input_equiv_trans : forall (inp1 inp2 inp3 : VaultSecurityInput),
   low_input_equiv inp2 inp3 ->
   low_input_equiv inp1 inp3.
 Proof.
-  intros inp1 inp2 inp3 H12 H23.
-  unfold low_input_equiv in *.
-  rewrite H12.
-  exact H23.
+  intros inp1 inp2 inp3 [Hp12 Hf12] [Hp23 Hf23].
+  unfold low_input_equiv.
+  split.
+  - rewrite Hp12; exact Hp23.
+  - rewrite Hf12; exact Hf23.
 Qed.
 
 (** [SPEC]
@@ -842,17 +861,22 @@ Lemma low_input_equiv_dec : forall (inp1 inp2 : VaultSecurityInput),
 Proof.
   intros inp1 inp2.
   unfold low_input_equiv.
-  apply low_public_eq_dec.
+  destruct (low_public_eq_dec (input_public inp1) (input_public inp2)) as [Hp | nHp].
+  - destruct (vault_state_eq_dec (input_fsm inp1) (input_fsm inp2)) as [Hf | nHf].
+    + left; split; assumption.
+    + right; intros [_ H]; contradiction.
+  - right; intros [H _]; contradiction.
 Qed.
 
 (** [SPEC]
-    公開入力等号から low_input_equiv を導出する補題。 *)
+    公開入力およびFSM状態等号から low_input_equiv を導出する補題。 *)
 Lemma low_input_equiv_intro : forall (inp1 inp2 : VaultSecurityInput),
   input_public inp1 = input_public inp2 ->
+  input_fsm inp1 = input_fsm inp2 ->
   low_input_equiv inp1 inp2.
 Proof.
-  intros inp1 inp2 H.
-  exact H.
+  intros inp1 inp2 Hp Hf.
+  split; assumption.
 Qed.
 
 (** [MODEL]
@@ -920,27 +944,38 @@ Definition default_dummy_len : nat := 32%nat.
 
 (** [MODEL]
     ダミー長を考慮したユーザー認証評価関数 (eval_auth_lookup)。
+    Vaultが廃棄状態 (Zeroized) の場合は即座にゼロ消去エラー (Some Tlv_VaultError_Zeroized) を返却する。
+    それ以外の状態 (Locked / Unlocking / Unlocked) では、
     ユーザーが存在し (sec_user_exists = true) かつマスター鍵が登録されている (Some k) 場合は
     実際の鍵長 (length k) を採用し、ユーザーが存在しない場合やマスター鍵が未登録の場合は
     固定ダミー長 (dummy_len) を採用する。
     防護的マスキングにより低位エラーを発生させず (None)、
     指定バケットサイズにパディングしたレスポンスを出力することでユーザー列挙オラクルを排除する。 *)
 Definition eval_auth_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowObservation :=
-  let raw_len :=
-    if sec_user_exists (input_high inp)
-    then
-      match sec_master_key (input_high inp) with
-      | Some k => length k
-      | None   => dummy_len
-      end
-    else
-      dummy_len
-  in
-  mkLowObservation
-    None
-    (pad_to_bucket (pub_req_length (input_public inp)) raw_len)
-    (pub_header (input_public inp))
-    (pub_slot_id (input_public inp)).
+  match input_fsm inp with
+  | Zeroized =>
+      mkLowObservation
+        (Some Tlv_VaultError_InvalidMagic)
+        (pad_to_bucket (pub_req_length (input_public inp)) 0)
+        (pub_header (input_public inp))
+        (pub_slot_id (input_public inp))
+  | _ =>
+      let raw_len :=
+        if sec_user_exists (input_high inp)
+        then
+          match sec_master_key (input_high inp) with
+          | Some k => length k
+          | None   => dummy_len
+          end
+        else
+          dummy_len
+      in
+      mkLowObservation
+        None
+        (pad_to_bucket (pub_req_length (input_public inp)) raw_len)
+        (pub_header (input_public inp))
+        (pub_slot_id (input_public inp))
+  end.
 
 (** [MODEL]
     防護的ユーザー認証評価関数 (eval_auth)。
@@ -950,17 +985,36 @@ Definition eval_auth (inp : VaultSecurityInput) : LowObservation :=
 
 (** [MODEL]
     ダミー長を考慮したエントリ照会評価関数 (eval_entry_lookup)。
-    エントリが存在する場合は平文長、非存在時は固定ダミー長を採用し、
-    指定バケットサイズにパディングしたレスポンス長を出力する。 *)
+    Vaultマシンのコントロール状態 (input_fsm) と連動し:
+    - 解錠状態 (Unlocked): エントリが存在する場合は平文長、非存在時は固定ダミー長を採用し、
+      指定バケットサイズにパディングしたレスポンス長を出力する (エラーなし: None)。
+    - 施錠・認証中状態 (Locked / Unlocking): 平文アクセスを完全に遮断し、施錠時拒絶エラー (Some Tlv_VaultError_InvalidFormat)
+      およびデフォルトダミー長を出力する。
+    - 廃棄状態 (Zeroized): ゼロ消去・無効マジックエラー (Some Tlv_VaultError_InvalidMagic) およびデフォルトダミー長を出力する。 *)
 Definition eval_entry_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowObservation :=
-  let len := if sec_entry_exists (input_high inp)
-             then length (sec_plaintext (input_high inp))
-             else dummy_len in
-  mkLowObservation
-    None
-    (pad_to_bucket (pub_req_length (input_public inp)) len)
-    (pub_header (input_public inp))
-    (pub_slot_id (input_public inp)).
+  match input_fsm inp with
+  | Unlocked =>
+      let len := if sec_entry_exists (input_high inp)
+                 then length (sec_plaintext (input_high inp))
+                 else dummy_len in
+      mkLowObservation
+        None
+        (pad_to_bucket (pub_req_length (input_public inp)) len)
+        (pub_header (input_public inp))
+        (pub_slot_id (input_public inp))
+  | Zeroized =>
+      mkLowObservation
+        (Some Tlv_VaultError_InvalidMagic)
+        (pad_to_bucket (pub_req_length (input_public inp)) default_dummy_len)
+        (pub_header (input_public inp))
+        (pub_slot_id (input_public inp))
+  | Locked | Unlocking =>
+      mkLowObservation
+        (Some Tlv_VaultError_InvalidFormat)
+        (pad_to_bucket (pub_req_length (input_public inp)) default_dummy_len)
+        (pub_header (input_public inp))
+        (pub_slot_id (input_public inp))
+  end.
 
 (** [MODEL]
     防護的エントリ照会評価関数 (eval_query)。
@@ -979,15 +1033,17 @@ Definition eval_vault_query (inp : VaultSecurityInput) : LowObservation :=
 
 (** [MODEL]
     統合セキュリティ状態遷移関数 (vault_security_step)。
-    状態 s と公開入力 req を受け取り、防護的評価を経て次状態を生成する。 *)
+    状態 s と公開入力 req を受け取り、FSM実行時状態 (state_fsm) のコントロール状態
+    (vms_state) を入力セキュリティモデルに反映させて防護的評価を経て次状態を生成する。 *)
 Definition vault_security_step (s : VaultSecurityState) (req : LowPublic) : VaultSecurityState :=
   mkVaultSecurityState
+    (state_fsm s)
     (state_high s)
-    (eval_vault_query (mkVaultSecurityInput (state_high s) req)).
+    (eval_vault_query (mkVaultSecurityInput (vms_state (state_fsm s)) (state_high s) req)).
 
 (** [SPEC]
     認証評価関数に対する完全非干渉性主定理 (auth_non_interference):
-    低位公開入力が一致する任意の2入力に対し、パディング長一致条件下において、
+    低位公開入力およびFSM状態が一致する任意の2入力に対し、パディング長一致条件下において、
     ユーザー存在フラグやマスター鍵等の高位機密が異なっていても、
     評価後の低位観測値は常に完全に同値 (low_obs_eq) である。 *)
 Theorem auth_non_interference : forall (inp1 inp2 : VaultSecurityInput),
@@ -1002,17 +1058,20 @@ Theorem auth_non_interference : forall (inp1 inp2 : VaultSecurityInput),
      else default_dummy_len) ->
   low_obs_eq (eval_auth inp1) (eval_auth inp2).
 Proof.
-  intros inp1 inp2 Hequiv Hpad.
-  unfold eval_auth, eval_auth_lookup, low_obs_eq, low_input_equiv in *.
+  intros inp1 inp2 [Hequiv Hfsm] Hpad.
+  unfold eval_auth, eval_auth_lookup, low_obs_eq in *.
   simpl.
-  rewrite Hequiv in *.
-  rewrite Hpad.
-  repeat split; reflexivity.
+  rewrite Hfsm.
+  rewrite <- Hequiv.
+  destruct (input_fsm inp2); simpl; repeat split; try reflexivity.
+  - rewrite Hpad; reflexivity.
+  - rewrite Hpad; reflexivity.
+  - rewrite Hpad; reflexivity.
 Qed.
 
 (** [SPEC]
     ユーザー存在非干渉性主定理 (user_existence_non_interference):
-    低位公開入力が一致する2つの入力において、
+    低位公開入力およびFSM状態が一致する2つの入力において、
     一方にユーザーが存在し (sec_user_exists = true) 他方に存在しない (sec_user_exists = false) 場合であっても、
     実鍵長とデフォルトダミー長が同一バケット境界にパディングされるならば、
     評価後の低位観測値は完全に同値 (low_obs_eq) である。 *)
@@ -1036,7 +1095,7 @@ Qed.
 
 (** [SPEC]
     ユーザー摂動入力に対する一般化ユーザー存在非干渉性補題:
-    user_perturbed 関係を満たし公開入力が等しい任意の2入力に対し、
+    user_perturbed 関係を満たし公開入力・FSM状態が等しい任意の2入力に対し、
     パディング長一致条件下で認証観測値は同値となる。 *)
 Lemma user_perturbed_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
@@ -1057,7 +1116,7 @@ Qed.
 
 (** [SPEC]
     ダミー長パディング一致条件下でのエントリ照会非干渉性補題 (entry_lookup_non_interference):
-    実平文長とダミー長が同一バケット境界に収まる場合、
+    低位公開入力およびFSM状態が一致する場合、実平文長とダミー長が同一バケット境界に収まるならば、
     エントリ存在フラグが異なっていても低位観測値は完全に同値となる。 *)
 Theorem entry_lookup_non_interference : forall (inp1 inp2 : VaultSecurityInput) (dummy_len : nat),
   low_input_equiv inp1 inp2 ->
@@ -1067,18 +1126,19 @@ Theorem entry_lookup_non_interference : forall (inp1 inp2 : VaultSecurityInput) 
   pad_to_bucket (pub_req_length (input_public inp1)) dummy_len ->
   low_obs_eq (eval_entry_lookup inp1 dummy_len) (eval_entry_lookup inp2 dummy_len).
 Proof.
-  intros inp1 inp2 dummy_len Hequiv He1 He2 Hpad.
-  unfold eval_entry_lookup, low_obs_eq, low_input_equiv in *.
+  intros inp1 inp2 dummy_len [Hequiv Hfsm] He1 He2 Hpad.
+  unfold eval_entry_lookup, low_obs_eq in *.
   simpl.
-  rewrite He1, He2.
-  rewrite Hequiv in *.
-  rewrite Hpad.
-  repeat split; reflexivity.
+  rewrite Hfsm.
+  rewrite <- Hequiv.
+  destruct (input_fsm inp2); simpl; repeat split; try reflexivity.
+  rewrite He1, He2, Hpad.
+  reflexivity.
 Qed.
 
 (** [SPEC]
     エントリ有無非干渉性補題 (entry_existence_non_interference):
-    低位公開入力が一致する2つの入力において、
+    低位公開入力およびFSM状態が一致する2つの入力において、
     エントリ存在フラグ (sec_entry_exists) がtrue と false で異なっていても、
     平文長とダミー長が同一バケット境界にパディングされるならば、
     評価後の低位観測値は完全に同値 (low_obs_eq) である。 *)
@@ -1097,7 +1157,8 @@ Qed.
 
 (** [SPEC]
     エントリ摂動入力に対する一般化エントリ非干渉性補題:
-    entry_perturbed 関係を満たし公開入力が等しい任意の2入力に対し、パディング長一致条件下で照会観測値は同値となる。 *)
+    entry_perturbed 関係を満たし公開入力・FSM状態が等しい任意の2入力に対し、
+    パディング長一致条件下で照会観測値は同値となる。 *)
 Lemma entry_perturbed_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   entry_perturbed (input_high inp1) (input_high inp2) ->
@@ -1111,17 +1172,19 @@ Lemma entry_perturbed_non_interference : forall (inp1 inp2 : VaultSecurityInput)
      else default_dummy_len) ->
   low_obs_eq (eval_query inp1) (eval_query inp2).
 Proof.
-  intros inp1 inp2 Hequiv [Hk Hu] Hpad.
-  unfold eval_query, eval_entry_lookup, low_obs_eq, low_input_equiv in *.
+  intros inp1 inp2 [Hequiv Hfsm] [Hk Hu] Hpad.
+  unfold eval_query, eval_entry_lookup, low_obs_eq in *.
   simpl.
-  rewrite Hequiv in *.
+  rewrite Hfsm.
+  rewrite <- Hequiv.
+  destruct (input_fsm inp2); simpl; repeat split; try reflexivity.
   rewrite Hpad.
-  repeat split; reflexivity.
+  reflexivity.
 Qed.
 
 (** [SPEC]
     最上位セキュリティ非干渉性主定理 (vault_security_non_interference):
-    低位公開入力が等しい任意の2つの入力 inp1, inp2 において、
+    低位公開入力およびFSM状態が等しい任意の2つの入力 inp1, inp2 において、
     パディング長一致条件下では高位機密 (エントリ有無・平文データ等) が異なっていても、
     評価後の低位観測値は常に完全に同値 (low_obs_eq) である。 *)
 Theorem vault_security_non_interference : forall (inp1 inp2 : VaultSecurityInput),
@@ -1136,20 +1199,23 @@ Theorem vault_security_non_interference : forall (inp1 inp2 : VaultSecurityInput
      else default_dummy_len) ->
   low_obs_eq (eval_vault_query inp1) (eval_vault_query inp2).
 Proof.
-  intros inp1 inp2 Hequiv Hpad.
-  unfold eval_vault_query, eval_query, eval_entry_lookup, low_obs_eq, low_input_equiv in *.
+  intros inp1 inp2 [Hequiv Hfsm] Hpad.
+  unfold eval_vault_query, eval_query, eval_entry_lookup, low_obs_eq in *.
   simpl.
-  rewrite Hequiv in *.
+  rewrite Hfsm.
+  rewrite <- Hequiv.
+  destruct (input_fsm inp2); simpl; repeat split; try reflexivity.
   rewrite Hpad.
-  repeat split; reflexivity.
+  reflexivity.
 Qed.
 
 (** [SPEC]
     1ステップ状態遷移非干渉性主定理 (vault_step_non_interference):
-    低位等価な任意の2つの状態 s1 ≈_L s2 に対し、
+    低位等価かつFSMコントロール状態が一致する任意の2つの状態 s1, s2 に対し、
     同一の公開リクエスト req を与えて遷移させた後の状態も低位等価 (s1' ≈_L s2') を維持する。 *)
 Theorem vault_step_non_interference : forall (s1 s2 : VaultSecurityState) (req : LowPublic),
   low_equiv s1 s2 ->
+  vms_state (state_fsm s1) = vms_state (state_fsm s2) ->
   pad_to_bucket (pub_req_length req)
     (if sec_entry_exists (state_high s1)
      then length (sec_plaintext (state_high s1))
@@ -1160,18 +1226,20 @@ Theorem vault_step_non_interference : forall (s1 s2 : VaultSecurityState) (req :
      else default_dummy_len) ->
   low_equiv (vault_security_step s1 req) (vault_security_step s2 req).
 Proof.
-  intros s1 s2 req Hequiv Hpad.
+  intros s1 s2 req Hequiv Hfsm Hpad.
   unfold vault_security_step, low_equiv, observe_low.
   simpl.
   unfold eval_vault_query, eval_query, eval_entry_lookup, low_obs_eq.
   simpl.
+  rewrite Hfsm.
+  destruct (vms_state (state_fsm s2)); simpl; repeat split; try reflexivity.
   rewrite Hpad.
-  repeat split; reflexivity.
+  reflexivity.
 Qed.
 
 (** [SPEC]
     ユーザー列挙オラクル排除系 (no_user_enumeration_oracle):
-    低位公開入力が等しい場合、パディング長一致条件下で観測されるエラー型およびレスポンス長は
+    低位公開入力およびFSM状態が等しい場合、パディング長一致条件下で観測されるエラー型およびレスポンス長は
     ユーザー存在フラグやマスター鍵の真偽に依存しない。 *)
 Corollary no_user_enumeration_oracle : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
@@ -1193,7 +1261,7 @@ Qed.
 
 (** [SPEC]
     エントリ有無オラクル排除系 (no_entry_existence_oracle):
-    低位公開入力が等しい場合、パディング長一致条件下で観測されるエラー型およびレスポンス長はエントリ存在フラグの真偽に依存しない。 *)
+    低位公開入力およびFSM状態が等しい場合、パディング長一致条件下で観測されるエラー型およびレスポンス長はエントリ存在フラグの真偽に依存しない。 *)
 Corollary no_entry_existence_oracle : forall (inp1 inp2 : VaultSecurityInput),
   low_input_equiv inp1 inp2 ->
   pad_to_bucket (pub_req_length (input_public inp1))
@@ -1231,4 +1299,98 @@ Proof.
   intros inp1 inp2 Hequiv Hpad.
   destruct (vault_security_non_interference inp1 inp2 Hequiv Hpad) as [_ [Hlen _]].
   exact Hlen.
+Qed.
+
+
+(** -------------------------------------------------------------------------
+    7. FSM状態連携と機密性架橋定理 (FSM Bridge Theorems)
+    ------------------------------------------------------------------------- *)
+
+(** [SPEC]
+    施錠状態における平文非露出定理 (locked_query_non_interference):
+    FSMのコントロール状態が Locked である場合、高位平文の内容や長さ、
+    エントリ存在フラグが任意に異なっていても (パディング長一致条件すら不要)、
+    低位公開入力が一致する限り、評価後の低位観測値は完全に同値となる。
+    (施錠状態での平文アクセス完全遮断の形式証明) *)
+Theorem locked_query_non_interference : forall (inp1 inp2 : VaultSecurityInput),
+  low_input_equiv inp1 inp2 ->
+  input_fsm inp1 = Locked ->
+  low_obs_eq (eval_query inp1) (eval_query inp2).
+Proof.
+  intros inp1 inp2 [Hequiv Hfsm] Hlocked.
+  unfold eval_query, eval_entry_lookup, low_obs_eq.
+  rewrite Hlocked.
+  rewrite <- Hfsm.
+  rewrite Hlocked.
+  rewrite <- Hequiv.
+  simpl.
+  repeat split; reflexivity.
+Qed.
+
+(** [SPEC]
+    ゼロ消去状態における平文非露出定理 (zeroized_query_non_interference):
+    FSMのコントロール状態が Zeroized である場合、高位平文の内容や長さ、
+    エントリ存在フラグが任意に異なっていても、低位公開入力が一致する限り、
+    評価後の低位観測値は完全に同値となる。
+    (廃棄状態での平文アクセス完全遮断の形式証明) *)
+Theorem zeroized_query_non_interference : forall (inp1 inp2 : VaultSecurityInput),
+  low_input_equiv inp1 inp2 ->
+  input_fsm inp1 = Zeroized ->
+  low_obs_eq (eval_query inp1) (eval_query inp2).
+Proof.
+  intros inp1 inp2 [Hequiv Hfsm] Hzeroized.
+  unfold eval_query, eval_entry_lookup, low_obs_eq.
+  rewrite Hzeroized.
+  rewrite <- Hfsm.
+  rewrite Hzeroized.
+  rewrite <- Hequiv.
+  simpl.
+  repeat split; reflexivity.
+Qed.
+
+(** [SPEC]
+    非解錠状態における平文非露出一般定理 (non_unlocked_query_non_interference):
+    FSMのコントロール状態が Unlocked 以外 (Locked, Unlocking, Zeroized) である場合、
+    パディング長一致条件なしに、任意の高位機密に対して低位観測値の完全非干渉性が成立する。 *)
+Theorem non_unlocked_query_non_interference : forall (inp1 inp2 : VaultSecurityInput),
+  low_input_equiv inp1 inp2 ->
+  input_fsm inp1 <> Unlocked ->
+  low_obs_eq (eval_query inp1) (eval_query inp2).
+Proof.
+  intros inp1 inp2 [Hequiv Hfsm] Hnot_unlocked.
+  unfold eval_query, eval_entry_lookup, low_obs_eq.
+  rewrite Hfsm in Hnot_unlocked.
+  rewrite Hfsm.
+  rewrite <- Hequiv.
+  destruct (input_fsm inp2).
+  - simpl; repeat split; reflexivity.
+  - simpl; repeat split; reflexivity.
+  - contradiction Hnot_unlocked; reflexivity.
+  - simpl; repeat split; reflexivity.
+Qed.
+
+(** [SPEC]
+    EnvelopeFsm と NonInterference の統合機密性架橋定理 (fsm_confidentiality_bridge):
+    FSM実行時状態 m においてコントロール状態が非解錠 (vms_state m <> Unlocked) であり、
+    かつメモリ安全不変条件 (SafeState m) を満たす場合、
+    メモリ上の平文DEKが完全に遮断されている (observe_dek m = None) と同時に、
+    任意の公開リクエストに対するクエリ観測値において、平文長やエントリ存在に依存しない
+    完全な非干渉性 (low_obs_eq) が保証される。 *)
+Theorem fsm_confidentiality_bridge : forall (m : VaultMachineState) (h1 h2 : HighSecret) (req : LowPublic),
+  SafeState m ->
+  vms_state m <> Unlocked ->
+  observe_dek m = None /\
+  low_obs_eq
+    (eval_query (mkVaultSecurityInput (vms_state m) h1 req))
+    (eval_query (mkVaultSecurityInput (vms_state m) h2 req)).
+Proof.
+  intros m h1 h2 req Hsafe Hnot_unlocked.
+  split.
+  - destruct (observe_dek m) as [k |] eqn:Hobs.
+    + apply (safe_state_observe_some_implies_unlocked m k Hsafe) in Hobs.
+      contradiction Hnot_unlocked.
+    + reflexivity.
+  - apply non_unlocked_query_non_interference.
+    + apply low_input_equiv_intro; reflexivity.
+    + simpl; exact Hnot_unlocked.
 Qed.

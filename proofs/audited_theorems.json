@@ -1612,5 +1612,35 @@
     "theorem": "no_length_oracle",
     "allow_aeneas_axioms": false,
     "description": "レスポンス長オラクル排除系"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_machine_state_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultMachineState 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "locked_query_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "施錠状態における平文非露出定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "zeroized_query_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ゼロ消去状態における平文非露出定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "non_unlocked_query_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態における平文非露出一般定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "fsm_confidentiality_bridge",
+    "allow_aeneas_axioms": false,
+    "description": "EnvelopeFsm と NonInterference の統合機密性架橋定理"
   }
 ]
