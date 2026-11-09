@@ -993,10 +993,12 @@ Definition default_dummy_len : nat := 32%nat.
 
 (** [MODEL]
     ダミー長を考慮したユーザー認証評価関数 (eval_auth_lookup)。
-    Vaultが廃棄状態 (Zeroized) の場合は即座にゼロ消去エラー (Some Tlv_VaultError_Zeroized) を返却する。
+    Vaultが廃棄状態 (Zeroized) の場合は無効マジックエラー (Some Tlv_VaultError_InvalidMagic) を返し、
+    ダミー長 (dummy_len) をバケットサイズにパディングしたレスポンスを出力して、
+    トラフィック解析防止 (Traffic Uniformity) を維持する。
     それ以外の状態 (Locked / Unlocking / Unlocked) では、
-    ユーザーが存在し (sec_user_exists = true) かつマスター鍵が登録されている (Some k) 場合は
-    実際の鍵長 (length k) を採用し、ユーザーが存在しない場合やマスター鍵が未登録の場合は
+    ユーザーが存在し (sec_user_exists = true) かつマスター鍵が登録されている (Some k) 場合は、
+    実際の鍵長 (length k) を採用し、ユーザーが存在しない場合やマスター鍵が未登録の場合は、
     固定ダミー長 (dummy_len) を採用する。
     防護的マスキングにより低位エラーを発生させず (None)、
     指定バケットサイズにパディングしたレスポンスを出力することでユーザー列挙オラクルを排除する。 *)
@@ -1005,7 +1007,7 @@ Definition eval_auth_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowOb
   | Zeroized =>
       mkLowObservation
         (Some Tlv_VaultError_InvalidMagic)
-        (pad_to_bucket (pub_req_length (input_public inp)) 0)
+        (pad_to_bucket (pub_req_length (input_public inp)) dummy_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   | _ =>
@@ -1034,12 +1036,12 @@ Definition eval_auth (inp : VaultSecurityInput) : LowObservation :=
 
 (** [MODEL]
     ダミー長を考慮したエントリ照会評価関数 (eval_entry_lookup)。
-    Vaultマシンのコントロール状態 (input_fsm) と連動し:
+    Vaultマシンのコントロール状態 (input_fsm) と連動し、
     - 解錠状態 (Unlocked): エントリが存在する場合は平文長、非存在時は固定ダミー長を採用し、
       指定バケットサイズにパディングしたレスポンス長を出力する (エラーなし: None)。
     - 施錠・認証中状態 (Locked / Unlocking): 平文アクセスを完全に遮断し、施錠時拒絶エラー (Some Tlv_VaultError_InvalidFormat)
-      およびデフォルトダミー長を出力する。
-    - 廃棄状態 (Zeroized): ゼロ消去・無効マジックエラー (Some Tlv_VaultError_InvalidMagic) およびデフォルトダミー長を出力する。 *)
+      およびダミー長 (dummy_len) を出力する。
+    - 廃棄状態 (Zeroized): ゼロ消去・無効マジックエラー (Some Tlv_VaultError_InvalidMagic) およびダミー長 (dummy_len) を出力する。 *)
 Definition eval_entry_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowObservation :=
   match input_fsm inp with
   | Unlocked =>
@@ -1054,13 +1056,13 @@ Definition eval_entry_lookup (inp : VaultSecurityInput) (dummy_len : nat) : LowO
   | Zeroized =>
       mkLowObservation
         (Some Tlv_VaultError_InvalidMagic)
-        (pad_to_bucket (pub_req_length (input_public inp)) default_dummy_len)
+        (pad_to_bucket (pub_req_length (input_public inp)) dummy_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   | Locked | Unlocking =>
       mkLowObservation
         (Some Tlv_VaultError_InvalidFormat)
-        (pad_to_bucket (pub_req_length (input_public inp)) default_dummy_len)
+        (pad_to_bucket (pub_req_length (input_public inp)) dummy_len)
         (pub_header (input_public inp))
         (pub_slot_id (input_public inp))
   end.
