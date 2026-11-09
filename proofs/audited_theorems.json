@@ -619,6 +619,18 @@
   },
   {
     "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "non_unlocked_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態起点における一般化DEK平文非露出定理: 非解錠状態かつ安全なマシン状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "non_unlocked_no_auth_cannot_extract_dek",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態起点における一般化DEK平文非抽出系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
     "theorem": "locked_no_auth_dek_confidentiality",
     "allow_aeneas_axioms": false,
     "description": "DEK平文非露出定理: 施錠状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する定理"
