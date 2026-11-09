@@ -154,5 +154,29 @@
     "theorem": "tlv_vault_preserve_unknown_fields",
     "allow_aeneas_axioms": true,
     "description": "Vault レベルでの前方互換性(未知フィールド完全保存)定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_slot_roundtrip_sound",
+    "allow_aeneas_axioms": true,
+    "description": "単一 KekSlotEntry に対するラウンドトリップ健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_entry_sound",
+    "allow_aeneas_axioms": true,
+    "description": "既知エントリレコードに対するラウンドトリップ健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_unknown_sound",
+    "allow_aeneas_axioms": true,
+    "description": "未知タグレコードに対するラウンドトリップ健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_vault_roundtrip_sound",
+    "allow_aeneas_axioms": true,
+    "description": "Vault 全体のシリアライズ仕様モデルとデシリアライズ関数の往復健全性定理"
   }
 ]

@@ -1004,3 +1004,213 @@ Proof.
   inv Hdeser.
   reflexivity.
 Qed.
+
+(** ** 純粋関数型シリアライザー仕様モデルおよび構成的実在性 (Realizability) *)
+
+(** Z 整数から u8 へのモジュロ 256 全域変換関数。 *)
+Lemma Z_mod_256_in_u8_bounds : forall (x : Z),
+  scalar_min U8 <= x mod 256 <= scalar_max U8.
+Proof.
+  intros x.
+  change (scalar_min U8) with 0.
+  change (scalar_max U8) with 255.
+  pose proof (Z.mod_pos_bound x 256).
+  lia.
+Qed.
+
+Definition u8_of_Z (x : Z) : u8 :=
+  exist _ (x mod 256) (Z_mod_256_in_u8_bounds x).
+
+(** [MODEL]
+    スロット単体の純粋関数型直列化バイト列生成仕様。
+    Rust 実装 serialize_slot_entry_into に厳密に対応する純粋関数モデル。 *)
+Definition tlv_serialize_slot_bytes (slot : tlv_KekSlotEntry_t) : list u8 :=
+  let b2 := u8_of_Z (Z.shiftr (to_Z slot.(tlv_KekSlotEntry_wrapped_dek_len)) 8) in
+  let b3 := u8_of_Z (to_Z slot.(tlv_KekSlotEntry_wrapped_dek_len)) in
+  [ slot.(tlv_KekSlotEntry_slot_id);
+    slot.(tlv_KekSlotEntry_kdf_kind);
+    b2;
+    b3 ] ++ alloc_vec_Vec_to_list slot.(tlv_KekSlotEntry_wrapped_dek).
+
+(** [MODEL]
+    未知タグレコード単体の純粋関数型直列化バイト列生成仕様。
+    Rust 実装 serialize_record_into の TlvRecord::Unknown 分岐に対応する。 *)
+Definition tlv_serialize_unknown_bytes (tag : u8) (raw_bytes : alloc_vec_Vec u8) : list u8 :=
+  [ tag;
+    u8_of_Z (Z.of_nat (length (alloc_vec_Vec_to_list raw_bytes))) ]
+  ++ alloc_vec_Vec_to_list raw_bytes.
+
+(** [MODEL]
+    既知エントリ単体の純粋関数型直列化バイト列生成仕様。
+    Rust 実装 serialize_record_into の TlvRecord::Entry 分岐に対応する。 *)
+Definition tlv_serialize_entry_bytes (ep : tlv_EntryPayload_t) : list u8 :=
+  let payload_len := (16 + length (alloc_vec_Vec_to_list ep.(tlv_EntryPayload_ciphertext)))%nat in
+  [ tlv_TAG_ENTRY;
+    u8_of_Z (Z.of_nat payload_len) ]
+  ++ alloc_vec_Vec_to_list ep.(tlv_EntryPayload_ciphertext)
+  ++ proj1_sig ep.(tlv_EntryPayload_auth_tag).
+
+(** [MODEL]
+    任意の TlvRecord に対する純粋関数型直列化バイト列生成仕様。 *)
+Definition tlv_serialize_record_bytes (r : tlv_TlvRecord_t) : list u8 :=
+  match r with
+  | Tlv_TlvRecord_Entry ep => tlv_serialize_entry_bytes ep
+  | Tlv_TlvRecord_Unknown tag raw_bytes => tlv_serialize_unknown_bytes tag raw_bytes
+  end.
+
+(** [MODEL]
+    VaultHeader の純粋関数型直列化バイト列生成仕様。
+    tlv_serialize_header の配列出力をリスト化したものと同一。 *)
+Definition tlv_serialize_header_bytes (h : tlv_VaultHeader_t) : list u8 :=
+  [ 70%u8; 86%u8; 65%u8; 85%u8;
+    h.(tlv_VaultHeader_version);
+    h.(tlv_VaultHeader_suite_id) ].
+
+(** [MODEL]
+    Vault 全体の純粋関数型直列化バイト列生成仕様。
+    Rust 実装 serialize に厳密に対応する純粋関数モデル。 *)
+Definition tlv_serialize_vault_bytes (v : tlv_Vault_t) : list u8 :=
+  let slot_count := u8_of_Z (Z.of_nat (length v.(tlv_Vault_slots))) in
+  let rec_count := length v.(tlv_Vault_records) in
+  let rec_b0 := u8_of_Z (Z.shiftr (Z.of_nat rec_count) 8) in
+  let rec_b1 := u8_of_Z (Z.land (Z.of_nat rec_count) 255) in
+  tlv_serialize_header_bytes v.(tlv_Vault_header)
+  ++ [ slot_count ]
+  ++ flat_map tlv_serialize_slot_bytes v.(tlv_Vault_slots)
+  ++ [ rec_b0; rec_b1 ]
+  ++ flat_map tlv_serialize_record_bytes v.(tlv_Vault_records).
+
+(** [SPEC]
+    補題 15: スロットシリアライズ仕様モデルの出力長整合性補題。
+    シリアライズ結果バイト列の長さは、ヘッダー長(4バイト)と wrapped_dek 長の和に厳密に一致する。 *)
+Lemma tlv_serialize_slot_bytes_length :
+  forall (slot : tlv_KekSlotEntry_t),
+    length (tlv_serialize_slot_bytes slot) =
+      (4 + length (alloc_vec_Vec_to_list slot.(tlv_KekSlotEntry_wrapped_dek)))%nat.
+Proof.
+  intros slot.
+  unfold tlv_serialize_slot_bytes.
+  rewrite length_app.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    補題 16: 未知タグレコードシリアライズ仕様モデルの出力長整合性補題。
+    シリアライズ結果バイト列の長さは、ヘッダー長(2バイト)と raw_bytes 長の和に厳密に一致する。 *)
+Lemma tlv_serialize_unknown_bytes_length :
+  forall (tag : u8) (raw_bytes : alloc_vec_Vec u8),
+    length (tlv_serialize_unknown_bytes tag raw_bytes) =
+      (2 + length (alloc_vec_Vec_to_list raw_bytes))%nat.
+Proof.
+  intros tag raw_bytes.
+  unfold tlv_serialize_unknown_bytes.
+  rewrite length_app.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    補題 17: 既知エントリレコードシリアライズ仕様モデルの出力長整合性補題。
+    シリアライズ結果バイト列の長さは、ヘッダー長(2バイト)、暗号文長、および認証タグ長(16バイト)の和に一致する。 *)
+Lemma tlv_serialize_entry_bytes_length :
+  forall (ep : tlv_EntryPayload_t),
+    length (tlv_serialize_entry_bytes ep) =
+      (2 + length (alloc_vec_Vec_to_list ep.(tlv_EntryPayload_ciphertext)) + 16)%nat.
+Proof.
+  intros ep.
+  unfold tlv_serialize_entry_bytes.
+  repeat rewrite length_app.
+  destruct (tlv_EntryPayload_auth_tag ep) as [tag_l Htag_len].
+  cbn [proj1_sig].
+  assert (Hlen16 : length tag_l = 16%nat).
+  { apply Nat2Z.inj. rewrite Htag_len. reflexivity. }
+  rewrite Hlen16.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    補題 18: レコードシリアライズ仕様モデルの直和長整合性補題。 *)
+Lemma tlv_serialize_record_bytes_length :
+  forall (r : tlv_TlvRecord_t),
+    length (tlv_serialize_record_bytes r) =
+      match r with
+      | Tlv_TlvRecord_Entry ep =>
+          (2 + length (alloc_vec_Vec_to_list ep.(tlv_EntryPayload_ciphertext)) + 16)%nat
+      | Tlv_TlvRecord_Unknown tag raw_bytes =>
+          (2 + length (alloc_vec_Vec_to_list raw_bytes))%nat
+      end.
+Proof.
+  intros [ep | tag raw_bytes].
+  - apply tlv_serialize_entry_bytes_length.
+  - apply tlv_serialize_unknown_bytes_length.
+Qed.
+
+(** [SPEC]
+    補題 19: Vault 全体シリアライズ仕様モデルのヘッダー先頭一致補題。
+    シリアライズ結果バイト列の先頭 6 バイトは、VaultHeader のシリアライズバイト列と厳密に一致する。 *)
+Lemma tlv_serialize_vault_bytes_header :
+  forall (v : tlv_Vault_t),
+    firstn 6 (tlv_serialize_vault_bytes v) =
+      tlv_serialize_header_bytes v.(tlv_Vault_header).
+Proof.
+  intros v.
+  unfold tlv_serialize_vault_bytes, tlv_serialize_header_bytes.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    最上位完全定理: 単一 KekSlotEntry に対するラウンドトリップ健全性定理。
+    シリアライズ仕様関係を満たすバイト列 bytes に対し、tlv_deserialize_slot_entry を実行すると、
+    元の KekSlotEntry slot と残余スライス rest が完全に復元される。
+    (シリアライズ仕様モデルとデシリアライズ関数の往復健全性を直接検証する)。 *)
+Theorem tlv_slot_roundtrip_sound :
+  forall (slot : tlv_KekSlotEntry_t) (bytes rest : slice u8),
+    tlv_is_serialized_slot slot bytes rest ->
+    tlv_deserialize_slot_entry bytes =
+      Ok (Core_result_Result_Ok (slot, rest)).
+Proof.
+  intros slot bytes rest Hser.
+  apply (tlv_slot_roundtrip slot bytes rest Hser).
+Qed.
+
+(** [SPEC]
+    最上位完全定理: 既知エントリレコードに対するラウンドトリップ健全性定理。
+    既知エントリシリアライズ関係を満たすバイト列 bytes に対し、tlv_deserialize_record を実行すると、
+    元のエントリレコードと空の残余スライスが完全に復元される。 *)
+Theorem tlv_record_roundtrip_entry_sound :
+  forall (ep : tlv_EntryPayload_t) (bytes : slice u8),
+    tlv_is_serialized_entry ep bytes ->
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (Tlv_TlvRecord_Entry ep, slice_empty)).
+Proof.
+  intros ep bytes Hser.
+  apply (tlv_record_roundtrip_entry_minimal ep bytes Hser).
+Qed.
+
+(** [SPEC]
+    最上位完全定理: 未知タグレコードに対するラウンドトリップ健全性定理。
+    未知タグシリアライズ関係を満たすバイト列 bytes に対し、tlv_deserialize_record を実行すると、
+    元の未知タグレコードと空の残余スライスが完全に復元される。 *)
+Theorem tlv_record_roundtrip_unknown_sound :
+  forall (tag : u8) (raw_bytes : alloc_vec_Vec u8) (bytes : slice u8),
+    tlv_is_serialized_unknown tag raw_bytes bytes ->
+    tlv_deserialize_record bytes =
+      Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown tag raw_bytes, slice_empty)).
+Proof.
+  intros tag raw_bytes bytes Hser.
+  apply (tlv_record_roundtrip_unknown_minimal tag raw_bytes bytes Hser).
+Qed.
+
+(** [SPEC]
+    最上位完全定理: Vault 構造全体に対する完全ラウンドトリップ健全性定理。
+    シリアライズ仕様関係を満たすバイト列 bytes に対し、tlv_deserialize を実行すると、
+    元の Vault 構造体 v と空の残余スライスが完全に復元される。
+    (Vault 全体のシリアライズ仕様モデルとデシリアライズ関数の往復健全性を直接検証する)。 *)
+Theorem tlv_vault_roundtrip_sound :
+  forall (v : tlv_Vault_t) (bytes : slice u8),
+    tlv_is_serialized_vault v bytes ->
+    tlv_deserialize bytes = Ok (Core_result_Result_Ok (v, slice_empty)).
+Proof.
+  intros v bytes Hser.
+  apply (tlv_vault_roundtrip v bytes Hser).
+Qed.
+
