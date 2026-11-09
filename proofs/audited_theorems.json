@@ -1549,6 +1549,12 @@
   },
   {
     "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "auth_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "認証評価関数に対する完全非干渉性主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
     "theorem": "user_existence_non_interference",
     "allow_aeneas_axioms": false,
     "description": "ユーザー存在非干渉性主定理 (存在/非存在高位入力に対する低位観測値同値性)"

@@ -978,6 +978,25 @@ Definition vault_security_step (s : VaultSecurityState) (req : LowPublic) : Vaul
     (eval_vault_query (mkVaultSecurityInput (state_high s) req)).
 
 (** [SPEC]
+    認証評価関数に対する完全非干渉性主定理 (auth_non_interference):
+    低位公開入力が一致する任意の2入力に対し、ユーザー存在フラグやマスター鍵等の高位機密が
+    異なっていても、評価後の低位観測値は完全に同値 (low_obs_eq) である。 *)
+Theorem auth_non_interference : forall (inp1 inp2 : VaultSecurityInput),
+  low_input_equiv inp1 inp2 ->
+  low_obs_eq (eval_auth inp1) (eval_auth inp2).
+Proof.
+  intros inp1 inp2 Hequiv.
+  unfold eval_auth, low_obs_eq, low_input_equiv in *.
+  simpl.
+  destruct (sec_user_exists (input_high inp1));
+    destruct (sec_user_exists (input_high inp2));
+    try destruct (sec_master_key (input_high inp1));
+    try destruct (sec_master_key (input_high inp2));
+    rewrite Hequiv;
+    repeat split; reflexivity.
+Qed.
+
+(** [SPEC]
     ユーザー存在非干渉性補題 (user_existence_non_interference):
     低位公開入力が一致する2つの入力において、ユーザー存在フラグ (sec_user_exists) が
     true と false で異なっていても、評価後の低位観測値は完全に同値 (low_obs_eq) である。 *)
@@ -987,13 +1006,8 @@ Theorem user_existence_non_interference : forall (inp1 inp2 : VaultSecurityInput
   sec_user_exists (input_high inp2) = false ->
   low_obs_eq (eval_auth inp1) (eval_auth inp2).
 Proof.
-  intros inp1 inp2 Hequiv Hu1 Hu2.
-  unfold eval_auth, low_obs_eq, low_input_equiv in *.
-  simpl.
-  rewrite Hu1, Hu2.
-  destruct (sec_master_key (input_high inp1));
-    rewrite Hequiv;
-    repeat split; reflexivity.
+  intros inp1 inp2 Hequiv _ _.
+  apply (auth_non_interference inp1 inp2 Hequiv).
 Qed.
 
 (** [SPEC]
@@ -1004,15 +1018,8 @@ Lemma user_perturbed_non_interference : forall (inp1 inp2 : VaultSecurityInput),
   user_perturbed (input_high inp1) (input_high inp2) ->
   low_obs_eq (eval_auth inp1) (eval_auth inp2).
 Proof.
-  intros inp1 inp2 Hequiv [Hk [Hp He]].
-  unfold eval_auth, low_obs_eq, low_input_equiv in *.
-  simpl.
-  destruct (sec_user_exists (input_high inp1)) eqn:Hu1;
-    destruct (sec_user_exists (input_high inp2)) eqn:Hu2;
-    try destruct (sec_master_key (input_high inp1));
-    try destruct (sec_master_key (input_high inp2));
-    rewrite Hequiv;
-    repeat split; reflexivity.
+  intros inp1 inp2 Hequiv _.
+  apply (auth_non_interference inp1 inp2 Hequiv).
 Qed.
 
 (** [SPEC]
@@ -1137,13 +1144,8 @@ Corollary no_user_enumeration_oracle : forall (inp1 inp2 : VaultSecurityInput),
   obs_error (eval_auth inp1) = obs_error (eval_auth inp2).
 Proof.
   intros inp1 inp2 Hequiv.
-  unfold eval_auth, low_input_equiv in *.
-  simpl.
-  destruct (sec_user_exists (input_high inp1));
-    destruct (sec_user_exists (input_high inp2));
-    try destruct (sec_master_key (input_high inp1));
-    try destruct (sec_master_key (input_high inp2));
-    reflexivity.
+  destruct (auth_non_interference inp1 inp2 Hequiv) as [Herr _].
+  exact Herr.
 Qed.
 
 (** [SPEC]
@@ -1163,11 +1165,9 @@ Corollary no_entry_existence_oracle : forall (inp1 inp2 : VaultSecurityInput),
   obs_length (eval_query inp1) = obs_length (eval_query inp2).
 Proof.
   intros inp1 inp2 Hequiv Hpad.
-  unfold eval_query, eval_entry_lookup, low_input_equiv in *.
-  simpl.
-  rewrite Hequiv in *.
-  rewrite Hpad.
-  split; reflexivity.
+  assert (Hobs := vault_security_non_interference inp1 inp2 Hequiv Hpad).
+  destruct Hobs as [Herr [Hlen _]].
+  split; [exact Herr | exact Hlen].
 Qed.
 
 (** [SPEC]
@@ -1186,9 +1186,6 @@ Corollary no_length_oracle : forall (inp1 inp2 : VaultSecurityInput),
   obs_length (eval_vault_query inp1) = obs_length (eval_vault_query inp2).
 Proof.
   intros inp1 inp2 Hequiv Hpad.
-  unfold eval_vault_query, eval_query, eval_entry_lookup, low_input_equiv in *.
-  simpl.
-  rewrite Hequiv in *.
-  rewrite Hpad.
-  reflexivity.
+  destruct (vault_security_non_interference inp1 inp2 Hequiv Hpad) as [_ [Hlen _]].
+  exact Hlen.
 Qed.
