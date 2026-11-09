@@ -172,7 +172,81 @@ Fixpoint tlv_deserialize_slots (n : nat) (bytes : slice u8) :
   end.
 
 (** [SPEC]
-    補題 8: スロット数 n に対する構造帰納法により、tlv_deserialize_slots は必ず Ok または Fail_ で停止する(全域性)。 *)
+    補題: u8 から usize へのスカラーキャストは常に Ok を返す (非失敗性)。 *)
+Lemma scalar_cast_u8_to_usize_safe :
+  forall (x : u8),
+    exists (y : usize), scalar_cast U8 Usize x = Ok y.
+Proof.
+  intros [val [Hmin Hmax]].
+  cbn in Hmin, Hmax.
+  unfold scalar_cast, mk_scalar, to_Z.
+  cbn.
+  destruct (sumbool_of_bool (scalar_in_bounds Usize val)) as [Hin | Hout].
+  - exists (exist _ val (scalar_in_bounds_valid Usize val Hin)). reflexivity.
+  - exfalso.
+    unfold scalar_in_bounds, scalar_ge_min, scalar_le_max, scalar_min_cons, scalar_max_cons in Hout.
+    unfold u32_min, u32_max, u8_min, u8_max in *.
+    assert (Hge : (0%Z <=? val)%Z = true) by (apply Z.leb_le; lia).
+    assert (Hle : (val <=? 4294967295%Z)%Z = true) by (apply Z.leb_le; lia).
+    rewrite Hge, Hle in Hout.
+    cbn in Hout.
+    discriminate Hout.
+Qed.
+
+(** [SPEC]
+    補題: u16 から usize へのスカラーキャストは常に Ok を返す (非失敗性)。 *)
+Lemma scalar_cast_u16_to_usize_safe :
+  forall (x : u16),
+    exists (y : usize), scalar_cast U16 Usize x = Ok y.
+Proof.
+  intros [val [Hmin Hmax]].
+  cbn in Hmin, Hmax.
+  unfold scalar_cast, mk_scalar, to_Z.
+  cbn.
+  destruct (sumbool_of_bool (scalar_in_bounds Usize val)) as [Hin | Hout].
+  - exists (exist _ val (scalar_in_bounds_valid Usize val Hin)). reflexivity.
+  - exfalso.
+    unfold scalar_in_bounds, scalar_ge_min, scalar_le_max, scalar_min_cons, scalar_max_cons in Hout.
+    unfold u32_min, u32_max, u16_min, u16_max in *.
+    assert (Hge : (0%Z <=? val)%Z = true) by (apply Z.leb_le; lia).
+    assert (Hle : (val <=? 4294967295%Z)%Z = true) by (apply Z.leb_le; lia).
+    rewrite Hge, Hle in Hout.
+    cbn in Hout.
+    discriminate Hout.
+Qed.
+
+(** [SPEC]
+    補題 8: 各スロットエントリのパースが非失敗 (Ok) であるとき、
+    スロット数 n に対する構造帰納法により、
+    tlv_deserialize_slots は Aeneas モナドレベルで失敗せず、
+    必ず Ok res を返す(構造帰納的停止性および非失敗性)。 *)
+Lemma tlv_deserialize_slots_non_failure :
+  forall (n : nat) (bytes : slice u8),
+    (forall (b : slice u8), exists (res : core_result_Result_t (tlv_KekSlotEntry_t * slice u8) tlv_VaultError_t),
+       tlv_deserialize_slot_entry b = Ok res) ->
+    exists (res : core_result_Result_t (list tlv_KekSlotEntry_t * slice u8) tlv_VaultError_t),
+       tlv_deserialize_slots n bytes = Ok res.
+Proof.
+  induction n as [| n' IHn']; intros bytes Hentry.
+  - cbn [tlv_deserialize_slots].
+    eexists.
+    reflexivity.
+  - cbn [tlv_deserialize_slots].
+    unfold bind.
+    destruct (Hentry bytes) as [slot_res Hslot].
+    rewrite Hslot.
+    destruct slot_res as [(entry, rest) | err].
+    + destruct (IHn' rest Hentry) as [next_res Hnext].
+      rewrite Hnext.
+      destruct next_res as [(entries, final_rest) | err2].
+      * eexists. reflexivity.
+      * eexists. reflexivity.
+    + eexists. reflexivity.
+Qed.
+
+(** [SPEC]
+    補題 8 (全域性): スロット数 n に対する構造帰納法により、
+    tlv_deserialize_slots は必ず Ok または Fail_ で停止する(全域性)。 *)
 Lemma tlv_deserialize_slots_totality :
   forall (n : nat) (bytes : slice u8),
     (exists (res : core_result_Result_t (list tlv_KekSlotEntry_t * slice u8) tlv_VaultError_t),
@@ -218,7 +292,36 @@ Fixpoint tlv_deserialize_records (n : nat) (bytes : slice u8) :
   end.
 
 (** [SPEC]
-    補題 9: レコード数 n に対する構造帰納法により、tlv_deserialize_records は必ず Ok または Fail_ で停止する(全域性)。 *)
+    補題 9: 各レコードのパースが非失敗 (Ok) であるとき、
+    レコード数 n に対する構造帰納法により、
+    tlv_deserialize_records は Aeneas モナドレベルで失敗せず必ず Ok res を返す(構造帰納的停止性および非失敗性)。 *)
+Lemma tlv_deserialize_records_non_failure :
+  forall (n : nat) (bytes : slice u8),
+    (forall (b : slice u8), exists (res : core_result_Result_t (tlv_TlvRecord_t * slice u8) tlv_VaultError_t),
+       tlv_deserialize_record b = Ok res) ->
+    exists (res : core_result_Result_t (list tlv_TlvRecord_t * slice u8) tlv_VaultError_t),
+       tlv_deserialize_records n bytes = Ok res.
+Proof.
+  induction n as [| n' IHn']; intros bytes Hrec.
+  - cbn [tlv_deserialize_records].
+    eexists.
+    reflexivity.
+  - cbn [tlv_deserialize_records].
+    unfold bind.
+    destruct (Hrec bytes) as [rec_res Hrecord].
+    rewrite Hrecord.
+    destruct rec_res as [(record, rest) | err].
+    + destruct (IHn' rest Hrec) as [next_res Hnext].
+      rewrite Hnext.
+      destruct next_res as [(records, final_rest) | err2].
+      * eexists. reflexivity.
+      * eexists. reflexivity.
+    + eexists. reflexivity.
+Qed.
+
+(** [SPEC]
+    補題 9 (全域性): レコード数 n に対する構造帰納法により、
+    tlv_deserialize_records は必ず Ok または Fail_ で停止する(全域性)。 *)
 Lemma tlv_deserialize_records_totality :
   forall (n : nat) (bytes : slice u8),
     (exists (res : core_result_Result_t (list tlv_TlvRecord_t * slice u8) tlv_VaultError_t),
@@ -316,18 +419,111 @@ Proof.
   reflexivity.
 Qed.
 
+(** [MODEL]
+    TLV デシリアライズ処理環境における非失敗性仕様。
+    ヘッダー解析、スライスの境界内読み出し・サブスライス切り出し、および
+    各スロット・レコード解析が Aeneas モナドレベルで失敗しない(Fail_ を返さない)ことを規定する。 *)
+Record tlv_deserializer_non_failure_env : Type := {
+  env_header :
+    forall (bytes : slice u8),
+      exists (res : core_result_Result_t (tlv_VaultHeader_t * slice u8) tlv_VaultError_t),
+        tlv_deserialize_header bytes = Ok res;
+
+  env_slot_count_read :
+    forall (rest1 : slice u8),
+      (slice_len rest1 s< 1%usize) = false ->
+      exists (slot_count_u8 : u8),
+        slice_index_usize rest1 0%usize = Ok slot_count_u8;
+
+  env_rest2_subslice :
+    forall (rest1 : slice u8),
+      (slice_len rest1 s< 1%usize) = false ->
+      exists (rest2 : slice u8),
+        core_slice_index_Slice_index
+          (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+          rest1 {| core_ops_range_RangeFrom_start := 1%usize |} = Ok rest2;
+
+  env_slot_entry :
+    forall (bytes : slice u8),
+      exists (res : core_result_Result_t (tlv_KekSlotEntry_t * slice u8) tlv_VaultError_t),
+        tlv_deserialize_slot_entry bytes = Ok res;
+
+  env_record_count_read :
+    forall (rest3 : slice u8),
+      (slice_len rest3 s< 2%usize) = false ->
+      exists (b0 b1 : u8),
+        slice_index_usize rest3 0%usize = Ok b0 /\
+        slice_index_usize rest3 1%usize = Ok b1;
+
+  env_rest4_subslice :
+    forall (rest3 : slice u8),
+      (slice_len rest3 s< 2%usize) = false ->
+      exists (rest4 : slice u8),
+        core_slice_index_Slice_index
+          (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice u8)
+          rest3 {| core_ops_range_RangeFrom_start := 2%usize |} = Ok rest4;
+
+  env_record :
+    forall (bytes : slice u8),
+      exists (res : core_result_Result_t (tlv_TlvRecord_t * slice u8) tlv_VaultError_t),
+        tlv_deserialize_record bytes = Ok res;
+}.
+
 (** [SPEC]
-    定理: 任意長バイト列に対し tlv_deserialize は必ず Ok または Fail_ で停止する
-    (構造帰納法による停止性および全域性の最上位保証)。 *)
+    定理: デシリアライザー環境の非失敗性のもとで、任意長バイト列に対し tlv_deserialize は、
+    Aeneas エラーモナドレベルで失敗せず、必ず Ok res (成功または VaultError) を返す
+    (構造帰納法による停止性および合成パーサーの非失敗性最上位保証)。 *)
 Theorem tlv_deserialize_totality :
-  forall (bytes : slice u8),
-    (exists (res : core_result_Result_t (tlv_Vault_t * slice u8) tlv_VaultError_t),
-       tlv_deserialize bytes = Ok res) \/
-    (exists (e : error),
-       tlv_deserialize bytes = Fail_ e).
+  forall (env : tlv_deserializer_non_failure_env) (bytes : slice u8),
+    exists (res : core_result_Result_t (tlv_Vault_t * slice u8) tlv_VaultError_t),
+      tlv_deserialize bytes = Ok res.
 Proof.
-  intros bytes.
-  destruct (tlv_deserialize bytes) as [res | e].
-  - left. exists res. reflexivity.
-  - right. exists e. reflexivity.
+  intros env bytes.
+  destruct (slice_len bytes s< tlv_VAULT_HEADER_LEN) eqn:Hunderflow.
+  - rewrite (tlv_deserialize_underflow bytes Hunderflow).
+    eexists. reflexivity.
+  - unfold tlv_deserialize.
+    destruct (env.(env_header) bytes) as [hdr_res Hhdr].
+    rewrite Hhdr.
+    destruct hdr_res as [(header, rest1) | err].
+    + unfold bind.
+      destruct (slice_len rest1 s< 1%usize) eqn:Hlen1.
+      * eexists. reflexivity.
+      * destruct (env.(env_slot_count_read) rest1 Hlen1) as [slot_count_u8 Hslot_cnt].
+        rewrite Hslot_cnt.
+        unfold bind.
+        destruct (scalar_cast_u8_to_usize_safe slot_count_u8) as [slot_count Hcast_slot].
+        rewrite Hcast_slot.
+        unfold bind.
+        destruct (env.(env_rest2_subslice) rest1 Hlen1) as [rest2 Hrest2].
+        rewrite Hrest2.
+        unfold bind.
+        destruct (slice_len rest2 s< core_num_Usize_saturating_mul slot_count tlv_KEK_SLOT_HEADER_LEN) eqn:Hslot_len.
+        -- eexists. reflexivity.
+        -- destruct (tlv_deserialize_slots_non_failure (usize_to_nat slot_count) rest2 (env.(env_slot_entry))) as [slots_res Hslots].
+           rewrite Hslots.
+           destruct slots_res as [(slots, rest3) | err_slots].
+           ++ unfold bind.
+              destruct (slice_len rest3 s< 2%usize) eqn:Hlen3.
+              ** eexists. reflexivity.
+              ** destruct (env.(env_record_count_read) rest3 Hlen3) as [b0 [b1 [Hb0 Hb1]]].
+                 rewrite Hb0.
+                 unfold bind.
+                 rewrite Hb1.
+                 unfold bind.
+                 destruct (scalar_cast_u16_to_usize_safe (core_num_U16_from_be_bytes (mk_array 2%usize [b0; b1]))) as [record_count Hcast_rec].
+                 rewrite Hcast_rec.
+                 unfold bind.
+                 destruct (env.(env_rest4_subslice) rest3 Hlen3) as [rest4 Hrest4].
+                 rewrite Hrest4.
+                 unfold bind.
+                 destruct (slice_len rest4 s< core_num_Usize_saturating_mul record_count tlv_TLV_HEADER_LEN) eqn:Hrec_len.
+                 --- eexists. reflexivity.
+                 --- destruct (tlv_deserialize_records_non_failure (usize_to_nat record_count) rest4 (env.(env_record))) as [records_res Hrecords].
+                     rewrite Hrecords.
+                     destruct records_res as [(records, final_rest) | err_records].
+                     +++ eexists. reflexivity.
+                     +++ eexists. reflexivity.
+           ++ eexists. reflexivity.
+    + eexists. reflexivity.
 Qed.

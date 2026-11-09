@@ -63,7 +63,7 @@
     "module": "Fidelogic.Theories.TlvTotality",
     "theorem": "tlv_deserialize_totality",
     "allow_aeneas_axioms": true,
-    "description": "任意長バイト列に対し、tlv_deserialize は必ず停止して Ok または Fail_ を返す(最上位全域性保証)"
+    "description": "環境の非失敗性のもとで、任意長バイト列に対し tlv_deserialize は Aeneas エラーモナドレベルで失敗せず常に Ok res を返す(最上位非失敗性保証)"
   },
   {
     "module": "Fidelogic.Theories.TlvRoundtrip",
