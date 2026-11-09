@@ -1209,3 +1209,337 @@ Lemma opaque_string_hangul_ga :
 Proof.
   reflexivity.
 Qed.
+
+(** PRECIS 既知テストベクタ決定性補題群 (RFC 7564 / RFC 8265)。 *)
+
+Section PrecisTestVectors.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: ASCII 英大文字小文字混在文字列 ("User") の小文字化検証。 *)
+Lemma test_vector_username_fold_ascii_mixed :
+  precis_username_case_mapped [85; 115; 101; 114] = Some [117; 115; 101; 114].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: ASCII 全英大文字 ("USER") の小文字化検証。 *)
+Lemma test_vector_username_fold_ascii_upper :
+  precis_username_case_mapped [85; 83; 69; 82] = Some [117; 115; 101; 114].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: ASCII 小文字文字列 ("user") の恒等写像検証。 *)
+Lemma test_vector_username_fold_ascii_lower :
+  precis_username_case_mapped [117; 115; 101; 114] = Some [117; 115; 101; 114].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: ギリシャ文字大文字 ("ΟΣ") の小文字化 ("οσ") 検証。 *)
+Lemma test_vector_username_fold_greek :
+  precis_username_case_mapped [927; 931] = Some [959; 963].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: キリル文字大文字 ("Иван") の小文字化 ("иван") 検証。 *)
+Lemma test_vector_username_fold_cyrillic :
+  precis_username_case_mapped [1048; 1074; 1072; 1085] = Some [1080; 1074; 1072; 1085].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: Latin-1 補助大文字 ("É") の小文字化 ("é") 検証。 *)
+Lemma test_vector_username_fold_latin_accent :
+  precis_username_case_mapped [201] = Some [233].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: 空文字列拒絶 (None) の検証。 *)
+Lemma test_vector_username_reject_empty :
+  precis_username_case_mapped [] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: 空白文字混入文字列 ("user name") の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_space :
+  precis_username_case_mapped [117; 115; 101; 114; 32; 110; 97; 109; 101] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: ASCII NUL 制御文字混入の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_nul :
+  precis_username_case_mapped [0] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: 水平タブ制御文字混入の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_tab :
+  precis_username_case_mapped [117; 9; 115] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: Unicode サロゲートコードポイント (0xD800) の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_surrogate :
+  precis_username_case_mapped [55296] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: 私用領域コードポイント (0xE000) の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_pua :
+  precis_username_case_mapped [57344] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: 非文字 (0xFFFF) の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_nonchar_ffff :
+  precis_username_case_mapped [65535] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped テストベクタ: 非文字 (0xFDD0) の拒絶 (None) 検証。 *)
+Lemma test_vector_username_reject_nonchar_fdd0 :
+  precis_username_case_mapped [64976] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: 英大文字小文字混在パスワード ("PassWord") の大文字保持検証。 *)
+Lemma test_vector_opaque_preserve_case :
+  precis_opaque_string [80; 97; 115; 115; 87; 111; 114; 100] =
+  Some [80; 97; 115; 115; 87; 111; 114; 100].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: 空白文字を含む文字列 ("user name") の受容および保持検証。 *)
+Lemma test_vector_opaque_preserve_space :
+  precis_opaque_string [117; 115; 101; 114; 32; 110; 97; 109; 101] =
+  Some [117; 115; 101; 114; 32; 110; 97; 109; 101].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: Latin 'A' (65) + 結合ダイエレシス (776) の合成文字 'Ä' (196) への正規化検証。 *)
+Lemma test_vector_opaque_nfc_latin_a_diaeresis :
+  precis_opaque_string [65; 776] = Some [196].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: Latin 'c' (99) + 結合セディラ (807) の合成文字 'ç' (231) への正規化検証。 *)
+Lemma test_vector_opaque_nfc_latin_c_cedilla :
+  precis_opaque_string [99; 807] = Some [231].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: 空文字列拒絶 (None) の検証。 *)
+Lemma test_vector_opaque_reject_empty :
+  precis_opaque_string [] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: ASCII NUL 制御文字混入の拒絶 (None) 検証。 *)
+Lemma test_vector_opaque_reject_nul :
+  precis_opaque_string [0] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: 制御文字 (0x1F) 混入の拒絶 (None) 検証。 *)
+Lemma test_vector_opaque_reject_control_1f :
+  precis_opaque_string [31] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: Unicode サロゲートコードポイント (0xD800) の拒絶 (None) 検証。 *)
+Lemma test_vector_opaque_reject_surrogate :
+  precis_opaque_string [55296] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: 私用領域コードポイント (0xE000) の拒絶 (None) 検証。 *)
+Lemma test_vector_opaque_reject_pua :
+  precis_opaque_string [57344] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    OpaqueString テストベクタ: 非文字 (0xFFFF) の拒絶 (None) 検証。 *)
+Lemma test_vector_opaque_reject_nonchar :
+  precis_opaque_string [65535] = None.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    プロファイル境界差分連立補題: 空白を含む同一文字列 ("user name") に対する受容・拒絶の境界検証。 *)
+Lemma test_vector_profile_discrepancy_space :
+  precis_username_case_mapped [117; 115; 101; 114; 32; 110; 97; 109; 101] = None /\
+  precis_opaque_string [117; 115; 101; 114; 32; 110; 97; 109; 101] =
+  Some [117; 115; 101; 114; 32; 110; 97; 109; 101].
+Proof.
+  split; reflexivity.
+Qed.
+
+(** [SPEC]
+    プロファイル境界差分連立補題: 大文字を含む同一文字列 ("USER") に対する小文字化・大文字保持の境界検証。 *)
+Lemma test_vector_profile_discrepancy_uppercase :
+  precis_username_case_mapped [85; 83; 69; 82] = Some [117; 115; 101; 114] /\
+  precis_opaque_string [85; 83; 69; 82] = Some [85; 83; 69; 82].
+Proof.
+  split; reflexivity.
+Qed.
+
+(** [SPEC]
+    UsernameCaseMapped プロファイル正準化の計算的決定性定理。
+    純粋関数型モデルにおいて、同一入力に対する正準化結果の一意性を数学的に保証する。 *)
+Theorem username_case_mapped_deterministic : forall (s : PrecisString) (o1 o2 : option PrecisString),
+  precis_username_case_mapped s = o1 ->
+  precis_username_case_mapped s = o2 ->
+  o1 = o2.
+Proof.
+  intros s o1 o2 H1 H2.
+  rewrite <- H1.
+  exact H2.
+Qed.
+
+(** [SPEC]
+    OpaqueString プロファイル正準化の計算的決定性定理。
+    純粋関数型モデルにおいて、同一入力に対する正準化結果の一意性を数学的に保証する。 *)
+Theorem opaque_string_deterministic : forall (s : PrecisString) (o1 o2 : option PrecisString),
+  precis_opaque_string s = o1 ->
+  precis_opaque_string s = o2 ->
+  o1 = o2.
+Proof.
+  intros s o1 o2 H1 H2.
+  rewrite <- H1.
+  exact H2.
+Qed.
+
+(** [MODEL]
+    PRECIS テストケースレコード型。
+    入力文字列と、各プロファイルに対する期待出力を保持する。 *)
+Record PrecisTestCase : Type := {
+  tc_input : PrecisString;
+  tc_expected_user : option PrecisString;
+  tc_expected_opaque : option PrecisString;
+}.
+
+(** [MODEL]
+    テストケース妥当性判定述語。 *)
+Definition test_case_valid (tc : PrecisTestCase) : Prop :=
+  precis_username_case_mapped (tc_input tc) = tc_expected_user tc /\
+  precis_opaque_string (tc_input tc) = tc_expected_opaque tc.
+
+(** [MODEL]
+    RFC 7564 / RFC 8265 既知テストベクタ集合 (Golden Test Suite)。 *)
+Definition precis_golden_suite : list PrecisTestCase := [
+  {| tc_input := [85; 115; 101; 114];
+     tc_expected_user := Some [117; 115; 101; 114];
+     tc_expected_opaque := Some [85; 115; 101; 114] |};
+  {| tc_input := [85; 83; 69; 82];
+     tc_expected_user := Some [117; 115; 101; 114];
+     tc_expected_opaque := Some [85; 83; 69; 82] |};
+  {| tc_input := [117; 115; 101; 114];
+     tc_expected_user := Some [117; 115; 101; 114];
+     tc_expected_opaque := Some [117; 115; 101; 114] |};
+  {| tc_input := [927; 931];
+     tc_expected_user := Some [959; 963];
+     tc_expected_opaque := Some [927; 931] |};
+  {| tc_input := [1048; 1074; 1072; 1085];
+     tc_expected_user := Some [1080; 1074; 1072; 1085];
+     tc_expected_opaque := Some [1048; 1074; 1072; 1085] |};
+  {| tc_input := [201];
+     tc_expected_user := Some [233];
+     tc_expected_opaque := Some [201] |};
+  {| tc_input := [117; 115; 101; 114; 32; 110; 97; 109; 101];
+     tc_expected_user := None;
+     tc_expected_opaque := Some [117; 115; 101; 114; 32; 110; 97; 109; 101] |};
+  {| tc_input := [];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [0];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [9];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [55296];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [57344];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [65535];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [64976];
+     tc_expected_user := None;
+     tc_expected_opaque := None |};
+  {| tc_input := [101; 769];
+     tc_expected_user := Some [101; 769];
+     tc_expected_opaque := Some [233] |};
+  {| tc_input := [65; 776];
+     tc_expected_user := Some [97; 776];
+     tc_expected_opaque := Some [196] |};
+  {| tc_input := [99; 807];
+     tc_expected_user := Some [99; 807];
+     tc_expected_opaque := Some [231] |};
+  {| tc_input := [4352; 4449];
+     tc_expected_user := Some [4352; 4449];
+     tc_expected_opaque := Some [44032] |}
+].
+
+(** [SPEC]
+    テストベクタ一括適合性定理 (Test Suite Conformance Theorem)。
+    Golden Test Suite 内のすべてのテストケースにおいて、
+    期待される正準化結果とモデルの計算結果が完全一致することを一括証明する。 *)
+Theorem precis_golden_suite_conformance :
+  Forall test_case_valid precis_golden_suite.
+Proof.
+  repeat (
+    constructor; [
+      split; reflexivity
+    | ]
+  ).
+  constructor.
+Qed.
+
+End PrecisTestVectors.

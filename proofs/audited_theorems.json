@@ -970,5 +970,179 @@
     "theorem": "opaque_string_hangul_ga",
     "allow_aeneas_axioms": false,
     "description": "テストベクタ検証補題(ハングルJamo L+Vの音節合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_ascii_mixed",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII大文字小文字混在文字列の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_ascii_upper",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII全英大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_ascii_lower",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII小文字文字列の恒等写像)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_greek",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ギリシャ文字大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_cyrillic",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(キリル文字大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_latin_accent",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(Latin-1補助大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_empty",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(空文字列の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_space",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(空白文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_nul",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII NUL制御文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_tab",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(水平タブ制御文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_surrogate",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(サロゲートコードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_pua",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(私用領域コードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_nonchar_ffff",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(非文字0xFFFFの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_nonchar_fdd0",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(非文字0xFDD0の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_preserve_case",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(大文字小文字混在パスワードの大文字保持)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_preserve_space",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(空白文字を含む文字列の受容と保持)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_nfc_latin_a_diaeresis",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(Latin基底文字+結合ダイエレシスのNFC合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_nfc_latin_c_cedilla",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(Latin基底文字+結合セディラのNFC合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_empty",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(空文字列の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_nul",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(ASCII NUL制御文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_control_1f",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(制御文字0x1F混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_surrogate",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(サロゲートコードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_pua",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(私用領域コードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_nonchar",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(非文字0xFFFFの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_profile_discrepancy_space",
+    "allow_aeneas_axioms": false,
+    "description": "プロファイル境界差分連立補題(空白文字列に対する受容・拒絶の境界検証)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_profile_discrepancy_uppercase",
+    "allow_aeneas_axioms": false,
+    "description": "プロファイル境界差分連立補題(大文字文字列に対する小文字化・大文字保持の境界検証)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_deterministic",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedプロファイル正準化の計算的決定性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_deterministic",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringプロファイル正準化の計算的決定性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_golden_suite_conformance",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ一括適合性定理(Golden Test Suiteの完全一致保証)"
   }
 ]
