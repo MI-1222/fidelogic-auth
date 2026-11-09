@@ -826,5 +826,149 @@
     "theorem": "username_case_mapped_case_insensitive",
     "allow_aeneas_axioms": false,
     "description": "大文字小文字の差異しかない2つの入力文字列に対する正準化結果の一致性(大文字小文字不変性)主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "is_opaque_disallowed_cp_eq",
+    "allow_aeneas_axioms": false,
+    "description": "FreeformClass禁止判定関数と禁止命題のReflection補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_disallowed_cp_dec",
+    "allow_aeneas_axioms": false,
+    "description": "任意のコードポイントに対するFreeformClass禁止判定の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "space_opaque_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "ASCII空白文字(0x20)がFreeformClassにおいて合法(非禁止)であることの保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_disallowed_implies_disallowed",
+    "allow_aeneas_axioms": false,
+    "description": "FreeformClass禁止文字はIdentifierClassにおいても禁止文字であることの包含関係補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_hangul_syllable_range",
+    "allow_aeneas_axioms": false,
+    "description": "ハングル音節合成関数の出力値域有界性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_pair_range",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントの出力値域補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_pair_terminal_left",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントの終端性補題(左側オペランドとしての不活性性)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_pair_terminal_right",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントの終端性補題(右側オペランドとしての不活性性)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "composed_code_point_opaque_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントに対するFreeformClass許可性保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_opaque_allowed_nfc",
+    "allow_aeneas_axioms": false,
+    "description": "文字列の全文字許可性に対するNFC正規化の許可性保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "nfc_no_compose_id",
+    "allow_aeneas_axioms": false,
+    "description": "未合成ペア非存在文字列に対するNFC正規化の恒等性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_nfc_normalize_cons_cons",
+    "allow_aeneas_axioms": false,
+    "description": "2要素以上の先頭に対するNFC正規化の展開等式補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_nfc_normalize_cons",
+    "allow_aeneas_axioms": false,
+    "description": "非空文字列に対するNFC正規化結果の先頭要素存在補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "nfc_hd_cases",
+    "allow_aeneas_axioms": false,
+    "description": "非空文字列に対するNFC正規化結果の先頭要素特徴づけ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_nfc_normalize_no_compose",
+    "allow_aeneas_axioms": false,
+    "description": "NFC正規化結果に対する未合成ペア非存在性(不動点条件充足)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "nfc_normalize_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "Unicode正規化形式NFCの不動点性(冪等性)主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_not_empty",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の非空性保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_all_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字許可判定保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_opaque_allowed_forall",
+    "allow_aeneas_axioms": false,
+    "description": "FreeformClass文字列全文字許可判定関数とリスト全要素非禁止命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_no_disallowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字非禁止性保証定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringプロファイル正準化関数の冪等性主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_password_with_space",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ検証補題(空白を含むパスワードの受容と正準化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_nfd_acute",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ検証補題(基底文字+結合アクセントのNFC合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_hangul_ga",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ検証補題(ハングルJamo L+Vの音節合成)"
   }
 ]
