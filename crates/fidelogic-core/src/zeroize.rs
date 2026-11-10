@@ -79,6 +79,15 @@ impl<const N: usize> SecretBytes<N> {
     pub const fn is_empty(&self) -> bool {
         N == 0
     }
+
+    /// 条件 `choice` に基づき、定数時間で `other` の内容を自身に上書きコピーする。
+    ///
+    /// `choice` が真(`Choice(1)`)のときは `other` の内容がコピーされ、
+    /// 偽(`Choice(0)`)のときは自身の値がそのまま保持される。
+    #[inline]
+    pub fn conditional_assign(&mut self, other: &Self, choice: subtle::Choice) {
+        crate::constant_time::ct_assign_slice(choice, self.as_mut_slice(), other.as_slice());
+    }
 }
 
 impl<const N: usize> Default for SecretBytes<N> {
@@ -131,6 +140,13 @@ impl<const N: usize> core::fmt::Debug for SecretBytes<N> {
             .field("len", &N)
             .field("inner", &"[REDACTED]")
             .finish()
+    }
+}
+
+impl<const N: usize> subtle::ConstantTimeEq for SecretBytes<N> {
+    #[inline]
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        crate::constant_time::ct_eq_bytes(self.as_slice(), other.as_slice())
     }
 }
 
@@ -307,6 +323,14 @@ impl core::fmt::Debug for SecretVec {
             .field("len", &self.inner.len())
             .field("inner", &"[REDACTED]")
             .finish()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl subtle::ConstantTimeEq for SecretVec {
+    #[inline]
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        crate::constant_time::ct_eq_bytes(self.as_slice(), other.as_slice())
     }
 }
 

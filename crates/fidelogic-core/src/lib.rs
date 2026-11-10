@@ -22,10 +22,14 @@ pub mod profile_lite;
 #[cfg(feature = "profile-vault")]
 pub mod profile_vault;
 
+pub mod constant_time;
 pub mod error;
 pub mod tlv;
 pub mod zeroize;
 
+pub use constant_time::{
+    ct_assign_slice, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,
+};
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 pub use zeroize::{SecretBytes, volatile_zeroize};
 
