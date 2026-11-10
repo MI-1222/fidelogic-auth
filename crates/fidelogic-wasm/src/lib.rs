@@ -14,21 +14,12 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
-/// `no_std` のWasm環境に向けた最小限のグローバルアロケータ。
-#[cfg(all(target_arch = "wasm32", not(feature = "std")))]
-struct BumpAllocator;
-
-#[cfg(all(target_arch = "wasm32", not(feature = "std")))]
-unsafe impl core::alloc::GlobalAlloc for BumpAllocator {
-    unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 {
-        core::ptr::null_mut()
-    }
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
-}
-
+/// Wasm環境（`target_arch = "wasm32"` かつ `not(feature = "std")`）向けのグローバルアロケータ。
+///
+/// 断片化耐性に優れた `dlmalloc` へ一本化し、長期稼働Vaultや可変長ワークスペースでの安定したメモリ回収を保証する。
 #[cfg(all(target_arch = "wasm32", not(feature = "std")))]
 #[global_allocator]
-static ALLOCATOR: BumpAllocator = BumpAllocator;
+static ALLOCATOR: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
 use fidelogic_core::active_profile;
 

@@ -15,3 +15,4 @@ profile-vault = ["fidelogic-core/profile-vault"]
 
 [dependencies]
 fidelogic-core = { workspace = true }
+dlmalloc = { workspace = true }
