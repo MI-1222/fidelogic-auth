@@ -35,12 +35,10 @@ pub const MAX_PAYLOAD_LEN: usize = usize::MAX - TAG_LEN;
 ///
 /// RFC 8452(AES-GCM-SIV)における AAD 上限(2^36 - 1 バイト)および
 /// 32-bit 環境でのオーバーフローを防止する。
-pub const MAX_AAD_LEN: usize = if usize::BITS <= 32 {
-    usize::MAX
-} else {
-    // 2^36 - 1 バイト (68,719,476,735 バイト = 64 GiB - 1)
-    68_719_476_735
-};
+#[cfg(target_pointer_width = "64")]
+pub const MAX_AAD_LEN: usize = 68_719_476_735;
+#[cfg(not(target_pointer_width = "64"))]
+pub const MAX_AAD_LEN: usize = usize::MAX;
 
 /// ノンス長が指定された暗号スイートの要求長と一致するかを事前検証する。
 #[inline]
@@ -75,11 +73,12 @@ pub fn validate_payload_len(payload: &[u8]) -> Result<(), CryptoError> {
 /// 関連データ(AAD)スライス長が許容上限を満たすかを事前検証する。
 #[inline]
 pub fn validate_aad_len(aad: &[u8]) -> Result<(), CryptoError> {
+    #[cfg(target_pointer_width = "64")]
     if aad.len() > MAX_AAD_LEN {
-        Err(CryptoError::InvalidSliceLength)
-    } else {
-        Ok(())
+        return Err(CryptoError::InvalidSliceLength);
     }
+    let _ = aad;
+    Ok(())
 }
 
 /// 暗号スイート識別子を表す列挙型。
@@ -240,9 +239,9 @@ impl VaultCipher {
             crate::zeroize::volatile_zeroize(buffer);
             return Err(CryptoError::InvalidSliceLength);
         }
-        if aad.len() > MAX_AAD_LEN {
+        if let Err(err) = validate_aad_len(aad) {
             crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidSliceLength);
+            return Err(err);
         }
 
         let tag = match self {
@@ -307,9 +306,9 @@ impl VaultCipher {
             crate::zeroize::volatile_zeroize(buffer);
             return Err(CryptoError::InvalidSliceLength);
         }
-        if aad.len() > MAX_AAD_LEN {
+        if let Err(err) = validate_aad_len(aad) {
             crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidSliceLength);
+            return Err(err);
         }
 
         let tag_arr = GenericArray::from_slice(tag);
@@ -367,9 +366,7 @@ impl VaultCipher {
         if plaintext.len() > MAX_PAYLOAD_LEN {
             return Err(CryptoError::InvalidSliceLength);
         }
-        if aad.len() > MAX_AAD_LEN {
-            return Err(CryptoError::InvalidSliceLength);
-        }
+        validate_aad_len(aad)?;
 
         let mut buffer = alloc::vec::Vec::with_capacity(total_len);
         buffer.extend_from_slice(plaintext);
@@ -405,9 +402,7 @@ impl VaultCipher {
         if ciphertext_with_tag.len() < TAG_LEN {
             return Err(CryptoError::InvalidTagSize);
         }
-        if aad.len() > MAX_AAD_LEN {
-            return Err(CryptoError::InvalidSliceLength);
-        }
+        validate_aad_len(aad)?;
 
         let split_idx = ciphertext_with_tag
             .len()

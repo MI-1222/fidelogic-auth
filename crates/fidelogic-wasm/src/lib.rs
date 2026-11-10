@@ -67,6 +67,224 @@ pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
     fidelogic_core::ct_eq_32(a, b).unwrap_u8() as u32
 }
 
+/// TLV Vault ヘッダーのデシリアライズを行う外部C ABIエクスポート関数。
+///
+/// # Safety
+/// 呼び出し元は `header_bytes_ptr` が有効であり、少なくとも `len` バイトの
+/// 読み取り可能メモリ領域を指していることを保証しなければならない。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_header_parse(
+    header_bytes_ptr: *const u8,
+    len: usize,
+    out_suite_id: *mut u8,
+    out_epoch_id: *mut u64,
+) -> u32 {
+    if header_bytes_ptr.is_null() || len < fidelogic_core::tlv::VAULT_HEADER_LEN {
+        return 1;
+    }
+    let slice = unsafe { core::slice::from_raw_parts(header_bytes_ptr, len) };
+    match fidelogic_core::tlv::deserialize_header(slice) {
+        Ok((header, _)) => {
+            if !out_suite_id.is_null() {
+                unsafe { *out_suite_id = header.suite_id };
+            }
+            if !out_epoch_id.is_null() {
+                unsafe { *out_epoch_id = header.epoch_id };
+            }
+            0
+        }
+        Err(_) => 2,
+    }
+}
+
+/// RFC 7748 X25519 Diffie-Hellman 鍵共有演算の外部C ABIエクスポート関数。
+///
+/// # Safety
+/// 呼び出し元は `secret_key_ptr`, `public_key_ptr`, `out_shared_ptr` が有効であり、
+/// それぞれ32バイトのメモリ領域を指していることを保証しなければならない。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
+    secret_key_ptr: *const u8,
+    public_key_ptr: *const u8,
+    out_shared_ptr: *mut u8,
+) -> u32 {
+    if secret_key_ptr.is_null() || public_key_ptr.is_null() || out_shared_ptr.is_null() {
+        return 1;
+    }
+    let secret = unsafe { &*(secret_key_ptr as *const [u8; 32]) };
+    let public = unsafe { &*(public_key_ptr as *const [u8; 32]) };
+    match fidelogic_core::x25519_diffie_hellman(secret, public) {
+        Ok(shared) => {
+            let out_slice = unsafe { core::slice::from_raw_parts_mut(out_shared_ptr, 32) };
+            out_slice.copy_from_slice(shared.as_bytes());
+            0
+        }
+        Err(_) => 2,
+    }
+}
+
+#[cfg(feature = "profile-vault")]
+/// Argon2id 鍵導出の外部C ABIエクスポート関数。
+///
+/// # Safety
+/// 呼び出し元は各ポインタが有効であり、指定された長さのメモリ領域を指していることを保証しなければならない。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
+    password_ptr: *const u8,
+    password_len: usize,
+    salt_ptr: *const u8,
+    salt_len: usize,
+    out_ptr: *mut u8,
+    out_len: usize,
+) -> u32 {
+    if password_ptr.is_null() || salt_ptr.is_null() || out_ptr.is_null() {
+        return 1;
+    }
+    let password = unsafe { core::slice::from_raw_parts(password_ptr, password_len) };
+    let salt = unsafe { core::slice::from_raw_parts(salt_ptr, salt_len) };
+    let out = unsafe { core::slice::from_raw_parts_mut(out_ptr, out_len) };
+
+    let params = match fidelogic_core::Argon2Params::custom(
+        fidelogic_core::FAST_TEST_M_COST,
+        fidelogic_core::FAST_TEST_T_COST,
+        fidelogic_core::FAST_TEST_P_COST,
+        Some(out_len),
+    ) {
+        Ok(p) => p,
+        Err(_) => return 2,
+    };
+
+    match params.derive_key(password, salt, out) {
+        Ok(()) => 0,
+        Err(_) => 3,
+    }
+}
+
+#[cfg(feature = "profile-vault")]
+/// Vault インプレース分離暗号化の外部C ABIエクスポート関数。
+///
+/// # Safety
+/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
+    suite_id: u8,
+    key_ptr: *const u8,
+    nonce_ptr: *const u8,
+    nonce_len: usize,
+    aad_ptr: *const u8,
+    aad_len: usize,
+    data_ptr: *mut u8,
+    data_len: usize,
+    tag_out_ptr: *mut u8,
+) -> u32 {
+    if key_ptr.is_null() || nonce_ptr.is_null() || tag_out_ptr.is_null() {
+        return 1;
+    }
+    if data_len > 0 && data_ptr.is_null() {
+        return 1;
+    }
+    let suite = match fidelogic_core::CipherSuiteId::from_u8(suite_id) {
+        Ok(s) => s,
+        Err(_) => return 2,
+    };
+    let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
+    let cipher = fidelogic_core::VaultCipher::new(suite, key);
+
+    let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
+    let aad = if aad_len > 0 && !aad_ptr.is_null() {
+        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
+    } else {
+        &[]
+    };
+    let data = if data_len > 0 {
+        unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) }
+    } else {
+        &mut []
+    };
+
+    match cipher.encrypt_in_place_detached(nonce, aad, data) {
+        Ok(tag) => {
+            let tag_out =
+                unsafe { core::slice::from_raw_parts_mut(tag_out_ptr, fidelogic_core::TAG_LEN) };
+            tag_out.copy_from_slice(&tag);
+            0
+        }
+        Err(_) => 3,
+    }
+}
+
+#[cfg(feature = "profile-vault")]
+/// Vault インプレース分離復号の外部C ABIエクスポート関数。
+///
+/// # Safety
+/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
+    suite_id: u8,
+    key_ptr: *const u8,
+    nonce_ptr: *const u8,
+    nonce_len: usize,
+    aad_ptr: *const u8,
+    aad_len: usize,
+    data_ptr: *mut u8,
+    data_len: usize,
+    tag_ptr: *const u8,
+) -> u32 {
+    if key_ptr.is_null() || nonce_ptr.is_null() || tag_ptr.is_null() {
+        return 1;
+    }
+    if data_len > 0 && data_ptr.is_null() {
+        return 1;
+    }
+    let suite = match fidelogic_core::CipherSuiteId::from_u8(suite_id) {
+        Ok(s) => s,
+        Err(_) => return 2,
+    };
+    let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
+    let cipher = fidelogic_core::VaultCipher::new(suite, key);
+
+    let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
+    let aad = if aad_len > 0 && !aad_ptr.is_null() {
+        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
+    } else {
+        &[]
+    };
+    let data = if data_len > 0 {
+        unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) }
+    } else {
+        &mut []
+    };
+    let tag = unsafe { core::slice::from_raw_parts(tag_ptr, fidelogic_core::TAG_LEN) };
+
+    match cipher.decrypt_in_place_detached(nonce, aad, data, tag) {
+        Ok(()) => 0,
+        Err(_) => 3,
+    }
+}
+
+#[cfg(feature = "profile-vault")]
+/// Vault 全体のTLVデシリアライズ・シリアライズ検証の外部C ABIエクスポート関数。
+///
+/// # Safety
+/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, len: usize) -> u32 {
+    if bytes_ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
+    match fidelogic_core::tlv::deserialize(bytes) {
+        Ok((vault, _)) => {
+            // シリアライズ処理も確実にリンクされるよう実行する。
+            match fidelogic_core::tlv::serialize(&vault) {
+                Ok(_) => 0,
+                Err(_) => 2,
+            }
+        }
+        Err(_) => 3,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +310,125 @@ mod tests {
                 fidelogic_wasm_constant_time_eq_32(tag1.as_ptr(), tag3.as_ptr()),
                 0
             );
+        }
+    }
+
+    #[test]
+    fn test_header_parse() {
+        let valid_header = [b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 42];
+        let mut suite_id = 0u8;
+        let mut epoch_id = 0u64;
+
+        unsafe {
+            let res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                &mut suite_id,
+                &mut epoch_id,
+            );
+            assert_eq!(res, 0, "ヘッダーパースに成功。");
+            assert_eq!(suite_id, 1, "暗号スイートIDの取得に成功。");
+            assert_eq!(epoch_id, 42, "世代カウンターの取得に成功。");
+
+            // 長さ不足によるエラーの検証
+            let invalid_res =
+                fidelogic_wasm_header_parse(valid_header.as_ptr(), 5, &mut suite_id, &mut epoch_id);
+            assert_eq!(invalid_res, 1, "長さ不足時の検証エラーに成功。");
+        }
+    }
+
+    #[test]
+    fn test_x25519_dh() {
+        let priv_a = [0x01u8; 32];
+        let pub_b = fidelogic_core::x25519_basepoint_mul(&[0x02u8; 32]);
+        let mut shared = [0u8; 32];
+
+        unsafe {
+            let res =
+                fidelogic_wasm_x25519_dh(priv_a.as_ptr(), pub_b.as_ptr(), shared.as_mut_ptr());
+            assert_eq!(res, 0, "X25519 DH鍵共有に成功。");
+            assert_ne!(shared, [0u8; 32], "非ゼロの共有秘密の導出に成功。");
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_kdf_derive_key() {
+        let password = b"master-password";
+        let salt = [0x5au8; 16];
+        let mut derived_key = [0u8; 32];
+
+        unsafe {
+            let res = fidelogic_wasm_kdf_derive_key(
+                password.as_ptr(),
+                password.len(),
+                salt.as_ptr(),
+                salt.len(),
+                derived_key.as_mut_ptr(),
+                derived_key.len(),
+            );
+            assert_eq!(res, 0, "Argon2id鍵導出に成功。");
+            assert_ne!(derived_key, [0u8; 32], "非ゼロ鍵の導出に成功。");
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_vault_encrypt_decrypt() {
+        let key = [0x42u8; 32];
+        let nonce = [0x24u8; 24]; // XChaCha20Poly1305 ノンス
+        let aad = b"authenticated-aad";
+        let original_data = b"secret-payload-data";
+        let mut buffer = original_data.to_vec();
+        let mut tag = [0u8; 16];
+
+        unsafe {
+            // 暗号化
+            let enc_res = fidelogic_wasm_vault_encrypt(
+                1, // XChaCha20Poly1305
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                tag.as_mut_ptr(),
+            );
+            assert_eq!(enc_res, 0, "Vault暗号化に成功。");
+            assert_ne!(
+                buffer.as_slice(),
+                original_data,
+                "平文が暗号文に上書きされたことを確認。"
+            );
+
+            // 復号
+            let dec_res = fidelogic_wasm_vault_decrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                tag.as_ptr(),
+            );
+            assert_eq!(dec_res, 0, "Vault復号に成功。");
+            assert_eq!(buffer.as_slice(), original_data, "平文の復元に成功。");
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_vault_deserialize() {
+        let header = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+        ];
+
+        unsafe {
+            let res = fidelogic_wasm_vault_deserialize(header.as_ptr(), header.len());
+            assert_eq!(res, 0, "Vaultデシリアライズおよびシリアライズに成功。");
         }
     }
 }

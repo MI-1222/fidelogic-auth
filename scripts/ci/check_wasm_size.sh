@@ -31,7 +31,7 @@ cargo build -p fidelogic-wasm \
   --target wasm32-unknown-unknown \
   --release \
   --no-default-features \
-  --features profile-vault,std \
+  --features profile-vault \
   --target-dir "${TARGET_DIR}/vault_build"
 
 RAW_VAULT_BIN="${TARGET_DIR}/vault_build/wasm32-unknown-unknown/release/fidelogic_wasm.wasm"
