@@ -83,6 +83,50 @@ pub fn ct_eq_bytes_bool(a: &[u8], b: &[u8]) -> bool {
     ct_eq_bytes(a, b).into()
 }
 
+/// 32バイト固定長バイト列の等価性を定数時間で判定する。
+///
+/// 認証タグ(Poly1305、HMAC等)や256ビット暗号トークンの照合において、
+/// ループ継続判定を含む条件分岐命令(`br_if`, `if`, `br_table`)を完全に排除し、
+/// ストレートラインなビット演算によりタイミング攻撃耐性を確立する。
+#[inline]
+#[must_use]
+pub fn ct_eq_32(a: &[u8; 32], b: &[u8; 32]) -> Choice {
+    let mut diff = 0u8;
+    diff |= a[0] ^ b[0];
+    diff |= a[1] ^ b[1];
+    diff |= a[2] ^ b[2];
+    diff |= a[3] ^ b[3];
+    diff |= a[4] ^ b[4];
+    diff |= a[5] ^ b[5];
+    diff |= a[6] ^ b[6];
+    diff |= a[7] ^ b[7];
+    diff |= a[8] ^ b[8];
+    diff |= a[9] ^ b[9];
+    diff |= a[10] ^ b[10];
+    diff |= a[11] ^ b[11];
+    diff |= a[12] ^ b[12];
+    diff |= a[13] ^ b[13];
+    diff |= a[14] ^ b[14];
+    diff |= a[15] ^ b[15];
+    diff |= a[16] ^ b[16];
+    diff |= a[17] ^ b[17];
+    diff |= a[18] ^ b[18];
+    diff |= a[19] ^ b[19];
+    diff |= a[20] ^ b[20];
+    diff |= a[21] ^ b[21];
+    diff |= a[22] ^ b[22];
+    diff |= a[23] ^ b[23];
+    diff |= a[24] ^ b[24];
+    diff |= a[25] ^ b[25];
+    diff |= a[26] ^ b[26];
+    diff |= a[27] ^ b[27];
+    diff |= a[28] ^ b[28];
+    diff |= a[29] ^ b[29];
+    diff |= a[30] ^ b[30];
+    diff |= a[31] ^ b[31];
+    diff.ct_eq(&0u8)
+}
+
 /// 条件 `condition` に応じて定数時間で値を選択するヘルパー。
 ///
 /// `condition` が真(`Choice(1)`)の場合は `true_val` を、
@@ -301,5 +345,16 @@ mod tests {
             let ct_result = ct_eq_bytes_bool(&a, &b);
             prop_assert_eq!(ct_result, expected);
         });
+    }
+
+    #[test]
+    fn test_ct_eq_32() {
+        let a = [0x5Au8; 32];
+        let b = [0x5Au8; 32];
+        let mut c = [0x5Au8; 32];
+        c[31] = 0x5B;
+
+        assert_eq!(ct_eq_32(&a, &b).unwrap_u8(), 1);
+        assert_eq!(ct_eq_32(&a, &c).unwrap_u8(), 0);
     }
 }

@@ -31,7 +31,7 @@ pub mod tlv;
 pub mod zeroize;
 
 pub use constant_time::{
-    ct_assign_slice, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,
+    ct_assign_slice, ct_eq_32, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,
 };
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 pub use zeroize::{SecretBytes, volatile_zeroize};
