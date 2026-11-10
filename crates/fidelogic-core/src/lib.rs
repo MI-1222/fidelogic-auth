@@ -22,6 +22,9 @@ pub mod profile_lite;
 #[cfg(feature = "profile-vault")]
 pub mod profile_vault;
 
+#[cfg(feature = "memlock")]
+pub mod memlock;
+
 pub mod constant_time;
 pub mod error;
 pub mod tlv;
@@ -35,6 +38,9 @@ pub use zeroize::{SecretBytes, volatile_zeroize};
 
 #[cfg(feature = "alloc")]
 pub use zeroize::SecretVec;
+
+#[cfg(feature = "memlock")]
+pub use memlock::LockedBuffer;
 
 /// 現在有効化されているプロファイルの識別子を返す。
 #[must_use]
@@ -79,5 +85,16 @@ mod tests {
     fn test_profile_vault_engine() {
         let engine = profile_vault::VaultProfileEngine::new();
         assert_eq!(engine.name(), "profile-vault");
+    }
+
+    #[cfg(feature = "memlock")]
+    #[test]
+    fn test_memlock_locked_buffer_export() {
+        let buf = LockedBuffer::<32>::zero();
+        assert_eq!(
+            buf.len(),
+            32,
+            "エクスポートされたLockedBufferの生成に成功。"
+        );
     }
 }

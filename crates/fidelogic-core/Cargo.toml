@@ -12,12 +12,15 @@ alloc = ["zeroize/alloc"]
 profile-lite = ["alloc"]
 # profile-vault: 完全なVault操作と暗号スイートを備えたプロファイル。
 profile-vault = ["alloc", "profile-lite"]
+# memlock: ネイティブ環境向けにmlockおよびmadviseによるメモリ保護を提供するプロファイル。
+memlock = ["std", "dep:libc"]
 
 [dependencies]
 aes-gcm-siv = { workspace = true, features = ["alloc"] }
 argon2 = { workspace = true, features = ["alloc"] }
 chacha20poly1305 = { workspace = true, features = ["alloc"] }
 curve25519-dalek = { workspace = true, features = ["alloc", "zeroize"] }
+libc = { workspace = true, optional = true }
 subtle = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
 
