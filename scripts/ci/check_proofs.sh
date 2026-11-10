@@ -16,20 +16,13 @@ if [ ! -f "${AUDIT_SCRIPT}" ]; then
   exit 1
 fi
 
-echo "==> Auditing axioms for sanity theorem..."
-python3 "${AUDIT_SCRIPT}" \
-  --module Fidelogic.Sanity \
-  --theorem sanity_add_comm
+echo "==> Auditing all formal proof theorems against kernel axioms..."
+MANIFEST_FILE="${REPO_ROOT}/proofs/audited_theorems.json"
+if [ ! -f "${MANIFEST_FILE}" ]; then
+  echo "Error: proofs/audited_theorems.json が存在しません。" >&2
+  exit 1
+fi
 
-echo "==> Auditing axioms for TLV soundness theorems..."
-python3 "${AUDIT_SCRIPT}" \
-  --module Fidelogic.Theories.TlvSoundness \
-  --theorem tlv_parse_tlv_header_underflow \
-  --allow-aeneas-axioms
-
-python3 "${AUDIT_SCRIPT}" \
-  --module Fidelogic.Theories.TlvSoundness \
-  --theorem tlv_validate_tlv_bounds_implies_header_some \
-  --allow-aeneas-axioms
+python3 "${AUDIT_SCRIPT}" --manifest "${MANIFEST_FILE}"
 
 echo "==> [SUCCESS] All Rocq proofs and axiom audits passed cleanly without Admitted."

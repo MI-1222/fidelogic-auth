@@ -20,7 +20,7 @@ Lemma tlv_parse_tlv_header_underflow :
     tlv_parse_tlv_header bytes = Ok None.
 Proof.
   intros bytes Hlen.
-  unfold tlv_parse_tlv_header.
+  unfold tlv_parse_tlv_header, tlv_TLV_HEADER_LEN.
   rewrite Hlen.
   reflexivity.
 Qed.

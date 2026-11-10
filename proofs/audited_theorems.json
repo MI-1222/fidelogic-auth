@@ -1,0 +1,1700 @@
+[
+  {
+    "module": "Fidelogic.Sanity",
+    "theorem": "sanity_add_comm",
+    "allow_aeneas_axioms": false,
+    "description": "加算の可換性に関する疎通確認用補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvSoundness",
+    "theorem": "tlv_parse_tlv_header_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "スライス長が2未満の場合、tlv_parse_tlv_header は必ず Ok None を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvSoundness",
+    "theorem": "tlv_validate_tlv_bounds_implies_header_some",
+    "allow_aeneas_axioms": true,
+    "description": "tlv_validate_tlv_bounds が true を返す場合、ヘッダーのパースは必ず成功(Some)している"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_header_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "スライス長がヘッダー長(6バイト)未満の場合、tlv_deserialize_header は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_header_totality",
+    "allow_aeneas_axioms": true,
+    "description": "任意長バイト列に対し tlv_deserialize_header は必ず Ok または Fail_ で停止する(全域性)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_record_header_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "スライス長がヘッダー長(2バイト)未満の場合、tlv_deserialize_record は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_record_underflow",
+    "allow_aeneas_axioms": true,
+    "description": "レコード長ヘッダー値 length に対してスライスの残余長が不足している場合、tlv_deserialize_record は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_record_bounds_violation",
+    "allow_aeneas_axioms": true,
+    "description": "2 + length > bytes.length の場合、tlv_deserialize_record は必ず Ok (Err UnexpectedEof) を返す"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_slots_totality",
+    "allow_aeneas_axioms": true,
+    "description": "スロット数 n に対する構造帰納法により、tlv_deserialize_slots は必ず Ok または Fail_ で停止する(全域性)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_records_totality",
+    "allow_aeneas_axioms": true,
+    "description": "レコード数 n に対する構造帰納法により、tlv_deserialize_records は必ず Ok または Fail_ で停止する(全域性)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvTotality",
+    "theorem": "tlv_deserialize_totality",
+    "allow_aeneas_axioms": true,
+    "description": "環境の非失敗性のもとで、任意長バイト列に対し tlv_deserialize は Aeneas エラーモナドレベルで失敗せず常に Ok res を返す(最上位非失敗性保証)"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_entry_minimal",
+    "allow_aeneas_axioms": true,
+    "description": "シリアライズされた EntryPayload に対してデシリアライズを行うと元のペイロードが復元される"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_known",
+    "allow_aeneas_axioms": true,
+    "description": "TlvRecord レベルでの既知タグ最小ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_unknown_minimal",
+    "allow_aeneas_axioms": true,
+    "description": "シリアライズされた未知タグレコードに対してデシリアライズを行うと、元の未知タグレコードが復元される"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_unknown",
+    "allow_aeneas_axioms": true,
+    "description": "TlvRecord レベルでの未知タグ最小ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_header_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "VaultHeader のシリアライズ・デシリアライズのラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_header_roundtrip_sound",
+    "allow_aeneas_axioms": true,
+    "description": "Rust シリアライズ関数とデシリアライズ関数の真の関数合成を直接検証するラウンドトリップ定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_slot_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "単一 KekSlotEntry に対するラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_slots_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "スロットリスト全体に対するリスト帰納的ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_chain_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "残余スライスを保持する単一 TlvRecord に対するラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_records_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "未知・既知混在レコードリスト全体に対するリスト帰納的ラウンドトリップ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_vault_roundtrip",
+    "allow_aeneas_axioms": true,
+    "description": "Vault 全体の完全なシリアライズ・デシリアライズ往復ラウンドトリップ定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_unknown_tag_structure_preservation",
+    "allow_aeneas_axioms": true,
+    "description": "未知タグフィールドのデシリアライズにおいて構造・タグ・バイト列が保存される"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_unknown_tag_structure_preservation_minimal",
+    "allow_aeneas_axioms": true,
+    "description": "単一未知タグレコードの最小構造保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_records_preserve_unknown_fields",
+    "allow_aeneas_axioms": true,
+    "description": "複数レコード列における未知タグフィールドの完全保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_vault_preserve_unknown_fields",
+    "allow_aeneas_axioms": true,
+    "description": "Vault レベルでの前方互換性(未知フィールド完全保存)定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_slot_roundtrip_sound",
+    "allow_aeneas_axioms": true,
+    "description": "単一 KekSlotEntry に対するラウンドトリップ健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_entry_sound",
+    "allow_aeneas_axioms": true,
+    "description": "既知エントリレコードに対するラウンドトリップ健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_record_roundtrip_unknown_sound",
+    "allow_aeneas_axioms": true,
+    "description": "未知タグレコードに対するラウンドトリップ健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.TlvRoundtrip",
+    "theorem": "tlv_vault_roundtrip_sound",
+    "allow_aeneas_axioms": true,
+    "description": "Vault 全体のシリアライズ仕様モデルとデシリアライズ関数の往復健全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_eqb_refl",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState ブール値等価判定関数の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_eqb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState ブール値等価判定関数と等号命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_cases",
+    "allow_aeneas_axioms": false,
+    "description": "VaultState の有限網羅性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_locked_not_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "Locked と Unlocked の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_zeroized_not_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized と Unlocked の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_state_locked_not_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Locked と Zeroized の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_eq",
+    "allow_aeneas_axioms": false,
+    "description": "有効スロット判定関数 is_valid_slot_id と有効スロット命題 valid_slot_id の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_kind_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SlotKind 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_kind_to_id_valid",
+    "allow_aeneas_axioms": false,
+    "description": "slot_kind_to_id が生成するスロットIDは常に有効(valid_slot_id)であることの健全性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_eqb_refl",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus ブール値等価判定関数の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_eqb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus ブール値等価判定関数と等号命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_cases",
+    "allow_aeneas_axioms": false,
+    "description": "SlotStatus の有限網羅性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_valid_not_invalid",
+    "allow_aeneas_axioms": false,
+    "description": "SlotValid と SlotInvalid の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_valid_not_unset",
+    "allow_aeneas_axioms": false,
+    "description": "SlotValid と SlotUnset の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_status_invalid_not_unset",
+    "allow_aeneas_axioms": false,
+    "description": "SlotInvalid と SlotUnset の状態排他性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "is_slot_status_valid_eq",
+    "allow_aeneas_axioms": false,
+    "description": "is_slot_status_valid が true であることと SlotValid であることの同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "kek_slots_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "KekSlots 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "get_slot_status_argon2id",
+    "allow_aeneas_axioms": false,
+    "description": "get_slot_status の Slot 0 (Argon2id) に対する簡約補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "get_slot_status_prf",
+    "allow_aeneas_axioms": false,
+    "description": "get_slot_status の Slot 1 (WebAuthn PRF) に対する簡約補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "get_slot_status_recovery",
+    "allow_aeneas_axioms": false,
+    "description": "get_slot_status の Slot 2 (リカバリーコード) に対する簡約補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_validb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "slot_validb と slot_valid の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_valid_out_of_bounds",
+    "allow_aeneas_axioms": false,
+    "description": "境界外(3以上)のスロット識別子は常に健全でないことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_validb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "any_slot_validb と any_slot_valid の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_valid_exists_eq",
+    "allow_aeneas_axioms": false,
+    "description": "any_slot_valid と有効スロットに対する存在量化の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_valid_argon2id_robust",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRFスロットが無効・破損時でもArgon2idスロット健全性により全体健全性が維持される補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "any_slot_valid_recovery_robust",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRFスロットが無効・破損時でもリカバリーコードスロット健全性により全体健全性が維持される補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "vault_event_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultEvent 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_deterministic",
+    "allow_aeneas_axioms": false,
+    "description": "状態遷移関係 step の決定論性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_locked_to_unlocked_impossible",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態から直接Unlocked状態へ到達不可能であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_zeroized_to_unlocked_impossible",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態から直接Unlocked状態へ到達不可能であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_unlock_success_requires_valid",
+    "allow_aeneas_axioms": false,
+    "description": "EventUnlockSuccess による遷移成立にはスロット健全性が必要であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_start_unlock_requires_valid_id",
+    "allow_aeneas_axioms": false,
+    "description": "EventStartUnlock による遷移成立にはスロットIDが有効範囲内であることが必要であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_unlocked_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocked状態からの退行遷移は施錠またはゼロ消去のみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_locked_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態からの遷移先は有効なスロットIDに対するEventStartUnlockによるUnlocking状態のみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_zeroized_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態からの遷移先はEventResetによるLocked状態のみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_unlocking_destinations",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocking状態からの遷移先は健全なスロットによるEventUnlockSuccessまたはEventUnlockFailのみであることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_stateb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "safe_stateb と SafeState の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SafeState の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_locked",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_unlocking",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocking状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocked状態においては常に SafeState が成立することを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_locked_or_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Locked または Zeroized 状態において SafeState が成立しているならば平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_locked",
+    "allow_aeneas_axioms": false,
+    "description": "Locked状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_unlocking",
+    "allow_aeneas_axioms": false,
+    "description": "Unlocking状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_locked_or_zeroized",
+    "allow_aeneas_axioms": false,
+    "description": "Locked または Zeroized 状態において SafeState が成立しているならば観測される平文DEKは None であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_observe_some_implies_unlocked",
+    "allow_aeneas_axioms": false,
+    "description": "SafeState を満たすマシン状態において平文DEKが観測される場合、状態は必ず Unlocked であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_intro_none",
+    "allow_aeneas_axioms": false,
+    "description": "メモリ内平文DEKバッファが None であるならば、いかなる状態であっても常に SafeState を満たすことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "safe_state_init",
+    "allow_aeneas_axioms": false,
+    "description": "初期マシン状態 (Locked かつ平文DEK None) は常に SafeState を満たすことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_argon2id",
+    "allow_aeneas_axioms": false,
+    "description": "Argon2id スロット識別子が有効であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_prf",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRF スロット識別子が有効であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "valid_slot_id_recovery",
+    "allow_aeneas_axioms": false,
+    "description": "リカバリーコード スロット識別子が有効であることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_refl",
+    "allow_aeneas_axioms": false,
+    "description": "多段階状態遷移 steps の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_step",
+    "allow_aeneas_axioms": false,
+    "description": "単一ステップ遷移 step を長さ1のイベント列による多段階遷移 steps へ持ち上げる補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_trans",
+    "allow_aeneas_axioms": false,
+    "description": "多段階状態遷移 steps の推移性 (トレース連結) 補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_trace",
+    "allow_aeneas_axioms": false,
+    "description": "有効かつ健全なスロットIDに対する2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_argon2id",
+    "allow_aeneas_axioms": false,
+    "description": "Argon2idスロットが健全な場合の2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_prf",
+    "allow_aeneas_axioms": false,
+    "description": "WebAuthn PRFスロットが健全な場合の2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_unlock_recovery",
+    "allow_aeneas_axioms": false,
+    "description": "リカバリーコードスロットが健全な場合の2ステップ解錠到達補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_multiplexing_soundness",
+    "allow_aeneas_axioms": false,
+    "description": "スロット多重化健全性定理: 3スロット中いずれか1つが健全であればLockedからUnlockedへ到達可能であることを保証する完全性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "slot_multiplexing_can_reach",
+    "allow_aeneas_axioms": false,
+    "description": "到達可能性述語 can_reach を用いたスロット多重化健全性定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "is_valid_unlock_eventb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "is_valid_unlock_eventb と valid_unlock_event の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "is_unlock_success_eventb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "is_unlock_success_eventb と unlock_success_event の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "not_unlock_success_implies_not_valid_unlock",
+    "allow_aeneas_axioms": false,
+    "description": "構文的解錠成功イベントでないならば有効な認証イベントになり得ないことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "no_valid_unlock_traceb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "no_valid_unlock_traceb と no_valid_unlock_trace の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "no_unlock_success_implies_no_valid_unlock_trace",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを含まないトレースは任意の環境において未認証トレースとなることを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_non_unlocked_invariant",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から有効な認証イベントを経ない単一ステップ遷移において遷移先も非解錠状態にとどまることを示す1ステップ保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_non_unlocked_invariant",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から有効な認証イベントを含まない多段階遷移列により到達可能な任意の状態はUnlockedになり得ないことを示す一般化トレース不変性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "非到達性定理: 施錠状態から有効な認証イベントを経ない任意の遷移列によって解錠状態に到達することは不可能であることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_syntax_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを含まないトレースに対する非到達性定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "non_unlocked_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態起点における一般化DEK平文非露出定理: 非解錠状態かつ安全なマシン状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "non_unlocked_no_auth_cannot_extract_dek",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態起点における一般化DEK平文非抽出系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "DEK平文非露出定理: 施錠状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_no_auth_cannot_extract_dek",
+    "allow_aeneas_axioms": false,
+    "description": "DEK平文非露出定理の系: 施錠状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す否定的帰結系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "locked_syntax_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを含まないトレースに対するDEK平文非露出定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "step_zeroized_no_reset_impossible",
+    "allow_aeneas_axioms": false,
+    "description": "Zeroized状態から再初期化イベント (EventReset) を経ない単一ステップ遷移は存在しないことを示す補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "no_reset_traceb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "no_reset_traceb と no_reset_trace の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_zeroized_no_reset_invariant",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態の完全滞留定理: 再初期化イベントを含まない遷移列においてマシンはZeroized状態に留まることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態からの非到達性定理: メモリゼロ消去状態から有効な解錠イベントを経ない任意の遷移列によって解錠状態に到達することは不可能であることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_syntax_no_auth_unreachability",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを一切含まないトレースに対するマスター鍵消去状態からの非到達性定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態におけるDEK平文非露出定理: ゼロ消去状態から有効な認証イベントを経ずに遷移したマシン状態において平文DEKが観測されることはなく常にNoneが保たれることを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_no_auth_cannot_extract_dek",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態におけるDEK平文非露出定理の系: ゼロ消去状態から有効な認証イベントを経ずに平文DEKを取り出すことは不可能であることを示す否定的帰結系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "zeroized_syntax_no_auth_dek_confidentiality",
+    "allow_aeneas_axioms": false,
+    "description": "構文的に解錠成功イベントを一切含まないトレースに対するマスター鍵消去状態におけるDEK平文非露出定理の系"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_zeroized_to_unlocked_requires_reset",
+    "allow_aeneas_axioms": false,
+    "description": "解錠状態到達における再初期化イベント必須性定理: Zeroized状態からUnlocked状態へ到達する任意の遷移トレースには必ずEventResetが含まれていなければならないことを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_to_unlocked_requires_auth_gen",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から解錠状態への到達における認証イベント存在に関する一般化補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_to_unlocked_requires_auth",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態から解錠状態への到達における認証イベント存在補題"
+  },
+  {
+    "module": "Fidelogic.Theories.EnvelopeFsm",
+    "theorem": "steps_zeroized_to_unlocked_requires_auth",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵消去状態から解錠状態到達における有効認証イベント必須性定理: Zeroized状態からUnlocked状態へ到達する任意の遷移トレースには健全なスロットに対する有効な解錠成功イベントが含まれていなければならないことを保証する定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "in_range_true",
+    "allow_aeneas_axioms": false,
+    "description": "閉区間内コードポイントに対する範囲判定関数の真偽性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "in_range_iff",
+    "allow_aeneas_axioms": false,
+    "description": "閉区間内コードポイントに対する範囲判定関数と同値命題のReflection補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "in_range_false",
+    "allow_aeneas_axioms": false,
+    "description": "閉区間外コードポイントに対する範囲判定関数の偽値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "is_disallowed_cp_eq",
+    "allow_aeneas_axioms": false,
+    "description": "総合禁止判定関数と禁止コードポイント命題のReflection補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "disallowed_cp_dec",
+    "allow_aeneas_axioms": false,
+    "description": "任意のコードポイントに対する禁止判定の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "単一コードポイントに対するCase Folding写像関数の不動点性(冪等性)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "small_noncharacter_false",
+    "allow_aeneas_axioms": false,
+    "description": "基本多言語面(BMP)低位コードポイントに対する非文字判定偽値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "folded_code_point_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "Case Folding写像後の小文字領域コードポイントに対する許可性(非禁止性)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_preserves_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "許可コードポイントに対するCase Folding写像の許可性保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_preserves_allowed_prop",
+    "allow_aeneas_axioms": false,
+    "description": "許可コードポイント命題に対するCase Folding写像の不変性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_string_length",
+    "allow_aeneas_axioms": false,
+    "description": "文字列に対するCase Folding写像適用時の長さ不変補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "case_fold_string_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "文字列に対するCase Folding写像の不動点性(冪等性)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_allowed_folded",
+    "allow_aeneas_axioms": false,
+    "description": "文字列中の全文字許可性に対するCase Folding写像適用後の許可性保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_allowed_forall",
+    "allow_aeneas_axioms": false,
+    "description": "文字列全文字許可判定関数とリスト全要素非禁止命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_not_empty",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の非空性保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_length",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における入出力文字列の長さ上限補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_all_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字許可判定保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_no_disallowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字非禁止性保証定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedプロファイル正準化関数の冪等性主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_case_insensitive",
+    "allow_aeneas_axioms": false,
+    "description": "大文字小文字の差異しかない2つの入力文字列に対する正準化結果の一致性(大文字小文字不変性)主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "is_opaque_disallowed_cp_eq",
+    "allow_aeneas_axioms": false,
+    "description": "FreeformClass禁止判定関数と禁止命題のReflection補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_disallowed_cp_dec",
+    "allow_aeneas_axioms": false,
+    "description": "任意のコードポイントに対するFreeformClass禁止判定の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "space_opaque_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "ASCII空白文字(0x20)がFreeformClassにおいて合法(非禁止)であることの保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_disallowed_implies_disallowed",
+    "allow_aeneas_axioms": false,
+    "description": "FreeformClass禁止文字はIdentifierClassにおいても禁止文字であることの包含関係補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_hangul_syllable_range",
+    "allow_aeneas_axioms": false,
+    "description": "ハングル音節合成関数の出力値域有界性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_pair_range",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントの出力値域補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_pair_terminal_left",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントの終端性補題(左側オペランドとしての不活性性)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "compose_pair_terminal_right",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントの終端性補題(右側オペランドとしての不活性性)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "composed_code_point_opaque_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "合成後コードポイントに対するFreeformClass許可性保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_opaque_allowed_nfc",
+    "allow_aeneas_axioms": false,
+    "description": "文字列の全文字許可性に対するNFC正規化の許可性保存補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "nfc_no_compose_id",
+    "allow_aeneas_axioms": false,
+    "description": "未合成ペア非存在文字列に対するNFC正規化の恒等性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_nfc_normalize_cons_cons",
+    "allow_aeneas_axioms": false,
+    "description": "2要素以上の先頭に対するNFC正規化の展開等式補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_nfc_normalize_cons",
+    "allow_aeneas_axioms": false,
+    "description": "非空文字列に対するNFC正規化結果の先頭要素存在補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "nfc_hd_cases",
+    "allow_aeneas_axioms": false,
+    "description": "非空文字列に対するNFC正規化結果の先頭要素特徴づけ補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_nfc_normalize_no_compose",
+    "allow_aeneas_axioms": false,
+    "description": "NFC正規化結果に対する未合成ペア非存在性(不動点条件充足)補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "nfc_normalize_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "Unicode正規化形式NFCの不動点性(冪等性)主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_not_empty",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の非空性保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_all_allowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字許可判定保証補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "all_opaque_allowed_forall",
+    "allow_aeneas_axioms": false,
+    "description": "FreeformClass文字列全文字許可判定関数とリスト全要素非禁止命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_no_disallowed",
+    "allow_aeneas_axioms": false,
+    "description": "正準化成功時における出力文字列の全文字非禁止性保証定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_idempotent",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringプロファイル正準化関数の冪等性主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_password_with_space",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ検証補題(空白を含むパスワードの受容と正準化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_nfd_acute",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ検証補題(基底文字+結合アクセントのNFC合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_hangul_ga",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ検証補題(ハングルJamo L+Vの音節合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_ascii_mixed",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII大文字小文字混在文字列の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_ascii_upper",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII全英大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_ascii_lower",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII小文字文字列の恒等写像)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_greek",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ギリシャ文字大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_cyrillic",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(キリル文字大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_fold_latin_accent",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(Latin-1補助大文字の小文字化)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_empty",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(空文字列の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_space",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(空白文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_nul",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(ASCII NUL制御文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_tab",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(水平タブ制御文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_surrogate",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(サロゲートコードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_pua",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(私用領域コードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_nonchar_ffff",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(非文字0xFFFFの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_username_reject_nonchar_fdd0",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedテストベクタ(非文字0xFDD0の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_preserve_case",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(大文字小文字混在パスワードの大文字保持)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_preserve_space",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(空白文字を含む文字列の受容と保持)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_nfc_latin_a_diaeresis",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(Latin基底文字+結合ダイエレシスのNFC合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_nfc_latin_c_cedilla",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(Latin基底文字+結合セディラのNFC合成)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_empty",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(空文字列の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_nul",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(ASCII NUL制御文字混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_control_1f",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(制御文字0x1F混入の拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_surrogate",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(サロゲートコードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_pua",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(私用領域コードポイントの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_opaque_reject_nonchar",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringテストベクタ(非文字0xFFFFの拒絶)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_profile_discrepancy_space",
+    "allow_aeneas_axioms": false,
+    "description": "プロファイル境界差分連立補題(空白文字列に対する受容・拒絶の境界検証)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "test_vector_profile_discrepancy_uppercase",
+    "allow_aeneas_axioms": false,
+    "description": "プロファイル境界差分連立補題(大文字文字列に対する小文字化・大文字保持の境界検証)"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "username_case_mapped_deterministic",
+    "allow_aeneas_axioms": false,
+    "description": "UsernameCaseMappedプロファイル正準化の計算的決定性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "opaque_string_deterministic",
+    "allow_aeneas_axioms": false,
+    "description": "OpaqueStringプロファイル正準化の計算的決定性定理"
+  },
+  {
+    "module": "Fidelogic.Theories.PrecisProfile",
+    "theorem": "precis_golden_suite_conformance",
+    "allow_aeneas_axioms": false,
+    "description": "テストベクタ一括適合性定理(Golden Test Suiteの完全一致保証)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "SecLevel 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_eqb_refl",
+    "allow_aeneas_axioms": false,
+    "description": "sec_level_eqb の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_eqb_eq",
+    "allow_aeneas_axioms": false,
+    "description": "sec_level_eqb と等号命題の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_cases",
+    "allow_aeneas_axioms": false,
+    "description": "SecLevel の有限網羅性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_low_not_high",
+    "allow_aeneas_axioms": false,
+    "description": "Low と High の非等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_high_not_low",
+    "allow_aeneas_axioms": false,
+    "description": "High と Low の非等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_leb_spec",
+    "allow_aeneas_axioms": false,
+    "description": "sec_leb と sec_le の Reflection 同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_dec",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序述語 sec_le の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_refl",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序の反射律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_trans",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序の推移律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_antisym",
+    "allow_aeneas_axioms": false,
+    "description": "情報流順序の反対称律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_low_bottom",
+    "allow_aeneas_axioms": false,
+    "description": "Low が最小元 (Bottom) であることの補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_high_top",
+    "allow_aeneas_axioms": false,
+    "description": "High が最大元 (Top) であることの補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_le_high_low_false",
+    "allow_aeneas_axioms": false,
+    "description": "High から Low への情報流不成立補題 (機密漏洩禁止)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_level_to_bool_inverse",
+    "allow_aeneas_axioms": false,
+    "description": "SecLevel と bool の対合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "bool_to_sec_level_inverse",
+    "allow_aeneas_axioms": false,
+    "description": "bool と SecLevel の対合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_to_orb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join とブール論理和 (orb) の同型準同型補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_to_andb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet とブール論理積 (andb) の同型準同型補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_leb_to_implb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_leb とブール論理含意 (implb) の同型補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_comm",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join の可換性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_comm",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet の可換性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_assoc",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join の結合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_assoc",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet の結合性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_idemp",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join の冪等性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_idemp",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet の冪等性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_meet_absorb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join と sec_meet の吸収律補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_join_absorb",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet と sec_join の吸収律補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_ub_left",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join が左引数の上界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_ub_right",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join が右引数の上界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_join_least",
+    "allow_aeneas_axioms": false,
+    "description": "sec_join が最小上界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_lb_left",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet が左引数の下界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_lb_right",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet が右引数の下界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "sec_meet_greatest",
+    "allow_aeneas_axioms": false,
+    "description": "sec_meet が最大下界である補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "flows_to_self",
+    "allow_aeneas_axioms": false,
+    "description": "自身のセキュリティレベルへの情報流成立補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "flows_to_high",
+    "allow_aeneas_axioms": false,
+    "description": "High レベルへの情報流許可補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_val_flows_to_any",
+    "allow_aeneas_axioms": false,
+    "description": "Low ラベル付き値の任意レベル情報流可能補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "high_val_cannot_flow_to_low",
+    "allow_aeneas_axioms": false,
+    "description": "High ラベル付き値の Low レベル流出不可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "high_secret_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "HighSecret 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "tlv_vault_error_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "tlv_VaultError_t 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_header_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "LowHeader 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "option_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "option 型に対する決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_observation_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "LowObservation 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_security_state_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultSecurityState 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_refl",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_sym",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_trans",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の推移性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_iff_eq",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq と構文的等号の一致性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_obs_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "low_obs_eq の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_refl",
+    "allow_aeneas_axioms": false,
+    "description": "低位等価関係 low_equiv の反射律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_sym",
+    "allow_aeneas_axioms": false,
+    "description": "低位等価関係 low_equiv の対称律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_trans",
+    "allow_aeneas_axioms": false,
+    "description": "低位等価関係 low_equiv の推移律"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_iff_obs_eq",
+    "allow_aeneas_axioms": false,
+    "description": "low_equiv と射影結果構文的等号の同値性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_equiv_dec",
+    "allow_aeneas_axioms": false,
+    "description": "low_equiv の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "pad_to_bucket_zero",
+    "allow_aeneas_axioms": false,
+    "description": "バケットサイズ0におけるパディング長不変補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "pad_to_bucket_equal",
+    "allow_aeneas_axioms": false,
+    "description": "同一バケット境界パディング長一致補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "high_secrets_independent_of_low_obs",
+    "allow_aeneas_axioms": false,
+    "description": "高位機密の独立性補題 (低位観測値一致による低位同値保証)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_existence_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー存在フラグに関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_existence_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ存在フラグに関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "master_key_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "マスター鍵素材に関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "plaintext_low_equiv",
+    "allow_aeneas_axioms": false,
+    "description": "平文データに関する低位非干渉性基礎補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_public_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "LowPublic 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_refl",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_sym",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_trans",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の推移性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_dec",
+    "allow_aeneas_axioms": false,
+    "description": "low_input_equiv の決定可能性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "low_input_equiv_intro",
+    "allow_aeneas_axioms": false,
+    "description": "公開入力等号から low_input_equiv を導出する補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_perturbed_refl",
+    "allow_aeneas_axioms": false,
+    "description": "user_perturbed の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_perturbed_sym",
+    "allow_aeneas_axioms": false,
+    "description": "user_perturbed の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_perturbed_refl",
+    "allow_aeneas_axioms": false,
+    "description": "entry_perturbed の反射性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_perturbed_sym",
+    "allow_aeneas_axioms": false,
+    "description": "entry_perturbed の対称性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "auth_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "認証評価関数に対する完全非干渉性主定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_existence_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー存在非干渉性主定理 (存在/非存在高位入力に対する低位観測値同値性)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "user_perturbed_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー摂動入力に対する一般化ユーザー存在非干渉性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_existence_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ有無非干渉性主定理 (有無高位入力に対する低位観測値同値性)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_perturbed_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ摂動入力に対する一般化エントリ非干渉性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "entry_lookup_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ダミー長パディング一致条件下でのエントリ照会非干渉性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_security_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "最上位セキュリティ非干渉性主定理 (任意高位入力に対する低位観測値同値性)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_step_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "1ステップ状態遷移非干渉性主定理 (低位等価状態間のステップ遷移低位等価性保存)"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "no_user_enumeration_oracle",
+    "allow_aeneas_axioms": false,
+    "description": "ユーザー列挙オラクル排除系"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "no_entry_existence_oracle",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ有無オラクル排除系"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "no_length_oracle",
+    "allow_aeneas_axioms": false,
+    "description": "レスポンス長オラクル排除系"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "vault_machine_state_eq_dec",
+    "allow_aeneas_axioms": false,
+    "description": "VaultMachineState 間の決定可能等価性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "locked_query_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "施錠状態における平文非露出定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "zeroized_query_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "ゼロ消去状態における平文非露出定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "non_unlocked_query_non_interference",
+    "allow_aeneas_axioms": false,
+    "description": "非解錠状態における平文非露出一般定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "fsm_confidentiality_bridge",
+    "allow_aeneas_axioms": false,
+    "description": "EnvelopeFsm と NonInterference の統合機密性架橋定理"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "default_bucket_size_pos",
+    "allow_aeneas_axioms": false,
+    "description": "システム既定バケットサイズが正の整数であることの健全性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "clamp_bucket_size_pos",
+    "allow_aeneas_axioms": false,
+    "description": "クランプされたバケットサイズが常に正の整数を維持することの健全性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "eval_auth_bucket_size_constant",
+    "allow_aeneas_axioms": false,
+    "description": "認証照会におけるバケットパディング無効化攻撃耐性補題"
+  },
+  {
+    "module": "Fidelogic.Theories.NonInterference",
+    "theorem": "eval_entry_bucket_size_constant",
+    "allow_aeneas_axioms": false,
+    "description": "エントリ照会におけるバケットパディング無効化攻撃耐性補題"
+  }
+]

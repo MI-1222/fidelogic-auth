@@ -5,6 +5,8 @@
 
 From Stdlib Require Import Lia.
 From Stdlib Require Import List.
+From Fidelogic.Aeneas Require Import Primitives.
+Import Primitives.
 
 (** ** 破壊的等価置換タクティック (Context Cleanliness)
     仮定 [H] に対する inversion を行い、得られた等式を代入した上で不要となった仮定を消去する。 *)
@@ -22,3 +24,23 @@ Ltac safe_auto :=
 
 Ltac safe_eauto :=
   eauto 3.
+
+(** ** モナド簡約・ステップ展開タクティック
+    Aeneas/Primitives の result モナド (bind) を決定論的に簡約・展開する。 *)
+
+(** モナド bind の決定論的簡約。 *)
+Ltac monad_cbn :=
+  cbn [bind].
+
+(** ゴール中の既知の成功モナド式 (bind (Ok _) _) や等式仮定を用いた決定論的一歩展開。 *)
+Ltac monad_step :=
+  first [
+    progress (cbn [bind])
+  | progress (
+      match goal with
+      | H : ?x = Ok _ |- context [?x] => rewrite H
+      | H : ?x = false |- context [?x] => rewrite H
+      | H : ?x = true |- context [?x] => rewrite H
+      end
+    )
+  ].

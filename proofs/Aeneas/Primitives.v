@@ -1,10 +1,10 @@
-Require Import Lia.
-Require Coq.Strings.Ascii.
-Require Coq.Strings.String.
-Require Import Coq.Program.Equality.
-Require Import Coq.ZArith.ZArith.
-Require Import Coq.ZArith.Znat.
-Require Import List.
+From Stdlib Require Import Lia.
+From Stdlib.Strings Require Ascii.
+From Stdlib.Strings Require String.
+From Stdlib Require Import Program.Equality.
+From Stdlib.ZArith Require Import ZArith.
+From Stdlib.ZArith Require Import Znat.
+From Stdlib Require Import List.
 Import ListNotations.
 
 Module Primitives.
@@ -21,6 +21,8 @@ Inductive error :=
 Inductive result A :=
   | Ok : A -> result A
   | Fail_ : error -> result A.
+
+Inductive Never : Set := .
 
 Arguments Ok {_} a.
 Arguments Fail_ {_}.
@@ -63,10 +65,10 @@ Check (if true then Ok (1 + 2) else Fail_ Failure)%global = 3.
 
 (*** Misc *)
 
-Definition string := Coq.Strings.String.string.
+Definition string := Stdlib.Strings.String.string.
 Definition str := string.
-Definition char := Coq.Strings.Ascii.ascii.
-Definition char_of_byte := Coq.Strings.Ascii.ascii_of_byte.
+Definition char := Stdlib.Strings.Ascii.ascii.
+Definition char_of_byte := Stdlib.Strings.Ascii.ascii_of_byte.
 
 Definition core_mem_replace {a : Type} (x : a) (y : a) : a * a := (x, x) .
 
@@ -308,7 +310,7 @@ Definition u32   := scalar U32.
 Definition u64   := scalar U64.
 Definition u128  := scalar U128.
 
-(** Negaion *)
+(** Negation *)
 Definition isize_neg := @scalar_neg Isize.
 Definition i8_neg    := @scalar_neg I8.
 Definition i16_neg   := @scalar_neg I16.
@@ -495,27 +497,27 @@ Notation "x s>= y" := (scalar_geb x y)  (at level 80) : Primitives_scope.
 Notation "x s> y" := (scalar_gtb x y)  (at level 80) : Primitives_scope.
 
 (** Constants *)
-Definition core_num_U8_MIN    := u8_min %u32.
-Definition core_num_U16_MIN   := u16_min %u32.
+Definition core_num_U8_MIN    := u8_min %u8.
+Definition core_num_U16_MIN   := u16_min %u16.
 Definition core_num_U32_MIN   := u32_min %u32.
 Definition core_num_U64_MIN   := u64_min %u64.
-Definition core_num_U128_MIN  := u64_min %u128.
+Definition core_num_U128_MIN  := u128_min %u128.
 Axiom core_num_Usize_MIN : usize. (** TODO *)
-Definition core_num_I8_MIN    := i8_min %i32.
-Definition core_num_I16_MIN   := i16_min %i32.
+Definition core_num_I8_MIN    := i8_min %i8.
+Definition core_num_I16_MIN   := i16_min %i16.
 Definition core_num_I32_MIN   := i32_min %i32.
 Definition core_num_I64_MIN   := i64_min %i64.
 Definition core_num_I128_MIN  := i128_min %i128.
 Axiom core_num_Isize_MIN : isize. (** TODO *)
 
-Definition core_num_U8_MAX    := u8_max %u32.
-Definition core_num_U16_MAX   := u16_max %u32.
+Definition core_num_U8_MAX    := u8_max %u8.
+Definition core_num_U16_MAX   := u16_max %u16.
 Definition core_num_U32_MAX   := u32_max %u32.
 Definition core_num_U64_MAX   := u64_max %u64.
-Definition core_num_U128_MAX  := u64_max %u128.
+Definition core_num_U128_MAX  := u128_max %u128.
 Axiom core_num_Usize_MAX : usize. (** TODO *)
-Definition core_num_I8_MAX    := i8_max %i32.
-Definition core_num_I16_MAX   := i16_max %i32.
+Definition core_num_I8_MAX    := i8_max %i8.
+Definition core_num_I16_MAX   := i16_max %i16.
 Definition core_num_I32_MAX   := i32_max %i32.
 Definition core_num_I64_MAX   := i64_max %i64.
 Definition core_num_I128_MAX  := i128_max %i128.
@@ -719,6 +721,18 @@ Arguments mk_core_ops_range_Range {_}.
 Arguments core_ops_range_Range_start {_}.
 Arguments core_ops_range_Range_end_ {_}.
 
+Record core_ops_range_RangeTo (T : Type) := mk_core_ops_range_RangeTo {
+  core_ops_range_RangeTo_end_ : T;
+}.
+Arguments mk_core_ops_range_RangeTo {_}.
+Arguments core_ops_range_RangeTo_end_ {_}.
+
+Record core_ops_range_RangeFrom (T : Type) := mk_core_ops_range_RangeFrom {
+  core_ops_range_RangeFrom_start : T;
+}.
+Arguments mk_core_ops_range_RangeFrom {_}.
+Arguments core_ops_range_RangeFrom_start {_}.
+
 (*** [alloc] *)
 
 Definition alloc_boxed_Box_deref {T : Type} (x : T) : T := x.
@@ -799,6 +813,19 @@ Axiom array_update_subslice: forall {T : Type} {n : usize} (x : array T n) (r : 
 
 Axiom slice_subslice: forall {T : Type} (x : slice T) (r : core_ops_range_Range usize), result (slice T).
 Axiom slice_update_subslice: forall {T : Type} (x : slice T) (r : core_ops_range_Range usize) (ns : slice T), result (slice T).
+
+Definition slice_empty {T : Type} : slice T :=
+  exist _ [] le_0_usize_max.
+
+Axiom array_to_slice_len : forall {T : Type} {n : usize} (a : array T n),
+  slice_len (array_to_slice a) = n.
+
+Axiom array_to_slice_index : forall {T : Type} {n : usize} (a : array T n) (i : usize),
+  slice_index_usize (array_to_slice a) i = array_index_usize a i.
+
+Axiom mk_array_index_nth : forall {T : Type} (n : usize) (l : list T) (i : usize) (x : T),
+  nth_error l (usize_to_nat i) = Some x ->
+  array_index_usize (mk_array n l) i = Ok x.
 
 (*** Vectors *)
 
@@ -950,6 +977,85 @@ Definition core_slice_index_SliceIndexRangeUsizeSliceInst (T : Type) :
   core_slice_index_SliceIndex_index_mut := core_slice_index_SliceIndexRangeUsizeSlice_index_mut;
 |}.
 
+(* [core::slice::index::RangeTo::get]: forward function *)
+Axiom core_slice_index_SliceIndexRangeToUsizeSlice_get : forall {T : Type} (i : core_ops_range_RangeTo usize) (s : slice T), result (option (slice T)).
+
+(* [core::slice::index::RangeTo::get_mut]: forward function *)
+Axiom core_slice_index_SliceIndexRangeToUsizeSlice_get_mut :
+  forall {T : Type},
+    core_ops_range_RangeTo usize -> slice T ->
+    result (option (slice T) * (option (slice T) -> slice T)).
+
+Definition core_slice_index_SliceIndexRangeToUsizeSlice_get_unchecked
+  {T : Type} :
+  core_ops_range_RangeTo usize -> const_raw_ptr (slice T) -> result (const_raw_ptr (slice T)) :=
+  fun _ _ => Fail_ Failure.
+
+Definition core_slice_index_SliceIndexRangeToUsizeSlice_get_unchecked_mut
+  {T : Type} :
+  core_ops_range_RangeTo usize -> mut_raw_ptr (slice T) -> result (mut_raw_ptr (slice T)) :=
+  fun _ _ => Fail_ Failure.
+
+Axiom core_slice_index_SliceIndexRangeToUsizeSlice_index :
+  forall {T : Type}, core_ops_range_RangeTo usize -> slice T -> result (slice T).
+
+Axiom core_slice_index_SliceIndexRangeToUsizeSlice_index_mut :
+  forall {T : Type}, core_ops_range_RangeTo usize -> slice T -> result (slice T * (slice T -> slice T)).
+
+(* Trait implementation: [core::slice::index::RangeTo] *)
+Definition core_slice_index_SliceIndexRangeToUsizeSliceInst (T : Type) :
+  core_slice_index_SliceIndex (core_ops_range_RangeTo usize) (slice T) (slice T) := {|
+  core_slice_index_SliceIndex_get := core_slice_index_SliceIndexRangeToUsizeSlice_get;
+  core_slice_index_SliceIndex_get_mut := core_slice_index_SliceIndexRangeToUsizeSlice_get_mut;
+  core_slice_index_SliceIndex_get_unchecked := core_slice_index_SliceIndexRangeToUsizeSlice_get_unchecked;
+  core_slice_index_SliceIndex_get_unchecked_mut := core_slice_index_SliceIndexRangeToUsizeSlice_get_unchecked_mut;
+  core_slice_index_SliceIndex_index := core_slice_index_SliceIndexRangeToUsizeSlice_index;
+  core_slice_index_SliceIndex_index_mut := core_slice_index_SliceIndexRangeToUsizeSlice_index_mut;
+|}.
+
+(* [core::slice::index::RangeFrom::get]: forward function *)
+Axiom core_slice_index_SliceIndexRangeFromUsizeSlice_get : forall {T : Type} (i : core_ops_range_RangeFrom usize) (s : slice T), result (option (slice T)).
+
+(** [core::slice::index::RangeFrom::get] に関する Rust 言語仕様モデル。
+    開始インデックスがスライス長と一致する場合、必ず空スライスの Some を返す。 *)
+Axiom core_slice_index_SliceIndexRangeFromUsizeSlice_get_at_len :
+  forall {T : Type} (s : slice T) (r : core_ops_range_RangeFrom usize),
+    core_ops_range_RangeFrom_start r = slice_len s ->
+    core_slice_index_SliceIndexRangeFromUsizeSlice_get r s = Ok (Some slice_empty).
+
+(* [core::slice::index::RangeFrom::get_mut]: forward function *)
+Axiom core_slice_index_SliceIndexRangeFromUsizeSlice_get_mut :
+  forall {T : Type},
+    core_ops_range_RangeFrom usize -> slice T ->
+    result (option (slice T) * (option (slice T) -> slice T)).
+
+Definition core_slice_index_SliceIndexRangeFromUsizeSlice_get_unchecked
+  {T : Type} :
+  core_ops_range_RangeFrom usize -> const_raw_ptr (slice T) -> result (const_raw_ptr (slice T)) :=
+  fun _ _ => Fail_ Failure.
+
+Definition core_slice_index_SliceIndexRangeFromUsizeSlice_get_unchecked_mut
+  {T : Type} :
+  core_ops_range_RangeFrom usize -> mut_raw_ptr (slice T) -> result (mut_raw_ptr (slice T)) :=
+  fun _ _ => Fail_ Failure.
+
+Axiom core_slice_index_SliceIndexRangeFromUsizeSlice_index :
+  forall {T : Type}, core_ops_range_RangeFrom usize -> slice T -> result (slice T).
+
+Axiom core_slice_index_SliceIndexRangeFromUsizeSlice_index_mut :
+  forall {T : Type}, core_ops_range_RangeFrom usize -> slice T -> result (slice T * (slice T -> slice T)).
+
+(* Trait implementation: [core::slice::index::RangeFrom] *)
+Definition core_slice_index_SliceIndexRangeFromUsizeSliceInst (T : Type) :
+  core_slice_index_SliceIndex (core_ops_range_RangeFrom usize) (slice T) (slice T) := {|
+  core_slice_index_SliceIndex_get := core_slice_index_SliceIndexRangeFromUsizeSlice_get;
+  core_slice_index_SliceIndex_get_mut := core_slice_index_SliceIndexRangeFromUsizeSlice_get_mut;
+  core_slice_index_SliceIndex_get_unchecked := core_slice_index_SliceIndexRangeFromUsizeSlice_get_unchecked;
+  core_slice_index_SliceIndex_get_unchecked_mut := core_slice_index_SliceIndexRangeFromUsizeSlice_get_unchecked_mut;
+  core_slice_index_SliceIndex_index := core_slice_index_SliceIndexRangeFromUsizeSlice_index;
+  core_slice_index_SliceIndex_index_mut := core_slice_index_SliceIndexRangeFromUsizeSlice_index_mut;
+|}.
+
 (* Trait implementation: [core::slice::index::[T]] *)
 Definition core_ops_index_IndexSliceInst {T Idx Output : Type}
   (inst : core_slice_index_SliceIndex Idx (slice T) Output) :
@@ -1048,5 +1154,86 @@ Axiom alloc_vec_Vec_index_eq : forall {a : Type} (v : alloc_vec_Vec a) (i : usiz
 Axiom alloc_vec_Vec_index_mut_eq : forall {a : Type} (v : alloc_vec_Vec a) (i : usize) (x : a),
   alloc_vec_Vec_index_mut (core_slice_index_SliceIndexUsizeSliceInst a) v i =
     alloc_vec_Vec_index_mut_usize v i.
+
+Record core_cmp_PartialEq (Self Rhs : Type) := mk_core_cmp_PartialEq {
+  core_cmp_PartialEq_eq : Self -> Rhs -> result bool;
+}.
+Arguments mk_core_cmp_PartialEq {_ _}.
+Arguments core_cmp_PartialEq_eq {_ _}.
+
+Definition core_cmp_PartialEqU8 : core_cmp_PartialEq u8 u8 := {|
+  core_cmp_PartialEq_eq := fun x y => Ok (scalar_eqb x y);
+|}.
+
+Definition core_cmp_PartialEqUsize : core_cmp_PartialEq usize usize := {|
+  core_cmp_PartialEq_eq := fun x y => Ok (scalar_eqb x y);
+|}.
+
+(*** core::convert *)
+
+Record core_convert_From (Self T : Type) := mk_core_convert_From {
+  from_ : T -> result Self;
+}.
+Arguments mk_core_convert_From {_ _}.
+Arguments from_ {_ _}.
+
+Definition alloc_vec_Vec_from_slice {T : Type} (s : slice T) : result (alloc_vec_Vec T) :=
+  Ok (exist _ (proj1_sig s) (proj2_sig s)).
+
+Definition core_convert_From_slice_Vec {T : Type} : core_convert_From (alloc_vec_Vec T) (slice T) := {|
+  from_ := alloc_vec_Vec_from_slice;
+|}.
+
+Lemma u16_clamp_in_bounds (z : Z) : scalar_min U16 <= Z.min (Z.max 0 z) 65535 <= scalar_max U16.
+Proof.
+  unfold scalar_min, scalar_max, u16_min, u16_max.
+  lia.
+Qed.
+
+Definition u16_of_Z (z : Z) : u16 :=
+  exist _ (Z.min (Z.max 0 z) 65535) (u16_clamp_in_bounds z).
+
+Definition core_num_U16_from_be_bytes (a : array u8 2%usize) : u16 :=
+  match proj1_sig a with
+  | b0 :: b1 :: _ =>
+    u16_of_Z (to_Z b0 * 256 + to_Z b1)
+  | _ => u16_of_Z 0
+  end.
+
+Definition alloc_slice_Slice_to_vec {T : Type} (inst : core_clone_Clone T) (s : slice T) : result (alloc_vec_Vec T) :=
+  Ok (exist _ (proj1_sig s) (proj2_sig s)).
+
+Definition scalar_checked_add (ty: scalar_ty) (x y: scalar ty) : option (scalar ty) :=
+  match mk_scalar ty (to_Z x + to_Z y) with
+  | Ok s => Some s
+  | Fail_ _ => None
+  end.
+
+Definition Usize_checked_add := scalar_checked_add Usize.
+Definition U8_checked_add := scalar_checked_add U8.
+Definition U16_checked_add := scalar_checked_add U16.
+Definition U32_checked_add := scalar_checked_add U32.
+Definition U64_checked_add := scalar_checked_add U64.
+
+(** usize の飽和乗算 (saturating_mul) の境界健全性補題。 *)
+Lemma usize_saturating_mul_in_bounds (x y : usize) :
+  scalar_min Usize <= Z.min (to_Z x * to_Z y) usize_max <= scalar_max Usize.
+Proof.
+  unfold scalar_min, scalar_max, usize_min.
+  destruct x as [zx [Hxmin Hxmax]], y as [zy [Hymin Hymax]].
+  cbn in *.
+  unfold scalar_min, scalar_max, usize_min in *.
+  split.
+  - apply Z.min_glb.
+    + apply Z.mul_nonneg_nonneg; lia.
+    + apply le_0_usize_max.
+  - apply Z.le_trans with (m := usize_max).
+    + apply Z.le_min_r.
+    + lia.
+Qed.
+
+(** [core::num::<impl usize>::saturating_mul]: 飽和乗算の純粋関数型モデル。 *)
+Definition core_num_Usize_saturating_mul (x y : usize) : usize :=
+  exist _ (Z.min (to_Z x * to_Z y) usize_max) (usize_saturating_mul_in_bounds x y).
 
 End Primitives.

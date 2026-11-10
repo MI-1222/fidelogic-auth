@@ -3,52 +3,291 @@
 From Fidelogic.Aeneas Require Import Primitives.
 Import Primitives.
 Require Import Coq.ZArith.ZArith.
-Require Import List.
+From Stdlib Require Import List.
 Import ListNotations.
 Local Open Scope Primitives_scope.
 Module FidelogicCore.
 
-(** Trait declaration: [core::cmp::PartialEq]
-    Source: '/rustc/library/core/src/cmp.rs', lines 253:0-253:65
-    Name pattern: [core::cmp::PartialEq]
+(** [core::convert::{impl core::convert::From<T> for T}::from]:
+    Source: '/rustc/library/core/src/convert/mod.rs', lines 790:4-790:22
+    Name pattern: [core::convert::{core::convert::From<@T, @T>}::from]
     Visibility: public *)
-Record core_cmp_PartialEq_t (Self : Type) (Rhs : Type)
-  := mkcore_cmp_PartialEq_t {
-  core_cmp_PartialEq_t_eq : Self -> Rhs -> result bool;
-}.
+Axiom core_convert_From_Blanket_from : forall{T : Type}, T -> result T.
 
-Arguments mkcore_cmp_PartialEq_t { _ } { _ }.
-Arguments core_cmp_PartialEq_t_eq { _ } { _ } _.
+(** Trait implementation: [core::convert::{impl core::convert::From<T> for T}]
+    Source: '/rustc/library/core/src/convert/mod.rs', lines 787:0-787:27
+    Name pattern: [core::convert::From<@T, @T>] *)
+Definition core_convert_From_Blanket (T : Type) : core_convert_From T T := {|
+  from_ := core_convert_From_Blanket_from;
+|}.
 
-(** Trait declaration: [core::cmp::Eq]
-    Source: '/rustc/library/core/src/cmp.rs', lines 353:0-353:58
-    Name pattern: [core::cmp::Eq]
+(** [core::ops::control_flow::ControlFlow]
+    Source: '/rustc/library/core/src/ops/control_flow.rs', lines 89:0-89:31
+    Name pattern: [core::ops::control_flow::ControlFlow]
     Visibility: public *)
-Record core_cmp_Eq_t (Self : Type) := mkcore_cmp_Eq_t {
-  core_cmp_Eq_tcore_cmp_Eq_t_PartialEqInst : core_cmp_PartialEq_t Self Self;
-  core_cmp_Eq_t_assert_fields_are_eq : Self -> result unit;
-}.
-
-Arguments mkcore_cmp_Eq_t { _ }.
-Arguments core_cmp_Eq_tcore_cmp_Eq_t_PartialEqInst { _ } _.
-Arguments core_cmp_Eq_t_assert_fields_are_eq { _ } _.
-
-(** [core::cmp::Eq::assert_fields_are_eq]:
-    Source: '/rustc/library/core/src/cmp.rs', lines 371:4-371:34
-    Name pattern: [core::cmp::Eq::assert_fields_are_eq]
-    Visibility: public *)
-Axiom core_cmp_Eq_assert_fields_are_eq_default :
-  forall{Self : Type} (eqInst : core_cmp_Eq_t Self), Self -> result unit
+Inductive core_ops_control_flow_ControlFlow_t (B : Type) (C : Type) :=
+| Core_ops_control_flow_ControlFlow_Continue :
+  C ->
+  core_ops_control_flow_ControlFlow_t B C
+| Core_ops_control_flow_ControlFlow_Break :
+  B ->
+  core_ops_control_flow_ControlFlow_t B C
 .
 
-(** Trait declaration: [core::marker::StructuralPartialEq]
-    Source: '/rustc/library/core/src/marker.rs', lines 257:0-257:29
-    Name pattern: [core::marker::StructuralPartialEq]
-    Visibility: public *)
-Record core_marker_StructuralPartialEq_t (Self : Type)
-  := mkcore_marker_StructuralPartialEq_t{}.
+Arguments Core_ops_control_flow_ControlFlow_Continue { _ } { _ }.
+Arguments Core_ops_control_flow_ControlFlow_Break { _ } { _ }.
 
-Arguments mkcore_marker_StructuralPartialEq_t { _ }.
+(** [core::ops::range::RangeFrom]
+    Source: '/rustc/library/core/src/ops/range.rs', lines 202:0-202:25
+    Name pattern: [core::ops::range::RangeFrom]
+    Visibility: public *)
+Record core_ops_range_RangeFrom_t (Idx : Type) :=
+mkcore_ops_range_RangeFrom_t {
+  core_ops_range_RangeFrom_start : Idx;
+}
+.
+
+Arguments mkcore_ops_range_RangeFrom_t { _ }.
+Arguments core_ops_range_RangeFrom_start { _ }.
+
+(** [core::result::Result]
+    Source: '/rustc/library/core/src/result.rs', lines 558:0-558:21
+    Name pattern: [core::result::Result]
+    Visibility: public *)
+Inductive core_result_Result_t (T : Type) (E : Type) :=
+| Core_result_Result_Ok : T -> core_result_Result_t T E
+| Core_result_Result_Err : E -> core_result_Result_t T E
+.
+
+Arguments Core_result_Result_Ok { _ } { _ }.
+Arguments Core_result_Result_Err { _ } { _ }.
+
+(** [core::option::{core::option::Option<T>}::ok_or]:
+    Source: '/rustc/library/core/src/option.rs', lines 1335:4-1335:73
+    Name pattern: [core::option::{core::option::Option<@T>}::ok_or]
+    Visibility: public *)
+Axiom core_option_Option_ok_or :
+  forall{T : Type} {E : Type},
+        option T -> E -> result (core_result_Result_t T E)
+.
+
+(** [core::result::{impl core::ops::try_trait::Try for core::result::Result<T, E>}::branch]:
+    Source: '/rustc/library/core/src/result.rs', lines 2175:4-2175:64
+    Name pattern: [core::result::{core::ops::try_trait::Try<core::result::Result<@T, @E>>}::branch]
+    Visibility: public *)
+Axiom core_result_Result_Insts_CoreOpsTry_traitTry_branch :
+  forall{T : Type} {E : Type},
+        core_result_Result_t T E -> result (core_ops_control_flow_ControlFlow_t
+          (core_result_Result_t Never E) T)
+.
+
+(** [core::result::{impl core::ops::try_trait::FromResidual<core::result::Result<!, E>> for core::result::Result<T, F>}::from_residual]:
+    Source: '/rustc/library/core/src/result.rs', lines 2188:4-2188:52
+    Name pattern: [core::result::{core::ops::try_trait::FromResidual<core::result::Result<@T, @F>, core::result::Result<!, @E>>}::from_residual]
+    Visibility: public *)
+Axiom
+  core_result_Result_Insts_CoreOpsTry_traitFromResidualResultNeverE_from_residual
+  :
+  forall(T : Type) {E : Type} {F : Type} (convertFromInst : core_convert_From F
+        E),
+        core_result_Result_t Never E -> result (core_result_Result_t T F)
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}::index_mut]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 508:4-508:51
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>}::index_mut]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index_mut
+  :
+  forall{T : Type},
+        core_ops_range_RangeTo usize -> slice T -> result ((slice T) * (slice T
+          -> slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}::index]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 502:4-502:39
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>}::index]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index :
+  forall{T : Type}, core_ops_range_RangeTo usize -> slice T -> result (slice T)
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}::get_unchecked_mut]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 496:4-496:66
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>}::get_unchecked_mut]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked_mut
+  :
+  forall{T : Type},
+        core_ops_range_RangeTo usize -> mut_raw_ptr (slice T) -> result
+          (mut_raw_ptr (slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}::get_unchecked]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 490:4-490:66
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>}::get_unchecked]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked
+  :
+  forall{T : Type},
+        core_ops_range_RangeTo usize -> const_raw_ptr (slice T) -> result
+          (const_raw_ptr (slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}::get_mut]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 485:4-485:57
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>}::get_mut]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_mut
+  :
+  forall{T : Type},
+        core_ops_range_RangeTo usize -> slice T -> result ((option (slice T)) *
+          (option (slice T) -> slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}::get]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 479:4-479:45
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>}::get]
+    Visibility: public *)
+Axiom core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get
+  :
+  forall{T : Type},
+        core_ops_range_RangeTo usize -> slice T -> result (option (slice T))
+.
+
+(** Trait implementation: [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeTo<usize>}]
+    Source: '/rustc/library/core/src/slice/index.rs', lines 475:0-475:60
+    Name pattern: [core::slice::index::SliceIndex<core::ops::range::RangeTo<usize>, [@T], [@T]>] *)
+Definition core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+  (T : Type) : core_slice_index_SliceIndex (core_ops_range_RangeTo usize)
+  (slice T) (slice T) := {|
+  core_slice_index_SliceIndex_get :=
+    core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get;
+  core_slice_index_SliceIndex_get_mut :=
+    core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_mut;
+  core_slice_index_SliceIndex_get_unchecked :=
+    core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked;
+  core_slice_index_SliceIndex_get_unchecked_mut :=
+    core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked_mut;
+  core_slice_index_SliceIndex_index :=
+    core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index;
+  core_slice_index_SliceIndex_index_mut :=
+    core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index_mut;
+|}.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}::index_mut]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 556:4-556:51
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>}::index_mut]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index_mut
+  :
+  forall{T : Type},
+        core_ops_range_RangeFrom_t usize -> slice T -> result ((slice T) *
+          (slice T -> slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}::index]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 543:4-543:39
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>}::index]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index
+  :
+  forall{T : Type},
+        core_ops_range_RangeFrom_t usize -> slice T -> result (slice T)
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}::get_unchecked_mut]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 537:4-537:66
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>}::get_unchecked_mut]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked_mut
+  :
+  forall{T : Type},
+        core_ops_range_RangeFrom_t usize -> mut_raw_ptr (slice T) -> result
+          (mut_raw_ptr (slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}::get_unchecked]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 531:4-531:66
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>}::get_unchecked]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked
+  :
+  forall{T : Type},
+        core_ops_range_RangeFrom_t usize -> const_raw_ptr (slice T) -> result
+          (const_raw_ptr (slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}::get_mut]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 526:4-526:57
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>}::get_mut]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_mut
+  :
+  forall{T : Type},
+        core_ops_range_RangeFrom_t usize -> slice T -> result ((option (slice
+          T)) * (option (slice T) -> slice T))
+.
+
+(** [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}::get]:
+    Source: '/rustc/library/core/src/slice/index.rs', lines 520:4-520:45
+    Name pattern: [core::slice::index::{core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>}::get]
+    Visibility: public *)
+Axiom
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get :
+  forall{T : Type},
+        core_ops_range_RangeFrom_t usize -> slice T -> result (option (slice
+          T))
+.
+
+(** Trait implementation: [core::slice::index::{impl core::slice::index::SliceIndex<[T], [T]> for core::ops::range::RangeFrom<usize>}]
+    Source: '/rustc/library/core/src/slice/index.rs', lines 516:0-516:62
+    Name pattern: [core::slice::index::SliceIndex<core::ops::range::RangeFrom<usize>, [@T], [@T]>] *)
+Definition
+  core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice (T :
+  Type) : core_slice_index_SliceIndex (core_ops_range_RangeFrom_t usize) (slice
+  T) (slice T) := {|
+  core_slice_index_SliceIndex_get :=
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get;
+  core_slice_index_SliceIndex_get_mut :=
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_mut;
+  core_slice_index_SliceIndex_get_unchecked :=
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked;
+  core_slice_index_SliceIndex_get_unchecked_mut :=
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_get_unchecked_mut;
+  core_slice_index_SliceIndex_index :=
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index;
+  core_slice_index_SliceIndex_index_mut :=
+    core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice_index_mut;
+|}.
+
+(** [core::slice::{[T]}::copy_from_slice]:
+    Source: '/rustc/library/core/src/slice/mod.rs', lines 4341:4-4343:16
+    Name pattern: [core::slice::{[@T]}::copy_from_slice]
+    Visibility: public *)
+Axiom core_slice_Slice_copy_from_slice :
+  forall{T : Type} (markerCopyInst : core_marker_Copy T),
+        slice T -> slice T -> result (slice T)
+.
+
+(** [alloc::vec::{impl core::convert::From<&'_0 [T]> for alloc::vec::Vec<T>}::from]:
+    Source: '/rustc/library/alloc/src/vec/mod.rs', lines 4467:4-4467:30
+    Name pattern: [alloc::vec::{core::convert::From<alloc::vec::Vec<@T>, &'0 [@T]>}::from]
+    Visibility: public *)
+Axiom alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from :
+  forall{T : Type} (corecloneCloneInst : core_clone_Clone T),
+        slice T -> result (alloc_vec_Vec T)
+.
 
 (** [fidelogic_core::tlv::TlvHeader]
     Source: 'crates/fidelogic-core/src/tlv.rs', lines 7:0-10:1
@@ -59,75 +298,18 @@ mktlv_TlvHeader_t {
 }
 .
 
-(** [fidelogic_core::tlv::{impl core::clone::Clone for fidelogic_core::tlv::TlvHeader}::clone]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:9-6:14
+(** [fidelogic_core::tlv::TLV_HEADER_LEN]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 13:0-13:36
     Visibility: public *)
-Definition tlv_TlvHeader_Insts_CoreCloneClone_clone
-  (self : tlv_TlvHeader_t) : result tlv_TlvHeader_t :=
-  Ok self
-.
-
-(** Trait implementation: [fidelogic_core::tlv::{impl core::clone::Clone for fidelogic_core::tlv::TlvHeader}]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:9-6:14 *)
-Definition tlv_TlvHeader_Insts_CoreCloneClone : core_clone_Clone
-  tlv_TlvHeader_t := {|
-  core_clone_Clone_clone := tlv_TlvHeader_Insts_CoreCloneClone_clone;
-|}.
-
-(** Trait implementation: [fidelogic_core::tlv::{impl core::marker::Copy for fidelogic_core::tlv::TlvHeader}]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:16-6:20 *)
-Definition tlv_TlvHeader_Insts_CoreMarkerCopy : core_marker_Copy
-  tlv_TlvHeader_t := {|
-  cloneInst := tlv_TlvHeader_Insts_CoreCloneClone;
-|}.
-
-(** Trait implementation: [fidelogic_core::tlv::{impl core::marker::StructuralPartialEq for fidelogic_core::tlv::TlvHeader}]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:22-6:31 *)
-Definition tlv_TlvHeader_Insts_CoreMarkerStructuralPartialEq :
-  core_marker_StructuralPartialEq_t tlv_TlvHeader_t
-  := mkcore_marker_StructuralPartialEq_t.
-
-(** [fidelogic_core::tlv::{impl core::cmp::PartialEq<fidelogic_core::tlv::TlvHeader> for fidelogic_core::tlv::TlvHeader}::eq]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:22-6:31
-    Visibility: public *)
-Definition tlv_TlvHeader_Insts_CoreCmpPartialEqTlvHeader_eq
-  (self : tlv_TlvHeader_t) (other : tlv_TlvHeader_t) : result bool :=
-  if self.(tlv_TlvHeader_tag) s= other.(tlv_TlvHeader_tag)
-  then Ok (self.(tlv_TlvHeader_length) s= other.(tlv_TlvHeader_length))
-  else Ok false
-.
-
-(** Trait implementation: [fidelogic_core::tlv::{impl core::cmp::PartialEq<fidelogic_core::tlv::TlvHeader> for fidelogic_core::tlv::TlvHeader}]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:22-6:31 *)
-Definition tlv_TlvHeader_Insts_CoreCmpPartialEqTlvHeader : core_cmp_PartialEq_t
-  tlv_TlvHeader_t tlv_TlvHeader_t := {|
-  core_cmp_PartialEq_t_eq := tlv_TlvHeader_Insts_CoreCmpPartialEqTlvHeader_eq;
-|}.
-
-(** [fidelogic_core::tlv::{impl core::cmp::Eq for fidelogic_core::tlv::TlvHeader}::assert_fields_are_eq]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:33-6:35
-    Visibility: public *)
-Definition tlv_TlvHeader_Insts_CoreCmpEq_assert_fields_are_eq
-  (self : tlv_TlvHeader_t) : result unit :=
-  Ok tt
-.
-
-(** Trait implementation: [fidelogic_core::tlv::{impl core::cmp::Eq for fidelogic_core::tlv::TlvHeader}]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 6:33-6:35 *)
-Definition tlv_TlvHeader_Insts_CoreCmpEq : core_cmp_Eq_t tlv_TlvHeader_t := {|
-  core_cmp_Eq_tcore_cmp_Eq_t_PartialEqInst :=
-    tlv_TlvHeader_Insts_CoreCmpPartialEqTlvHeader;
-  core_cmp_Eq_t_assert_fields_are_eq :=
-    tlv_TlvHeader_Insts_CoreCmpEq_assert_fields_are_eq;
-|}.
+Definition tlv_TLV_HEADER_LEN : usize := 2%usize.
 
 (** [fidelogic_core::tlv::parse_tlv_header]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 14:0-23:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 17:0-26:1
     Visibility: public *)
 Definition tlv_parse_tlv_header
   (bytes : slice u8) : result (option tlv_TlvHeader_t) :=
   let i := slice_len bytes in
-  if i s< 2%usize
+  if i s< tlv_TLV_HEADER_LEN
   then Ok None
   else (
     i1 <- slice_index_usize bytes 0%usize;
@@ -136,7 +318,7 @@ Definition tlv_parse_tlv_header
 .
 
 (** [fidelogic_core::tlv::validate_tlv_bounds]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 27:0-34:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 30:0-37:1
     Visibility: public *)
 Definition tlv_validate_tlv_bounds (bytes : slice u8) : result bool :=
   o <- tlv_parse_tlv_header bytes;
@@ -144,9 +326,326 @@ Definition tlv_validate_tlv_bounds (bytes : slice u8) : result bool :=
   | None => Ok false
   | Some header =>
     i <- scalar_cast U8 Usize header.(tlv_TlvHeader_length);
-    required_len <- usize_add 2%usize i;
+    required_len <- usize_add tlv_TLV_HEADER_LEN i;
     let i1 := slice_len bytes in
     Ok (i1 s>= required_len)
+  end
+.
+
+(** [fidelogic_core::tlv::VAULT_MAGIC]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 40:0-40:42
+    Visibility: public *)
+Definition tlv_VAULT_MAGIC : array u8 4%usize :=
+  mk_array 4%usize [ 70%u8; 86%u8; 65%u8; 85%u8 ]
+.
+
+(** [fidelogic_core::tlv::VAULT_HEADER_LEN]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 43:0-43:38
+    Visibility: public *)
+Definition tlv_VAULT_HEADER_LEN : usize := 6%usize.
+
+(** [fidelogic_core::tlv::VaultHeader]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 50:0-57:1
+    Visibility: public *)
+Record tlv_VaultHeader_t :=
+mktlv_VaultHeader_t {
+  tlv_VaultHeader_magic : array u8 4%usize;
+  tlv_VaultHeader_version : u8;
+  tlv_VaultHeader_suite_id : u8;
+}
+.
+
+(** [fidelogic_core::tlv::VaultError]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 110:0-123:1
+    Visibility: public *)
+Inductive tlv_VaultError_t :=
+| Tlv_VaultError_UnexpectedEof : tlv_VaultError_t
+| Tlv_VaultError_InvalidMagic : tlv_VaultError_t
+| Tlv_VaultError_UnsupportedVersion : tlv_VaultError_t
+| Tlv_VaultError_UnsupportedSuite : tlv_VaultError_t
+| Tlv_VaultError_InvalidLength : tlv_VaultError_t
+| Tlv_VaultError_InvalidFormat : tlv_VaultError_t
+.
+
+(** [fidelogic_core::tlv::deserialize_header]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 68:0-88:1
+    Visibility: public *)
+Definition tlv_deserialize_header
+  (bytes : slice u8) :
+  result (core_result_Result_t (tlv_VaultHeader_t * (slice u8))
+    tlv_VaultError_t)
+  :=
+  let i := slice_len bytes in
+  if i s< tlv_VAULT_HEADER_LEN
+  then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+  else (
+    i1 <- slice_index_usize bytes 0%usize;
+    i2 <- slice_index_usize bytes 1%usize;
+    i3 <- slice_index_usize bytes 2%usize;
+    i4 <- slice_index_usize bytes 3%usize;
+    i5 <- array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 0%usize;
+    i6 <- array_index_usize tlv_VAULT_MAGIC 0%usize;
+    if i5 s<> i6
+    then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+    else (
+      i7 <- array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 1%usize;
+      i9 <- array_index_usize tlv_VAULT_MAGIC 1%usize;
+      if i7 s<> i9
+      then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+      else (
+        i10 <- array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 2%usize;
+        i11 <- array_index_usize tlv_VAULT_MAGIC 2%usize;
+        if i10 s<> i11
+        then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+        else (
+          i12 <-
+            array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 3%usize;
+          i13 <- array_index_usize tlv_VAULT_MAGIC 3%usize;
+          if i12 s<> i13
+          then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+          else (
+            version <- slice_index_usize bytes 4%usize;
+            suite_id <- slice_index_usize bytes 5%usize;
+            s <-
+              core_slice_index_Slice_index
+                (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+                u8) bytes
+                {| core_ops_range_RangeFrom_start := tlv_VAULT_HEADER_LEN |};
+            Ok (Core_result_Result_Ok
+              ({|
+                 tlv_VaultHeader_magic := (mk_array 4%usize [ i1; i2; i3; i4 ]);
+                 tlv_VaultHeader_version := version;
+                 tlv_VaultHeader_suite_id := suite_id
+               |}, s)))))))
+.
+
+(** [fidelogic_core::tlv::serialize_header]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 94:0-103:1
+    Visibility: public *)
+Definition tlv_serialize_header
+  (header : tlv_VaultHeader_t) : result (array u8 6%usize) :=
+  i <- array_index_usize header.(tlv_VaultHeader_magic) 0%usize;
+  i1 <- array_index_usize header.(tlv_VaultHeader_magic) 1%usize;
+  i2 <- array_index_usize header.(tlv_VaultHeader_magic) 2%usize;
+  i3 <- array_index_usize header.(tlv_VaultHeader_magic) 3%usize;
+  Ok
+    (mk_array 6%usize [
+      i; i1; i2; i3; header.(tlv_VaultHeader_version);
+      header.(tlv_VaultHeader_suite_id)
+      ])
+.
+
+(** [fidelogic_core::tlv::KEK_SLOT_HEADER_LEN]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 129:0-129:41
+    Visibility: public *)
+Definition tlv_KEK_SLOT_HEADER_LEN : usize := 4%usize.
+
+(** [fidelogic_core::tlv::KekSlotEntry]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 140:0-149:1
+    Visibility: public *)
+Record tlv_KekSlotEntry_t :=
+mktlv_KekSlotEntry_t {
+  tlv_KekSlotEntry_slot_id : u8;
+  tlv_KekSlotEntry_kdf_kind : u8;
+  tlv_KekSlotEntry_wrapped_dek_len : u16;
+  tlv_KekSlotEntry_wrapped_dek : alloc_vec_Vec u8;
+}
+.
+
+(** [fidelogic_core::tlv::deserialize_slot_entry]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 185:0-207:1
+    Visibility: public *)
+Definition tlv_deserialize_slot_entry
+  (bytes : slice u8) :
+  result (core_result_Result_t (tlv_KekSlotEntry_t * (slice u8))
+    tlv_VaultError_t)
+  :=
+  let i := slice_len bytes in
+  if i s< tlv_KEK_SLOT_HEADER_LEN
+  then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+  else (
+    slot_id <- slice_index_usize bytes 0%usize;
+    kdf_kind <- slice_index_usize bytes 1%usize;
+    i1 <- slice_index_usize bytes 2%usize;
+    i2 <- slice_index_usize bytes 3%usize;
+    let wrapped_dek_len :=
+      core_num_U16_from_be_bytes (mk_array 2%usize [ i1; i2 ])
+    in
+    dek_len <- scalar_cast U16 Usize wrapped_dek_len;
+    payload_bytes <-
+      core_slice_index_Slice_index
+        (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+        u8) bytes
+        {| core_ops_range_RangeFrom_start := tlv_KEK_SLOT_HEADER_LEN |};
+    let i3 := slice_len payload_bytes in
+    if i3 s< dek_len
+    then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+    else (
+      s <-
+        core_slice_index_Slice_index
+          (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+          u8) payload_bytes {| core_ops_range_RangeTo_end_ := dek_len |};
+      wrapped_dek <- alloc_slice_Slice_to_vec core_clone_CloneU8 s;
+      s1 <-
+        core_slice_index_Slice_index
+          (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+          u8) payload_bytes {| core_ops_range_RangeFrom_start := dek_len |};
+      Ok (Core_result_Result_Ok
+        ({|
+           tlv_KekSlotEntry_slot_id := slot_id;
+           tlv_KekSlotEntry_kdf_kind := kdf_kind;
+           tlv_KekSlotEntry_wrapped_dek_len := wrapped_dek_len;
+           tlv_KekSlotEntry_wrapped_dek := wrapped_dek
+         |}, s1))))
+.
+
+(** [fidelogic_core::tlv::AUTH_TAG_LEN]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 264:0-264:35
+    Visibility: public *)
+Definition tlv_AUTH_TAG_LEN : usize := 16%usize.
+
+(** [fidelogic_core::tlv::TAG_ENTRY]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 267:0-267:28
+    Visibility: public *)
+Definition tlv_TAG_ENTRY : u8 := 1%u8.
+
+(** [fidelogic_core::tlv::is_known_tag]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 271:0-273:1
+    Visibility: public *)
+Definition tlv_is_known_tag (tag : u8) : result bool :=
+  Ok (tag s= tlv_TAG_ENTRY)
+.
+
+(** [fidelogic_core::tlv::EntryPayload]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 279:0-284:1
+    Visibility: public *)
+Record tlv_EntryPayload_t :=
+mktlv_EntryPayload_t {
+  tlv_EntryPayload_ciphertext : alloc_vec_Vec u8;
+  tlv_EntryPayload_auth_tag : array u8 16%usize;
+}
+.
+
+(** [fidelogic_core::tlv::{fidelogic_core::tlv::EntryPayload}::new]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 290:4-295:5
+    Visibility: public *)
+Definition tlv_EntryPayload_new
+  (ciphertext : alloc_vec_Vec u8) (auth_tag : array u8 16%usize) :
+  result tlv_EntryPayload_t
+  :=
+  Ok
+    {|
+      tlv_EntryPayload_ciphertext := ciphertext;
+      tlv_EntryPayload_auth_tag := auth_tag
+    |}
+.
+
+(** [fidelogic_core::tlv::TlvRecord]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 308:0-318:1
+    Visibility: public *)
+Inductive tlv_TlvRecord_t :=
+| Tlv_TlvRecord_Entry : tlv_EntryPayload_t -> tlv_TlvRecord_t
+| Tlv_TlvRecord_Unknown : u8 -> alloc_vec_Vec u8 -> tlv_TlvRecord_t
+.
+
+(** [fidelogic_core::tlv::deserialize_record]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 345:0-375:1
+    Visibility: public *)
+Definition tlv_deserialize_record
+  (bytes : slice u8) :
+  result (core_result_Result_t (tlv_TlvRecord_t * (slice u8)) tlv_VaultError_t)
+  :=
+  o <- tlv_parse_tlv_header bytes;
+  match o with
+  | None => Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+  | Some header =>
+    length <- scalar_cast U8 Usize header.(tlv_TlvHeader_length);
+    total_len <- usize_add 2%usize length;
+    let i := slice_len bytes in
+    if i s< total_len
+    then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+    else (
+      payload_bytes <-
+        core_slice_index_Slice_index
+          (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
+          {|
+            core_ops_range_Range_start := 2%usize;
+            core_ops_range_Range_end_ := total_len
+          |};
+      rest <-
+        core_slice_index_Slice_index
+          (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+          u8) bytes {| core_ops_range_RangeFrom_start := total_len |};
+      if header.(tlv_TlvHeader_tag) s= tlv_TAG_ENTRY
+      then
+        let i1 := slice_len payload_bytes in
+        if i1 s< tlv_AUTH_TAG_LEN
+        then Ok (Core_result_Result_Err Tlv_VaultError_InvalidLength)
+        else (
+          let i2 := slice_len payload_bytes in
+          ciphertext_len <- usize_sub i2 tlv_AUTH_TAG_LEN;
+          s <-
+            core_slice_index_Slice_index
+              (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+              u8) payload_bytes
+              {| core_ops_range_RangeTo_end_ := ciphertext_len |};
+          ciphertext <-
+            alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
+              core_clone_CloneU8 s;
+          let auth_tag := array_repeat 16%usize 0%u8 in
+          let (s1, as_mut_slice_back) := array_to_slice_mut auth_tag in
+          s2 <-
+            core_slice_index_Slice_index
+              (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
+              u8) payload_bytes
+              {| core_ops_range_RangeFrom_start := ciphertext_len |};
+          s3 <- core_slice_Slice_copy_from_slice core_marker_CopyU8 s1 s2;
+          let auth_tag1 := as_mut_slice_back s3 in
+          ep <- tlv_EntryPayload_new ciphertext auth_tag1;
+          Ok (Core_result_Result_Ok (Tlv_TlvRecord_Entry ep, rest)))
+      else (
+        raw_bytes <-
+          alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
+            core_clone_CloneU8 payload_bytes;
+        Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown
+          header.(tlv_TlvHeader_tag) raw_bytes, rest))))
+  end
+.
+
+(** [fidelogic_core::tlv::record_serialized_len]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 383:0-407:1
+    Visibility: public *)
+Definition tlv_record_serialized_len
+  (record : tlv_TlvRecord_t) :
+  result (core_result_Result_t usize tlv_VaultError_t)
+  :=
+  match record with
+  | Tlv_TlvRecord_Entry payload =>
+    let i := alloc_vec_Vec_len payload.(tlv_EntryPayload_ciphertext) in
+    let o := Usize_checked_add i tlv_AUTH_TAG_LEN in
+    r <- core_option_Option_ok_or o Tlv_VaultError_InvalidLength;
+    cf <- core_result_Result_Insts_CoreOpsTry_traitTry_branch r;
+    match cf with
+    | Core_ops_control_flow_ControlFlow_Continue val =>
+      i1 <- scalar_cast U8 Usize core_num_U8_MAX;
+      if val s> i1
+      then Ok (Core_result_Result_Err Tlv_VaultError_InvalidLength)
+      else
+        let o1 := Usize_checked_add tlv_TLV_HEADER_LEN val in
+        core_option_Option_ok_or o1 Tlv_VaultError_InvalidLength
+    | Core_ops_control_flow_ControlFlow_Break residual =>
+      core_result_Result_Insts_CoreOpsTry_traitFromResidualResultNeverE_from_residual
+        usize (core_convert_From_Blanket tlv_VaultError_t) residual
+    end
+  | Tlv_TlvRecord_Unknown _ raw_bytes =>
+    let i := alloc_vec_Vec_len raw_bytes in
+    i1 <- scalar_cast U8 Usize core_num_U8_MAX;
+    if i s> i1
+    then Ok (Core_result_Result_Err Tlv_VaultError_InvalidLength)
+    else
+      let i2 := alloc_vec_Vec_len raw_bytes in
+      let o := Usize_checked_add tlv_TLV_HEADER_LEN i2 in
+      core_option_Option_ok_or o Tlv_VaultError_InvalidLength
   end
 .
 
