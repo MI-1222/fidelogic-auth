@@ -29,6 +29,11 @@ pub const TAG_LEN: usize = 16;
 /// 認証タグ(16バイト)付加時の加算オーバーフロー(`len + TAG_LEN`)を防止し、
 /// かつ 32-bit (Wasm) アーキテクチャおよび AEAD アルゴリズム規格(RFC 8439 / RFC 8452)の
 /// アドレス空間制約を満たす安全上限値。
+/// RFC 8452(AES-GCM-SIV)における平文/暗号文上限(2^36 - 31 バイト)に合わせて、
+/// 64-bit 環境では 68,719,476,705 バイトに制限する。
+#[cfg(target_pointer_width = "64")]
+pub const MAX_PAYLOAD_LEN: usize = 68_719_476_705;
+#[cfg(not(target_pointer_width = "64"))]
 pub const MAX_PAYLOAD_LEN: usize = usize::MAX - TAG_LEN;
 
 /// 関連データ(AAD: Associated Authenticated Data)の最大バイト長。
@@ -954,6 +959,34 @@ mod tests {
             Ok(()),
             "通常AAD長検証に成功。"
         );
+    }
+
+    #[test]
+    fn test_payload_and_aad_max_len_constants() {
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(
+                MAX_PAYLOAD_LEN, 68_719_476_705,
+                "64-bit環境におけるMAX_PAYLOAD_LEN値照合に成功。"
+            );
+            assert_eq!(
+                MAX_AAD_LEN, 68_719_476_735,
+                "64-bit環境におけるMAX_AAD_LEN値照合に成功。"
+            );
+        }
+        #[cfg(not(target_pointer_width = "64"))]
+        {
+            assert_eq!(
+                MAX_PAYLOAD_LEN,
+                usize::MAX - TAG_LEN,
+                "32-bit環境におけるMAX_PAYLOAD_LEN値照合に成功。"
+            );
+            assert_eq!(
+                MAX_AAD_LEN,
+                usize::MAX,
+                "32-bit環境におけるMAX_AAD_LEN値照合に成功。"
+            );
+        }
     }
 
     #[test]
