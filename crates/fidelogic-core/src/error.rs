@@ -67,6 +67,8 @@ pub enum VaultError {
     SlotNotFound,
     /// 外部公開境界における一様認証失敗例外(オラクル排除・情報流非干渉性保証用)。
     AuthenticationFailed,
+    /// 世代カウンター(`epoch_id`)の巻き戻し・ロールバック攻撃を検知した例外。
+    RollbackDetected,
 }
 
 impl From<TlvParseError> for VaultError {
@@ -133,6 +135,9 @@ impl core::fmt::Display for VaultError {
             Self::System(err) => write!(f, "システムエラー: {err}"),
             Self::SlotNotFound => write!(f, "指定されたスロットが存在しません。"),
             Self::AuthenticationFailed => write!(f, "認証に失敗しました。"),
+            Self::RollbackDetected => {
+                write!(f, "世代カウンターの巻き戻し(ロールバック)を検知しました。")
+            }
         }
     }
 }
@@ -242,6 +247,12 @@ mod tests {
         assert_eq!(
             auth_msg, "認証に失敗しました。",
             "VaultError::AuthenticationFailedのDisplay出力に成功。"
+        );
+
+        let rollback_msg = format!("{}", VaultError::RollbackDetected);
+        assert_eq!(
+            rollback_msg, "世代カウンターの巻き戻し(ロールバック)を検知しました。",
+            "VaultError::RollbackDetectedのDisplay出力に成功。"
         );
     }
 

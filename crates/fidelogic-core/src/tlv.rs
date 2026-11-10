@@ -39,12 +39,12 @@ pub fn validate_tlv_bounds(bytes: &[u8]) -> bool {
 /// Vaultヘッダーの既定マジックバイト。
 pub const VAULT_MAGIC: [u8; 4] = *b"FVAU";
 
-/// Vaultヘッダーのバイト長(6バイト)。
-pub const VAULT_HEADER_LEN: usize = 6;
+/// Vaultヘッダーのバイト長(14バイト)。
+pub const VAULT_HEADER_LEN: usize = 14;
 
 /// Vaultバイナリフォーマットの固定長ヘッダー。
 ///
-/// マジックバイト, フォーマットバージョン, 暗号スイートID を保持する。
+/// マジックバイト, フォーマットバージョン, 暗号スイートID, および単調増加世代カウンター(`epoch_id`) を保持する。
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct VaultHeader {
@@ -54,11 +54,79 @@ pub struct VaultHeader {
     pub version: u8,
     /// 暗号スイート識別子。
     pub suite_id: u8,
+    /// 単調増加世代カウンター(8バイト)。
+    pub epoch_id: u64,
+}
+
+impl VaultHeader {
+    /// 新しいVaultHeader構造体を生成する。
+    #[must_use]
+    pub const fn new(version: u8, suite_id: u8, epoch_id: u64) -> Self {
+        Self {
+            magic: VAULT_MAGIC,
+            version,
+            suite_id,
+            epoch_id,
+        }
+    }
+
+    /// AEAD暗号化・復号時にバインドする関連データ(Associated Data / AD)のバイト配列を生成する。
+    ///
+    /// フォーマット: `magic(4B) | version(1B) | suite_id(1B) | epoch_id(8B, BE)` (計14バイト)。
+    /// これをAEADのADに投入することで、暗号化コンテナとヘッダー情報(世代カウンター含む)が
+    /// 暗号学的に強固にバインドされ、スナップショット巻き戻し攻撃やヘッダー改変を検知・防御する。
+    #[inline]
+    #[must_use]
+    pub const fn associated_data(&self) -> [u8; VAULT_HEADER_LEN] {
+        serialize_header(self)
+    }
+
+    /// 世代カウンター `epoch_id` をインクリメントした新しいヘッダーを生成する。
+    ///
+    /// # Errors
+    ///
+    /// `epoch_id` が `u64::MAX` に達してオーバーフローする場合は、
+    /// カウンター巻き戻しによる脆弱性を防ぐため `None` を返す。
+    #[must_use]
+    pub const fn checked_increment_epoch(&self) -> Option<Self> {
+        if let Some(next_epoch) = self.epoch_id.checked_add(1) {
+            Some(Self {
+                magic: self.magic,
+                version: self.version,
+                suite_id: self.suite_id,
+                epoch_id: next_epoch,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// 本ヘッダーの世代カウンターが、対象ヘッダーよりも進んでいるか(真に大きいか)を判定する。
+    #[inline]
+    #[must_use]
+    pub const fn is_newer_than(&self, other: &Self) -> bool {
+        self.epoch_id > other.epoch_id
+    }
+
+    /// 現行の世代カウンター(`current_epoch`)に対して、本ヘッダーの世代カウンターが
+    /// 単調増加しているかを検証する。
+    ///
+    /// # Errors
+    ///
+    /// 本ヘッダーの `epoch_id` が `current_epoch` 以下である場合、
+    /// スナップショット巻き戻し攻撃と判定して [`VaultError::RollbackDetected`] を返す。
+    pub fn verify_epoch_progression(&self, current_epoch: u64) -> Result<(), VaultError> {
+        if self.epoch_id <= current_epoch {
+            Err(VaultError::RollbackDetected)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// `VaultHeader` 単体の純粋関数型デシリアライザー。
 ///
-/// 入力バイト列からヘッダー情報 (マジックバイト, バージョン, 暗号スイートID) を安全に読み取り、
+/// 入力バイト列からヘッダー情報 (マジックバイト, バージョン, 暗号スイートID, 世代カウンター) を安全に読み取り、
 /// デシリアライズされた [`VaultHeader`] と残余バイトスライスを返す。
 ///
 /// # Errors
@@ -83,19 +151,24 @@ pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParse
     }
     let version = bytes[4];
     let suite_id = bytes[5];
+    let epoch_id = u64::from_be_bytes([
+        bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+    ]);
     let header = VaultHeader {
         magic,
         version,
         suite_id,
+        epoch_id,
     };
     Ok((header, &bytes[VAULT_HEADER_LEN..]))
 }
 
 /// `VaultHeader` 単体の純粋関数型シリアライザー。
 ///
-/// 指定された [`VaultHeader`] を固定長バイト配列 (6バイト) にシリアライズする。
+/// 指定された [`VaultHeader`] を固定長バイト配列 (14バイト) にシリアライズする。
 #[must_use]
 pub const fn serialize_header(header: &VaultHeader) -> [u8; VAULT_HEADER_LEN] {
+    let epoch_bytes = header.epoch_id.to_be_bytes();
     [
         header.magic[0],
         header.magic[1],
@@ -103,6 +176,14 @@ pub const fn serialize_header(header: &VaultHeader) -> [u8; VAULT_HEADER_LEN] {
         header.magic[3],
         header.version,
         header.suite_id,
+        epoch_bytes[0],
+        epoch_bytes[1],
+        epoch_bytes[2],
+        epoch_bytes[3],
+        epoch_bytes[4],
+        epoch_bytes[5],
+        epoch_bytes[6],
+        epoch_bytes[7],
     ]
 }
 
@@ -658,13 +739,163 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 42,
         };
         let header2 = VaultHeader {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 42,
         };
         assert_eq!(header1, header2, "同一パラメータのVaultHeader比較に成功。");
+    }
+
+    #[test]
+    fn test_vault_header_associated_data_format() {
+        let header = VaultHeader::new(1, 2, 0x0102_0304_0506_0708);
+        let ad = header.associated_data();
+        let expected: [u8; VAULT_HEADER_LEN] = [
+            b'F', b'V', b'A', b'U', 1, 2, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        ];
+        assert_eq!(
+            ad, expected,
+            "Associated Dataのフォーマットバインド検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_vault_header_epoch_progression() {
+        let h1 = VaultHeader::new(1, 1, 10);
+        let h2 = VaultHeader::new(1, 1, 11);
+        let h_same = VaultHeader::new(1, 1, 10);
+        let h_old = VaultHeader::new(1, 1, 9);
+
+        // 世代比較
+        assert!(h2.is_newer_than(&h1), "より大きなepoch_idの判定に成功。");
+        assert!(
+            !h1.is_newer_than(&h2),
+            "より小さなepoch_idでの偽判定に成功。"
+        );
+        assert!(!h1.is_newer_than(&h_same), "同一epoch_idでの偽判定に成功。");
+
+        // インクリメント
+        let h_next = h1
+            .checked_increment_epoch()
+            .expect("インクリメントに成功。");
+        assert_eq!(
+            h_next.epoch_id, 11,
+            "単調増加インクリメント後のepoch_id検証に成功。"
+        );
+        assert_eq!(
+            h_next.magic, VAULT_MAGIC,
+            "インクリメント後のマジックバイト維持検証に成功。"
+        );
+
+        // オーバーフロー防止
+        let h_max = VaultHeader::new(1, 1, u64::MAX);
+        assert!(
+            h_max.checked_increment_epoch().is_none(),
+            "u64::MAX到達時のオーバーフロー遮断検証に成功。"
+        );
+
+        // 単調増加性の検証
+        assert_eq!(
+            h2.verify_epoch_progression(10),
+            Ok(()),
+            "現行値より大きいepoch_idでの単調増加検証に成功。"
+        );
+        assert_eq!(
+            h_same.verify_epoch_progression(10),
+            Err(VaultError::RollbackDetected),
+            "現行値と等しいepoch_idでのロールバック検知に成功。"
+        );
+        assert_eq!(
+            h_old.verify_epoch_progression(10),
+            Err(VaultError::RollbackDetected),
+            "現行値より小さいepoch_idでのロールバック検知に成功。"
+        );
+    }
+
+    #[test]
+    fn test_rollback_defense_aead_associated_data() {
+        use crate::cipher::{
+            AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, VaultCipher,
+            XCHACHA20_POLY1305_NONCE_LEN,
+        };
+        use crate::error::CryptoError;
+
+        let key = [0x42u8; KEY_LEN];
+        let plaintext_original = b"Secure payload bound to epoch counter snapshot.";
+
+        // 各暗号スイート(XChaCha20-Poly1305, AES-256-GCM-SIV)で検証
+        let suites = [
+            (
+                CipherSuiteId::XChaCha20Poly1305,
+                XCHACHA20_POLY1305_NONCE_LEN,
+            ),
+            (CipherSuiteId::Aes256GcmSiv, AES_256_GCM_SIV_NONCE_LEN),
+        ];
+
+        for (suite_id, nonce_len) in suites {
+            let cipher = VaultCipher::new(suite_id, &key);
+            let nonce = alloc::vec![0x3au8; nonce_len];
+
+            // 世代2のVaultヘッダー(現行)
+            let header_current = VaultHeader::new(1, suite_id.as_u8(), 2);
+            let ad_current = header_current.associated_data();
+
+            // 世代1のVaultヘッダー(過去のスナップショット)
+            let header_past = VaultHeader::new(1, suite_id.as_u8(), 1);
+            let ad_past = header_past.associated_data();
+
+            // 世代2のヘッダーADをバインドして暗号化
+            let mut buffer = plaintext_original.to_vec();
+            let tag = cipher
+                .encrypt_in_place_detached(&nonce, &ad_current, &mut buffer)
+                .expect("最新世代ADバインド暗号化に成功。");
+            let ciphertext = buffer.clone();
+
+            // 正常系: 正しい最新ヘッダーADでの復号
+            let mut decrypt_buf = ciphertext.clone();
+            let decrypt_res =
+                cipher.decrypt_in_place_detached(&nonce, &ad_current, &mut decrypt_buf, &tag);
+            assert!(decrypt_res.is_ok(), "同一世代ADでの正常復号に成功。");
+            assert_eq!(
+                decrypt_buf.as_slice(),
+                plaintext_original,
+                "復号平文の完全一致検証に成功。"
+            );
+
+            // 攻撃防御1: 過去のスナップショット(epoch_id=1)のヘッダーADを用いた巻き戻し試行
+            let mut rollback_buf = ciphertext.clone();
+            let rollback_res =
+                cipher.decrypt_in_place_detached(&nonce, &ad_past, &mut rollback_buf, &tag);
+            assert_eq!(
+                rollback_res,
+                Err(CryptoError::AeadDecryptionFailed),
+                "スナップショット巻き戻し攻撃のAEAD認証タグ不一致による遮断に成功。"
+            );
+            assert!(
+                rollback_buf.iter().all(|&b| b == 0),
+                "復号失敗時の平文バッファ揮発性ゼロ消去に成功。"
+            );
+
+            // 攻撃防御2: 偽造された未来世代(epoch_id=3)のヘッダーADを用いた試行
+            let header_future = VaultHeader::new(1, suite_id.as_u8(), 3);
+            let ad_future = header_future.associated_data();
+            let mut future_buf = ciphertext.clone();
+            let future_res =
+                cipher.decrypt_in_place_detached(&nonce, &ad_future, &mut future_buf, &tag);
+            assert_eq!(
+                future_res,
+                Err(CryptoError::AeadDecryptionFailed),
+                "改ざん世代ADでのAEAD認証遮断に成功。"
+            );
+            assert!(
+                future_buf.iter().all(|&b| b == 0),
+                "復号失敗時の平文バッファ揮発性ゼロ消去に成功。"
+            );
+        }
     }
 
     #[test]
@@ -797,6 +1028,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 10,
         };
         let slot = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20, 0x30, 0x40])
             .expect("スロット生成に成功。");
@@ -813,7 +1045,9 @@ mod tests {
 
     #[test]
     fn test_deserialize_header_success() {
-        let input = [b'F', b'V', b'A', b'U', 1, 2, 0xaa, 0xbb];
+        let mut input = alloc::vec![b'F', b'V', b'A', b'U', 1, 2];
+        input.extend_from_slice(&100u64.to_be_bytes());
+        input.extend_from_slice(&[0xaa, 0xbb]);
         let result = deserialize_header(&input);
         assert!(
             result.is_ok(),
@@ -826,6 +1060,7 @@ mod tests {
                 magic: VAULT_MAGIC,
                 version: 1,
                 suite_id: 2,
+                epoch_id: 100,
             },
             "デシリアライズされたVaultHeaderの検証に成功。"
         );
@@ -834,7 +1069,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_header_unexpected_eof() {
-        let input = [b'F', b'V', b'A', b'U', 1];
+        let input = [b'F', b'V', b'A', b'U', 1, 2, 0, 0];
         let result = deserialize_header(&input);
         assert_eq!(
             result,
@@ -845,7 +1080,11 @@ mod tests {
 
     #[test]
     fn test_deserialize_header_invalid_magic() {
-        let input = [b'W', b'R', b'N', b'G', 1, 2];
+        let mut input = [0u8; VAULT_HEADER_LEN];
+        input[..4].copy_from_slice(b"WRNG");
+        input[4] = 1;
+        input[5] = 2;
+        input[6..14].copy_from_slice(&10u64.to_be_bytes());
         let result = deserialize_header(&input);
         assert_eq!(
             result,
@@ -978,6 +1217,7 @@ mod tests {
     #[test]
     fn test_deserialize_vault_success() {
         let mut input = alloc::vec![b'F', b'V', b'A', b'U', 1, 2];
+        input.extend_from_slice(&777u64.to_be_bytes());
         // 1スロット
         input.push(1);
         input.extend_from_slice(&[0, 1, 0x00, 0x04, 0x11, 0x22, 0x33, 0x44]);
@@ -1001,6 +1241,7 @@ mod tests {
                 magic: VAULT_MAGIC,
                 version: 1,
                 suite_id: 2,
+                epoch_id: 777,
             },
             "デシリアライズされたVaultHeaderの検証に成功。"
         );
@@ -1036,7 +1277,9 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_vault_empty_slots_and_records() {
-        let input = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x00];
+        let input = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x00,
+        ];
         let result = deserialize(&input);
         assert!(
             result.is_ok(),
@@ -1065,7 +1308,7 @@ mod tests {
         );
 
         // slot_count不足
-        let header_only = [b'F', b'V', b'A', b'U', 1, 1];
+        let header_only = [b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1];
         assert_eq!(
             deserialize(&header_only),
             Err(TlvParseError::UnexpectedEof),
@@ -1073,7 +1316,9 @@ mod tests {
         );
 
         // スロットデータ不足
-        let slot_missing = [b'F', b'V', b'A', b'U', 1, 1, 1, 0, 1];
+        let slot_missing = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1,
+        ];
         assert_eq!(
             deserialize(&slot_missing),
             Err(TlvParseError::UnexpectedEof),
@@ -1081,7 +1326,9 @@ mod tests {
         );
 
         // record_count不足
-        let record_count_missing = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00];
+        let record_count_missing = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00,
+        ];
         assert_eq!(
             deserialize(&record_count_missing),
             Err(TlvParseError::UnexpectedEof),
@@ -1089,7 +1336,9 @@ mod tests {
         );
 
         // レコードデータ不足
-        let record_missing = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x01, TAG_ENTRY, 10];
+        let record_missing = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x01, TAG_ENTRY, 10,
+        ];
         assert_eq!(
             deserialize(&record_missing),
             Err(TlvParseError::UnexpectedEof),
@@ -1097,7 +1346,9 @@ mod tests {
         );
 
         // slot_count事前境界チェック(Allocation DoS防止)
-        let slot_dos_attack = [b'F', b'V', b'A', b'U', 1, 1, 255, 0, 1];
+        let slot_dos_attack = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 255, 0, 1,
+        ];
         assert_eq!(
             deserialize(&slot_dos_attack),
             Err(TlvParseError::UnexpectedEof),
@@ -1105,7 +1356,9 @@ mod tests {
         );
 
         // record_count事前境界チェック(Allocation DoS防止)
-        let record_dos_attack = [b'F', b'V', b'A', b'U', 1, 1, 0, 0xff, 0xff, 1, 2];
+        let record_dos_attack = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0xff, 0xff, 1, 2,
+        ];
         assert_eq!(
             deserialize(&record_dos_attack),
             Err(TlvParseError::UnexpectedEof),
@@ -1116,7 +1369,9 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_vault_invalid_magic() {
-        let input = [b'X', b'X', b'X', b'X', 1, 1, 0, 0x00, 0x00];
+        let input = [
+            b'X', b'X', b'X', b'X', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x00,
+        ];
         assert_eq!(
             deserialize(&input),
             Err(TlvParseError::InvalidMagic),
@@ -1128,8 +1383,8 @@ mod tests {
     #[test]
     fn test_deserialize_vault_record_error() {
         let input = [
-            b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x01, TAG_ENTRY, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8,
-            9,
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x01, TAG_ENTRY, 10, 0,
+            1, 2, 3, 4, 5, 6, 7, 8, 9,
         ];
         assert_eq!(
             deserialize(&input),
@@ -1144,11 +1399,14 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 3,
+            epoch_id: 0x0102_0304_0506_0708,
         };
         let bytes = serialize_header(&header);
         assert_eq!(
             bytes,
-            [b'F', b'V', b'A', b'U', 1, 3],
+            [
+                b'F', b'V', b'A', b'U', 1, 3, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+            ],
             "VaultHeaderのシリアライズ結果検証に成功。"
         );
 
@@ -1331,6 +1589,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 2,
+            epoch_id: 50,
         };
         let slot = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20, 0x30, 0x40])
             .expect("スロット生成に成功。");
@@ -1360,6 +1619,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
         let bytes = serialize(&vault).expect("空Vaultシリアライズに成功。");
@@ -1378,6 +1638,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let slot = KekSlotEntry::new(0, 1, alloc::vec::Vec::new()).expect("スロット生成に成功。");
         let slots = alloc::vec![slot; 256];
@@ -1427,6 +1688,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 2,
+            epoch_id: 99,
         };
         let slot = KekSlotEntry::new(1, 1, alloc::vec![0xaa, 0xbb]).expect("スロット生成に成功。");
         let record1 = TlvRecord::Entry(EntryPayload::new(
@@ -1452,10 +1714,13 @@ mod tests {
         use proptest::prelude::*;
 
         fn arb_vault_header() -> impl Strategy<Value = VaultHeader> {
-            (any::<u8>(), any::<u8>()).prop_map(|(version, suite_id)| VaultHeader {
-                magic: VAULT_MAGIC,
-                version,
-                suite_id,
+            (any::<u8>(), any::<u8>(), any::<u64>()).prop_map(|(version, suite_id, epoch_id)| {
+                VaultHeader {
+                    magic: VAULT_MAGIC,
+                    version,
+                    suite_id,
+                    epoch_id,
+                }
             })
         }
 

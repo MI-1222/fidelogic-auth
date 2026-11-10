@@ -45,6 +45,7 @@ mod tests {
             magic: crate::tlv::VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
         assert_eq!(
@@ -80,7 +81,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_header_reexport() {
-        let input = [b'F', b'V', b'A', b'U', 1, 1];
+        let input = [b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1];
         let res = deserialize_header(&input);
         assert!(
             res.is_ok(),
@@ -114,7 +115,9 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_vault_reexport() {
-        let input = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x00];
+        let input = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x00,
+        ];
         let res = deserialize(&input);
         assert!(
             res.is_ok(),
@@ -128,11 +131,12 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let bytes = serialize_header(&header);
         assert_eq!(
             bytes,
-            [b'F', b'V', b'A', b'U', 1, 1],
+            [b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1],
             "profile_vault経由のserialize_header呼び出しに成功。"
         );
     }
@@ -169,6 +173,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
         let res = serialize(&vault);
