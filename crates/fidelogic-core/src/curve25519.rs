@@ -11,6 +11,11 @@ pub use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 pub use curve25519_dalek::montgomery::MontgomeryPoint;
 pub use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 pub use curve25519_dalek::scalar::Scalar;
+use zeroize::Zeroize;
+
+use crate::constant_time::ct_eq_32;
+use crate::error::CryptoError;
+use crate::zeroize::SecretBytes;
 
 /// Ed25519ベースポイントに対する可変ベースポイントスカラー倍算を実行する。
 ///
@@ -43,12 +48,30 @@ pub fn x25519_basepoint_mul(secret_key: &[u8; 32]) -> [u8; 32] {
 /// RFC 7748 X25519 Diffie-Hellman 鍵共有演算を実行する。
 ///
 /// 秘密鍵とピアの公開鍵からクランプ乗算を行い、共有秘密(u座標32バイト)を導出する。
+/// RFC 7748 Section 6.1 の規定に基づき、低位数点攻撃を防御するため、
+/// 導出された共有秘密が全ゼロ(All-zero output)であるかを定数時間で検証する。
+/// 全ゼロが検出された場合は処理を中断し、[`CryptoError::InvalidParameter`] を返却する。
+/// 正常に導出された共有秘密は、メモリ自動ゼロ消去が保証された [`SecretBytes<32>`] でラップして返却する。
+///
+/// # エラー
+/// ピアの公開鍵が低位数点(位数 1, 2, 4, 8)等であり、計算された共有秘密が全ゼロとなる場合に
+/// [`CryptoError::InvalidParameter`] を返す。
 #[inline]
-#[must_use]
-pub fn x25519_diffie_hellman(secret_key: &[u8; 32], public_key: &[u8; 32]) -> [u8; 32] {
+pub fn x25519_diffie_hellman(
+    secret_key: &[u8; 32],
+    public_key: &[u8; 32],
+) -> Result<SecretBytes<32>, CryptoError> {
     let peer_point = MontgomeryPoint(*public_key);
     let shared = peer_point.mul_clamped(*secret_key);
-    shared.to_bytes()
+    let mut bytes = shared.to_bytes();
+
+    let is_all_zero: bool = ct_eq_32(&bytes, &[0u8; 32]).into();
+    if is_all_zero {
+        bytes.zeroize();
+        return Err(CryptoError::InvalidParameter);
+    }
+
+    Ok(SecretBytes::new(bytes))
 }
 
 #[cfg(test)]
@@ -133,10 +156,13 @@ mod tests {
         );
 
         // DH shared secret
-        let shared_alice = x25519_diffie_hellman(&alice_private, &bob_public_calc);
-        let shared_bob = x25519_diffie_hellman(&bob_private, &alice_public_calc);
+        let shared_alice = x25519_diffie_hellman(&alice_private, &bob_public_calc)
+            .expect("Aliceの共有秘密計算に成功。");
+        let shared_bob = x25519_diffie_hellman(&bob_private, &alice_public_calc)
+            .expect("Bobの共有秘密計算に成功。");
         assert_eq!(
-            shared_alice, shared_bob,
+            shared_alice.as_bytes(),
+            shared_bob.as_bytes(),
             "X25519 Diffie-Hellman共有秘密の一致検証に成功。"
         );
 
@@ -148,8 +174,33 @@ mod tests {
             0x1e, 0x16, 0x17, 0x42,
         ];
         assert_eq!(
-            shared_alice, expected_shared,
+            shared_alice.as_bytes(),
+            &expected_shared,
             "RFC 7748 X25519テストベクタ共有秘密との一致検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_x25519_small_subgroup_all_zero_rejection() {
+        let private_key = [0x42u8; 32];
+
+        // 1. 全ゼロ公開鍵 (低位数点 u = 0)
+        let zero_public = [0u8; 32];
+        let res_zero = x25519_diffie_hellman(&private_key, &zero_public);
+        assert_eq!(
+            res_zero.unwrap_err(),
+            CryptoError::InvalidParameter,
+            "全ゼロ公開鍵に対するDH共有秘密遮断に成功。"
+        );
+
+        // 2. 低位数点 u = 1 ([1, 0, 0, ..., 0])
+        let mut u_one_public = [0u8; 32];
+        u_one_public[0] = 1;
+        let res_u_one = x25519_diffie_hellman(&private_key, &u_one_public);
+        assert_eq!(
+            res_u_one.unwrap_err(),
+            CryptoError::InvalidParameter,
+            "低位数点(u=1)公開鍵に対するDH共有秘密遮断に成功。"
         );
     }
 
