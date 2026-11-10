@@ -28,6 +28,7 @@ pub mod memlock;
 pub mod constant_time;
 pub mod curve25519;
 pub mod error;
+pub mod kdf;
 pub mod tlv;
 pub mod zeroize;
 
@@ -38,6 +39,11 @@ pub use curve25519::{
     edwards_basepoint_mul, ristretto_basepoint_mul, x25519_basepoint_mul, x25519_diffie_hellman,
 };
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
+pub use kdf::{
+    Argon2Params, DEFAULT_KEY_LEN, DEFAULT_NATIVE_M_COST, DEFAULT_NATIVE_P_COST,
+    DEFAULT_NATIVE_T_COST, DEFAULT_WASM_M_COST, DEFAULT_WASM_P_COST, DEFAULT_WASM_T_COST,
+    FAST_TEST_M_COST, FAST_TEST_P_COST, FAST_TEST_T_COST,
+};
 pub use zeroize::{SecretBytes, volatile_zeroize};
 
 #[cfg(feature = "alloc")]

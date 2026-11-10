@@ -14,10 +14,12 @@ profile-lite = ["alloc"]
 profile-vault = ["alloc", "profile-lite"]
 # memlock: ネイティブ環境向けにmlockおよびmadviseによるメモリ保護を提供するプロファイル。
 memlock = ["std", "dep:libc"]
+# parallel: ネイティブ環境向けにマルチコア並列化パラメータ(レーン並列度)を既定値として選択するプロファイル。
+parallel = ["std"]
 
 [dependencies]
 aes-gcm-siv = { workspace = true, features = ["alloc"] }
-argon2 = { workspace = true, features = ["alloc"] }
+argon2 = { workspace = true, features = ["alloc", "zeroize"] }
 chacha20poly1305 = { workspace = true, features = ["alloc"] }
 curve25519-dalek = { workspace = true, features = ["alloc", "zeroize"] }
 libc = { workspace = true, optional = true }
