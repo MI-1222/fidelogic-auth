@@ -1,0 +1,28 @@
+# Fidelogic Rocq 形式検証証明 (Alectryon) ドキュメント生成用コンテナ。
+FROM rocq/rocq-prover:latest
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+USER rocq
+WORKDIR /workspace
+
+# rocq ユーザーの Python ローカルインストールパスを通す。
+ENV PATH="/home/rocq/.local/bin:${PATH}"
+
+# Rocq >= 9 対応 Alectryon バックエンド (VsRocq) の導入。
+RUN opam update && opam install -y vsrocq-language-server || true
+
+# Alectryon 公式最新版の導入。
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    git+https://github.com/cpitclaudel/alectryon.git
+
+COPY --chown=rocq:rocq . /workspace
+
+# デフォルトで Rocq 証明の Alectryon HTML 生成を実行。
+CMD ["bash", "-c", "eval $(opam env) && ./scripts/build_proofs_alectryon.sh"]

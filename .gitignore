@@ -6,6 +6,7 @@
 
 # distribution
 /dist
+/public
 
 # proof & dune build artifacts
 _build/

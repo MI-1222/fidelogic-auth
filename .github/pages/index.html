@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fidelogic - Documentation Portal</title>
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 0 20px;
+        line-height: 1.6;
+        color: #24292f;
+        background-color: #f6f8fa;
+      }
+      .container {
+        background: #ffffff;
+        padding: 32px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        border-bottom: 2px solid #eaecef;
+        padding-bottom: 8px;
+        margin-bottom: 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.75rem;
+      }
+      .repo-link {
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #57606a;
+        text-decoration: none;
+      }
+      .repo-link:hover {
+        color: #0969da;
+        text-decoration: underline;
+      }
+      p.lead {
+        color: #57606a;
+        margin: 0 0 24px 0;
+      }
+      h2.section-title {
+        font-size: 1.25rem;
+        margin: 28px 0 12px 0;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #eaecef;
+        color: #24292f;
+      }
+      ul {
+        list-style-type: none;
+        padding-left: 0;
+        margin: 0;
+      }
+      li {
+        margin: 16px 0;
+      }
+      a.item-link {
+        font-weight: 600;
+        font-size: 1.1rem;
+        color: #0969da;
+        text-decoration: none;
+      }
+      a.item-link:hover {
+        text-decoration: underline;
+      }
+      p.desc {
+        margin: 4px 0 0 0;
+        color: #57606a;
+        font-size: 0.95rem;
+      }
+      .more-link {
+        display: inline-block;
+        margin-top: 8px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: #0969da;
+        text-decoration: none;
+      }
+      .more-link:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🛡️ Fidelogic Documentation</h1>
+        <a
+          class="repo-link"
+          href="https://github.com/MI-1222/fidelogic-auth"
+          target="_blank"
+          rel="noopener noreferrer"
+          >GitHub ↗</a
+        >
+      </div>
+      <p class="lead">
+        WebAuthn PRF 拡張および OPAQUE (RFC 9807)
+        による高保証・形式検証済み暗号認証/暗号化コア「Fidelogic」のドキュメントポータルです。
+        Rocq による数理的不変条件証明 (Alectryon) と、Rust
+        ワークスペース各クレートの API 仕様書 (Rustdoc) をまとめています。
+      </p>
+
+      <h2 class="section-title">📜 形式検証証明 (Rocq / Alectryon)</h2>
+      <p class="desc">
+        Alectryon
+        による対話型証明ドキュメント。各タクティックの実行とゴール・仮定の遷移をステップごとに閲覧可能です。
+      </p>
+      <ul>
+        <li>
+          <a class="item-link" href="proofs/EnvelopeFsm.html"
+            >🔐 EnvelopeFsm.v</a
+          >
+          <p class="desc">
+            マルチスロット型エンベロープ暗号化におけるデータ暗号鍵 (DEK)
+            のライフサイクル決定性および状態遷移健全性の検証
+          </p>
+        </li>
+        <li>
+          <a class="item-link" href="proofs/NonInterference.html"
+            >🛡️ NonInterference.v</a
+          >
+          <p class="desc">
+            情報流制御 (IFC) 2レベルセキュリティ格子 (Low/High)
+            に基づくマスター鍵・平文データの非干渉性 (Non-Interference) 証明
+          </p>
+        </li>
+        <li>
+          <a class="item-link" href="proofs/TlvRoundtrip.html"
+            >🔄 TlvRoundtrip.v</a
+          >
+          <p class="desc">
+            可変長暗号コンテナの TLV デシリアライザーにおけるデータ復元健全性
+            (Roundtrip) および未知タグに対する構造保存証明
+          </p>
+        </li>
+        <li>
+          <a class="item-link" href="proofs/TlvTotality.html"
+            >🛑 TlvTotality.v</a
+          >
+          <p class="desc">
+            TLV 構文解析関数の全域性
+            (Totality)。任意長の不正入力バイト列に対するパニック不能性と停止性の検証
+          </p>
+        </li>
+        <li>
+          <a class="item-link" href="proofs/PrecisProfile.html"
+            >🔤 PrecisProfile.v</a
+          >
+          <p class="desc">
+            RFC 8265 UsernameCaseMapped プロファイルに基づく Unicode
+            文字列正規化仕様の決定性と不変条件モデル
+          </p>
+        </li>
+      </ul>
+      <a class="more-link" href="proofs/index.html"
+        >👉 全証明モジュール一覧 (インデックス) を開く &rarr;</a
+      >
+
+      <h2 class="section-title">📦 Rust クレート API (Rustdoc)</h2>
+      <p class="desc">
+        cargo doc
+        により生成された各クレートの型定義、トレイト実装、関数リファレンスです。
+      </p>
+      <ul>
+        <li>
+          <a class="item-link" href="rustdoc/fidelogic_core/index.html"
+            >📦 fidelogic-core</a
+          >
+          <p class="desc">
+            no_std 適合・ヒープ割り当てゼロの暗号コア。エンベロープ暗号化、TLV
+            パーサー、OPAQUE 鍵交換、Zeroize による機密消去保証
+          </p>
+        </li>
+        <li>
+          <a class="item-link" href="rustdoc/fidelogic_wasm/index.html"
+            >🌐 fidelogic-wasm</a
+          >
+          <p class="desc">
+            Web ブラウザおよび拡張機能向けの最小フットプリント Wasm
+            バインディング。WebAuthn PRF 出力処理とクライアント暗号化基盤
+          </p>
+        </li>
+        <li>
+          <a class="item-link" href="rustdoc/fidelogic_cli/index.html"
+            >🛠️ fidelogic-cli</a
+          >
+          <p class="desc">
+            暗号コンテナの生成・検証、パスワード認証テスト、開発・診断用コマンドライン管理ツール
+          </p>
+        </li>
+      </ul>
+    </div>
+  </body>
+</html>
