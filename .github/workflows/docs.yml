@@ -1,0 +1,116 @@
+# ==============================================================================
+# Fidelogic 統合ドキュメント (Rocq Proofs & Rustdoc) ビルド & デプロイワークフロー
+#
+# main ブランチへの push または手動実行を契機に、
+# 1. Rust ワークスペース全クレートの API ドキュメント (cargo doc -> public/rustdoc/)
+# 2. Rocq 形式検証証明の対話的 HTML (Alectryon -> public/proofs/)
+# 3. 統合ポータル (.github/pages/index.html -> public/index.html)
+# を集約生成し、GitHub Pages へ公開する。
+# ==============================================================================
+
+name: Deploy Documentation to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "crates/**"
+      - "proofs/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "_RocqProject"
+      - "Dockerfile.docs"
+      - ".github/pages/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "crates/**"
+      - "proofs/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "_RocqProject"
+      - "Dockerfile.docs"
+      - ".github/pages/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------------
+      # 1. Rust API ドキュメント (Rustdoc) の生成
+      # ------------------------------------------------------------------------
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Rustdoc
+        run: |
+          chmod +x ./scripts/build_rust_docs.sh
+          ./scripts/build_rust_docs.sh
+
+      # ------------------------------------------------------------------------
+      # 2. Rocq 形式検証証明 (Alectryon) の生成
+      # ------------------------------------------------------------------------
+      - name: Build Rocq Proofs & Alectryon in Docker
+        run: |
+          docker build --platform linux/amd64 -f Dockerfile.docs -t fidelogic-docs-builder .
+          docker run --name docs-runner --platform linux/amd64 fidelogic-docs-builder
+          mkdir -p public
+          docker cp docs-runner:/workspace/public/proofs ./public/proofs
+          docker rm docs-runner
+
+      # ------------------------------------------------------------------------
+      # 3. 統合トップポータル (index.html) の配置
+      # ------------------------------------------------------------------------
+      - name: Copy Portal index.html
+        run: |
+          chmod +x ./scripts/build_portal.sh
+          ./scripts/build_portal.sh
+
+      # ------------------------------------------------------------------------
+      # 4. GitHub Pages 成果物アップロード (PR 時は除外)
+      # ------------------------------------------------------------------------
+      - name: Setup Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./public"
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
