@@ -3,6 +3,7 @@
 //! 完全なVault運用および高強度暗号処理を提供するプロファイル骨格。
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
+pub use crate::error::{CryptoError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{
     EntryPayload, KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
@@ -10,9 +11,8 @@ pub use crate::tlv::{
     serialize_record_into, serialize_slot_entry, serialize_slot_entry_into, slot_serialized_len,
 };
 pub use crate::tlv::{
-    KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TLV_HEADER_LEN, TlvParseError,
-    VAULT_HEADER_LEN, VAULT_MAGIC, VaultError, VaultHeader, deserialize_header, is_known_tag,
-    serialize_header,
+    KEK_SLOT_ENTRY_LEN, KEK_SLOT_HEADER_LEN, TAG_ENTRY, TLV_HEADER_LEN, VAULT_HEADER_LEN,
+    VAULT_MAGIC, VaultHeader, deserialize_header, is_known_tag, serialize_header,
 };
 
 /// `profile-vault` の運用エンジンを表す構造体。
@@ -51,12 +51,26 @@ mod tests {
 
     #[test]
     fn test_vault_error_reexport() {
-        let err = VaultError::InvalidMagic;
-        let parse_err: TlvParseError = err;
+        let parse_err = TlvParseError::InvalidMagic;
+        let vault_err: VaultError = parse_err.into();
         assert_eq!(
-            parse_err,
-            VaultError::InvalidMagic,
-            "profile_vault経由のVaultError再エクスポート確認に成功。"
+            vault_err,
+            VaultError::Parse(TlvParseError::InvalidMagic),
+            "profile_vault経由のVaultError再エクスポートおよびFrom変換確認に成功。"
+        );
+        let crypto_err = CryptoError::KeyDerivationFailed;
+        let vault_crypto: VaultError = crypto_err.into();
+        assert_eq!(
+            vault_crypto,
+            VaultError::Crypto(CryptoError::KeyDerivationFailed),
+            "profile_vault経由のCryptoError変換確認に成功。"
+        );
+        let system_err = SystemError::MemoryLockFailed;
+        let vault_system: VaultError = system_err.into();
+        assert_eq!(
+            vault_system,
+            VaultError::System(SystemError::MemoryLockFailed),
+            "profile_vault経由のSystemError変換確認に成功。"
         );
     }
 
@@ -77,7 +91,7 @@ mod tests {
         let res = deserialize_record(&input);
         assert_eq!(
             res,
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "profile_vault経由のdeserialize_record呼び出しに成功。"
         );
     }

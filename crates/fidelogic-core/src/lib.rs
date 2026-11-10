@@ -22,8 +22,11 @@ pub mod profile_lite;
 #[cfg(feature = "profile-vault")]
 pub mod profile_vault;
 
+pub mod error;
 pub mod tlv;
 pub mod zeroize;
+
+pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 
 /// 現在有効化されているプロファイルの識別子を返す。
 #[must_use]
