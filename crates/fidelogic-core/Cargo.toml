@@ -18,7 +18,7 @@ memlock = ["std", "dep:libc"]
 parallel = ["std"]
 
 [dependencies]
-aes-gcm-siv = { workspace = true, features = ["alloc"] }
+aes-gcm-siv = { workspace = true, features = ["alloc", "aes"] }
 argon2 = { workspace = true, features = ["alloc", "zeroize"] }
 chacha20poly1305 = { workspace = true, features = ["alloc"] }
 curve25519-dalek = { workspace = true, features = ["alloc", "zeroize"] }

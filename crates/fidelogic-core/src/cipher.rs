@@ -1,0 +1,729 @@
+//! # 暗号スイート抽象化モジュール。
+//!
+//! トレイトオブジェクトを排除した列挙型ディスパッチ([`VaultCipher`])により、
+//! XChaCha20-Poly1305(192-bit Nonce)および AES-256-GCM-SIV(RFC 8452)の
+//! 高速かつ静的インライン化が可能な暗号化・復号インターフェースを提供する。
+
+use aes_gcm_siv::Aes256GcmSiv;
+use aes_gcm_siv::aead::generic_array::GenericArray;
+use aes_gcm_siv::aead::{AeadInPlace, KeyInit};
+use chacha20poly1305::XChaCha20Poly1305;
+
+use crate::error::CryptoError;
+use crate::zeroize::SecretBytes;
+
+/// 暗号鍵長(バイト単位: 256ビット = 32バイト)
+pub const KEY_LEN: usize = 32;
+
+/// XChaCha20-Poly1305 のノンス長(バイト単位: 192ビット = 24バイト)
+pub const XCHACHA20_POLY1305_NONCE_LEN: usize = 24;
+
+/// AES-256-GCM-SIV のノンス長(バイト単位: 96ビット = 12バイト)
+pub const AES_256_GCM_SIV_NONCE_LEN: usize = 12;
+
+/// 共通認証タグ長(バイト単位: 128ビット = 16バイト)
+pub const TAG_LEN: usize = 16;
+
+/// 暗号スイート識別子を表す列挙型。
+///
+/// Vaultヘッダーの `suite_id` フィールド(1バイト)に対応し、
+/// 暗号化アルゴリズムおよびノンス長を一意に決定する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum CipherSuiteId {
+    /// XChaCha20-Poly1305 (256-bit Key, 192-bit Nonce, 128-bit Tag)。
+    XChaCha20Poly1305 = 0x01,
+    /// AES-256-GCM-SIV (RFC 8452, 256-bit Key, 96-bit Nonce, 128-bit Tag)。
+    Aes256GcmSiv = 0x02,
+}
+
+impl CipherSuiteId {
+    /// 1バイト整数から [`CipherSuiteId`] への変換を試みる。
+    #[inline]
+    pub const fn from_u8(value: u8) -> Result<Self, CryptoError> {
+        match value {
+            0x01 => Ok(Self::XChaCha20Poly1305),
+            0x02 => Ok(Self::Aes256GcmSiv),
+            _ => Err(CryptoError::InvalidParameter),
+        }
+    }
+
+    /// 暗号スイート識別子の数値(`u8`)を返す。
+    #[inline]
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// 本暗号スイートで要求されるノンス長(バイト数)を返す。
+    #[inline]
+    pub const fn nonce_len(self) -> usize {
+        match self {
+            Self::XChaCha20Poly1305 => XCHACHA20_POLY1305_NONCE_LEN,
+            Self::Aes256GcmSiv => AES_256_GCM_SIV_NONCE_LEN,
+        }
+    }
+
+    /// 本暗号スイートで要求される認証タグ長(バイト数)を返す。
+    #[inline]
+    pub const fn tag_len(self) -> usize {
+        TAG_LEN
+    }
+
+    /// 本暗号スイートで要求される鍵長(バイト数)を返す。
+    #[inline]
+    pub const fn key_len(self) -> usize {
+        KEY_LEN
+    }
+}
+
+impl TryFrom<u8> for CipherSuiteId {
+    type Error = CryptoError;
+
+    #[inline]
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::from_u8(value)
+    }
+}
+
+impl From<CipherSuiteId> for u8 {
+    #[inline]
+    fn from(suite: CipherSuiteId) -> Self {
+        suite.as_u8()
+    }
+}
+
+/// 暗号化コンテナで使用されるAEAD暗号スイートの列挙型ディスパッチ構造体。
+///
+/// トレイトオブジェクト(`dyn AeadInPlace`)による間接呼び出しオーバーヘッドや
+/// vtableメタデータの保持を完全に排除し、静的インライン化およびゼロコストディスパッチを実現する。
+/// ヒープ確保(`Box`)を排して `no_std` 環境でのゼロアロケーション運用を維持するため、
+/// バリアント間サイズ差の警告を抑制している。
+#[allow(clippy::large_enum_variant)]
+pub enum VaultCipher {
+    /// XChaCha20-Poly1305 暗号インスタンス。
+    XChaCha20Poly1305(XChaCha20Poly1305),
+    /// AES-256-GCM-SIV 暗号インスタンス。
+    Aes256GcmSiv(Aes256GcmSiv),
+}
+
+impl VaultCipher {
+    /// 32バイト固定長秘密鍵配列および暗号スイート識別子から暗号インスタンスを生成する。
+    #[inline]
+    pub fn new(suite_id: CipherSuiteId, key: &[u8; KEY_LEN]) -> Self {
+        let key_arr = GenericArray::from_slice(key);
+        match suite_id {
+            CipherSuiteId::XChaCha20Poly1305 => {
+                Self::XChaCha20Poly1305(XChaCha20Poly1305::new(key_arr))
+            }
+            CipherSuiteId::Aes256GcmSiv => Self::Aes256GcmSiv(Aes256GcmSiv::new(key_arr)),
+        }
+    }
+
+    /// [`SecretBytes<32>`] から暗号インスタンスを安全に生成する。
+    #[inline]
+    pub fn new_from_secret(suite_id: CipherSuiteId, key: &SecretBytes<KEY_LEN>) -> Self {
+        Self::new(suite_id, key.as_bytes())
+    }
+
+    /// 任意長スライスから鍵長(32バイト)を事前検証して暗号インスタンスを生成する。
+    #[inline]
+    pub fn new_from_slice(suite_id: CipherSuiteId, key: &[u8]) -> Result<Self, CryptoError> {
+        let key_arr: &[u8; KEY_LEN] = key.try_into().map_err(|_| CryptoError::InvalidKeySize)?;
+        Ok(Self::new(suite_id, key_arr))
+    }
+
+    /// 本暗号インスタンスの暗号スイート識別子を返す。
+    #[inline]
+    pub const fn suite_id(&self) -> CipherSuiteId {
+        match self {
+            Self::XChaCha20Poly1305(_) => CipherSuiteId::XChaCha20Poly1305,
+            Self::Aes256GcmSiv(_) => CipherSuiteId::Aes256GcmSiv,
+        }
+    }
+
+    /// 本暗号インスタンスで要求されるノンス長(バイト数)を返す。
+    #[inline]
+    pub const fn nonce_len(&self) -> usize {
+        self.suite_id().nonce_len()
+    }
+
+    /// 本暗号インスタンスで要求される認証タグ長(バイト数)を返す。
+    #[inline]
+    pub const fn tag_len(&self) -> usize {
+        self.suite_id().tag_len()
+    }
+
+    /// インプレース分離暗号化(Detached Encryption)を実行し、16バイトの認証タグを返す。
+    ///
+    /// `buffer` に平文を渡すと暗号文に上書きされ、計算された16バイトの認証タグが返される。
+    /// ノンス長が暗号スイートの要求長(XChaCha20-Poly1305: 24B, AES-256-GCM-SIV: 12B)と
+    /// 一致しない場合は [`CryptoError::InvalidNonceSize`] を返す。
+    pub fn encrypt_in_place_detached(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<[u8; TAG_LEN], CryptoError> {
+        if nonce.len() != self.nonce_len() {
+            return Err(CryptoError::InvalidNonceSize);
+        }
+
+        let tag = match self {
+            Self::XChaCha20Poly1305(cipher) => {
+                let nonce_arr = GenericArray::from_slice(nonce);
+                cipher
+                    .encrypt_in_place_detached(nonce_arr, aad, buffer)
+                    .map_err(|_| CryptoError::AeadDecryptionFailed)?
+            }
+            Self::Aes256GcmSiv(cipher) => {
+                let nonce_arr = GenericArray::from_slice(nonce);
+                cipher
+                    .encrypt_in_place_detached(nonce_arr, aad, buffer)
+                    .map_err(|_| CryptoError::AeadDecryptionFailed)?
+            }
+        };
+
+        let mut tag_bytes = [0u8; TAG_LEN];
+        tag_bytes.copy_from_slice(tag.as_slice());
+        Ok(tag_bytes)
+    }
+
+    /// インプレース分離復号(Detached Decryption)を実行する。
+    ///
+    /// `buffer` に暗号文を渡し、`tag` に16バイトの認証タグを渡すと、認証成功時に平文へ上書きされる。
+    /// 認証タグ照合や復号に失敗した場合はバッファの内容を直ちに破棄(ゼロクリア)し、
+    /// [`CryptoError::AeadDecryptionFailed`] を返す。
+    pub fn decrypt_in_place_detached(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        buffer: &mut [u8],
+        tag: &[u8],
+    ) -> Result<(), CryptoError> {
+        if nonce.len() != self.nonce_len() {
+            return Err(CryptoError::InvalidNonceSize);
+        }
+        if tag.len() != TAG_LEN {
+            return Err(CryptoError::InvalidTagSize);
+        }
+
+        let tag_arr = GenericArray::from_slice(tag);
+        let result = match self {
+            Self::XChaCha20Poly1305(cipher) => {
+                let nonce_arr = GenericArray::from_slice(nonce);
+                cipher.decrypt_in_place_detached(nonce_arr, aad, buffer, tag_arr)
+            }
+            Self::Aes256GcmSiv(cipher) => {
+                let nonce_arr = GenericArray::from_slice(nonce);
+                cipher.decrypt_in_place_detached(nonce_arr, aad, buffer, tag_arr)
+            }
+        };
+
+        result.map_err(|_| {
+            crate::zeroize::volatile_zeroize(buffer);
+            CryptoError::AeadDecryptionFailed
+        })
+    }
+
+    /// 平文全体を暗号化し、暗号文の末尾に16バイトの認証タグを付与したバイト列(Ciphertext || Tag)を返す。
+    #[cfg(feature = "alloc")]
+    pub fn encrypt(
+        &self,
+        nonce: &[u8],
+        plaintext: &[u8],
+        aad: &[u8],
+    ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+        if nonce.len() != self.nonce_len() {
+            return Err(CryptoError::InvalidNonceSize);
+        }
+
+        let mut buffer = alloc::vec::Vec::from(plaintext);
+        let tag = self.encrypt_in_place_detached(nonce, aad, &mut buffer)?;
+        buffer.extend_from_slice(&tag);
+        Ok(buffer)
+    }
+
+    /// 認証タグ付き暗号文(Ciphertext || Tag)を復号し、平文バイト列を返す。
+    #[cfg(feature = "alloc")]
+    pub fn decrypt(
+        &self,
+        nonce: &[u8],
+        ciphertext_with_tag: &[u8],
+        aad: &[u8],
+    ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+        if nonce.len() != self.nonce_len() {
+            return Err(CryptoError::InvalidNonceSize);
+        }
+        if ciphertext_with_tag.len() < TAG_LEN {
+            return Err(CryptoError::InvalidTagSize);
+        }
+
+        let split_idx = ciphertext_with_tag.len() - TAG_LEN;
+        let mut buffer = alloc::vec::Vec::from(&ciphertext_with_tag[..split_idx]);
+        let tag = &ciphertext_with_tag[split_idx..];
+
+        if let Err(err) = self.decrypt_in_place_detached(nonce, aad, &mut buffer, tag) {
+            crate::zeroize::volatile_zeroize(&mut buffer);
+            return Err(err);
+        }
+
+        Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cipher_suite_id_conversions() {
+        assert_eq!(
+            CipherSuiteId::from_u8(1),
+            Ok(CipherSuiteId::XChaCha20Poly1305),
+            "suite_id 0x01のパースに成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::from_u8(2),
+            Ok(CipherSuiteId::Aes256GcmSiv),
+            "suite_id 0x02のパースに成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::from_u8(0),
+            Err(CryptoError::InvalidParameter),
+            "不正なsuite_id 0の拒絶に成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::from_u8(3),
+            Err(CryptoError::InvalidParameter),
+            "不正なsuite_id 3の拒絶に成功。"
+        );
+
+        assert_eq!(
+            CipherSuiteId::XChaCha20Poly1305.as_u8(),
+            1,
+            "XChaCha20Poly1305の数値変換に成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::Aes256GcmSiv.as_u8(),
+            2,
+            "Aes256GcmSivの数値変換に成功。"
+        );
+
+        assert_eq!(
+            CipherSuiteId::try_from(1),
+            Ok(CipherSuiteId::XChaCha20Poly1305),
+            "TryFromによる変換に成功。"
+        );
+        let u8_val: u8 = CipherSuiteId::Aes256GcmSiv.into();
+        assert_eq!(u8_val, 2, "Fromによる変換に成功。");
+
+        assert_eq!(
+            CipherSuiteId::XChaCha20Poly1305.nonce_len(),
+            24,
+            "XChaCha20Poly1305ノンス長24バイトの確認に成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::Aes256GcmSiv.nonce_len(),
+            12,
+            "Aes256GcmSivノンス長12バイトの確認に成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::XChaCha20Poly1305.tag_len(),
+            16,
+            "タグ長16バイトの確認に成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::Aes256GcmSiv.tag_len(),
+            16,
+            "タグ長16バイトの確認に成功。"
+        );
+        assert_eq!(
+            CipherSuiteId::XChaCha20Poly1305.key_len(),
+            32,
+            "鍵長32バイトの確認に成功。"
+        );
+    }
+
+    #[test]
+    fn test_vault_cipher_constructors() {
+        let key = [0x42u8; KEY_LEN];
+        let cipher_x = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+        assert_eq!(
+            cipher_x.suite_id(),
+            CipherSuiteId::XChaCha20Poly1305,
+            "XChaCha暗号インスタンス生成に成功。"
+        );
+        assert_eq!(cipher_x.nonce_len(), 24, "XChaChaノンス長照合に成功。");
+        assert_eq!(cipher_x.tag_len(), 16, "XChaChaタグ長照合に成功。");
+
+        let cipher_aes = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key);
+        assert_eq!(
+            cipher_aes.suite_id(),
+            CipherSuiteId::Aes256GcmSiv,
+            "AES-GCM-SIV暗号インスタンス生成に成功。"
+        );
+        assert_eq!(cipher_aes.nonce_len(), 12, "AESノンス長照合に成功。");
+        assert_eq!(cipher_aes.tag_len(), 16, "AESタグ長照合に成功。");
+
+        let secret = SecretBytes::new(key);
+        let cipher_secret = VaultCipher::new_from_secret(CipherSuiteId::XChaCha20Poly1305, &secret);
+        assert_eq!(
+            cipher_secret.suite_id(),
+            CipherSuiteId::XChaCha20Poly1305,
+            "SecretBytes経由の生成に成功。"
+        );
+
+        let slice_ok = VaultCipher::new_from_slice(CipherSuiteId::Aes256GcmSiv, &key[..]);
+        assert!(slice_ok.is_ok(), "スライス経由の正常生成に成功。");
+
+        let short_key = [0x42u8; 31];
+        let slice_err = VaultCipher::new_from_slice(CipherSuiteId::Aes256GcmSiv, &short_key[..]);
+        assert_eq!(
+            slice_err.err(),
+            Some(CryptoError::InvalidKeySize),
+            "短小鍵スライスの拒絶に成功。"
+        );
+    }
+
+    #[test]
+    fn test_xchacha20_poly1305_roundtrip_and_tamper() {
+        let key = [0x11u8; KEY_LEN];
+        let nonce = [0x22u8; XCHACHA20_POLY1305_NONCE_LEN];
+        let aad = b"header-aad-metadata";
+        let plaintext_original = b"Fidelogic Secure Vault Secret Plaintext Data";
+
+        let cipher = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+
+        let mut buffer = *plaintext_original;
+        let tag = cipher
+            .encrypt_in_place_detached(&nonce, aad, &mut buffer)
+            .expect("暗号化に成功。");
+
+        assert_ne!(
+            buffer.as_slice(),
+            plaintext_original.as_slice(),
+            "暗号文が平文と相違することを確認。"
+        );
+
+        // 正常復号
+        let mut decrypt_buf = buffer;
+        cipher
+            .decrypt_in_place_detached(&nonce, aad, &mut decrypt_buf, &tag)
+            .expect("復号に成功。");
+        assert_eq!(
+            decrypt_buf.as_slice(),
+            plaintext_original.as_slice(),
+            "平文の完全復元に成功。"
+        );
+
+        // 改ざん暗号文の拒絶
+        let mut tampered_buf = buffer;
+        tampered_buf[0] ^= 0x01;
+        let res_tampered = cipher.decrypt_in_place_detached(&nonce, aad, &mut tampered_buf, &tag);
+        assert_eq!(
+            res_tampered,
+            Err(CryptoError::AeadDecryptionFailed),
+            "改ざん暗号文の拒絶に成功。"
+        );
+        assert_eq!(
+            tampered_buf, [0u8; 44],
+            "改ざん検知時のバッファ揮発ゼロクリアに成功。"
+        );
+
+        // 改ざんタグの拒絶
+        let mut decrypt_buf2 = buffer;
+        let mut tampered_tag = tag;
+        tampered_tag[0] ^= 0x01;
+        let res_tag =
+            cipher.decrypt_in_place_detached(&nonce, aad, &mut decrypt_buf2, &tampered_tag);
+        assert_eq!(
+            res_tag,
+            Err(CryptoError::AeadDecryptionFailed),
+            "改ざんタグの拒絶に成功。"
+        );
+
+        // 改ざんAADの拒絶
+        let mut decrypt_buf3 = buffer;
+        let tampered_aad = b"tampered-aad-metadata";
+        let res_aad =
+            cipher.decrypt_in_place_detached(&nonce, tampered_aad, &mut decrypt_buf3, &tag);
+        assert_eq!(
+            res_aad,
+            Err(CryptoError::AeadDecryptionFailed),
+            "改ざんAADの拒絶に成功。"
+        );
+
+        // 不正なノンス長
+        let invalid_nonce = [0x22u8; 12];
+        let mut dummy = [0u8; 10];
+        assert_eq!(
+            cipher.encrypt_in_place_detached(&invalid_nonce, aad, &mut dummy),
+            Err(CryptoError::InvalidNonceSize),
+            "不正ノンス長の暗号化拒絶に成功。"
+        );
+        assert_eq!(
+            cipher.decrypt_in_place_detached(&invalid_nonce, aad, &mut dummy, &tag),
+            Err(CryptoError::InvalidNonceSize),
+            "不正ノンス長の復号拒絶に成功。"
+        );
+
+        // 不正なタグ長
+        let invalid_tag = [0u8; 15];
+        assert_eq!(
+            cipher.decrypt_in_place_detached(&nonce, aad, &mut decrypt_buf, &invalid_tag),
+            Err(CryptoError::InvalidTagSize),
+            "不正タグ長の復号拒絶に成功。"
+        );
+    }
+
+    #[test]
+    fn test_aes256_gcm_siv_roundtrip_and_tamper() {
+        let key = [0x33u8; KEY_LEN];
+        let nonce = [0x44u8; AES_256_GCM_SIV_NONCE_LEN];
+        let aad = b"epoch-epoch-counter-12345";
+        let plaintext_original = b"Synthetic IV Nonce Misuse-Resistant Plaintext";
+
+        let cipher = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key);
+
+        let mut buffer = *plaintext_original;
+        let tag = cipher
+            .encrypt_in_place_detached(&nonce, aad, &mut buffer)
+            .expect("暗号化に成功。");
+
+        assert_ne!(
+            buffer.as_slice(),
+            plaintext_original.as_slice(),
+            "暗号文が平文と相違することを確認。"
+        );
+
+        // 正常復号
+        let mut decrypt_buf = buffer;
+        cipher
+            .decrypt_in_place_detached(&nonce, aad, &mut decrypt_buf, &tag)
+            .expect("復号に成功。");
+        assert_eq!(
+            decrypt_buf.as_slice(),
+            plaintext_original.as_slice(),
+            "平文の完全復元に成功。"
+        );
+
+        // 改ざん暗号文の拒絶
+        let mut tampered_buf = buffer;
+        tampered_buf[0] ^= 0x01;
+        let res_tampered = cipher.decrypt_in_place_detached(&nonce, aad, &mut tampered_buf, &tag);
+        assert_eq!(
+            res_tampered,
+            Err(CryptoError::AeadDecryptionFailed),
+            "改ざん暗号文の拒絶に成功。"
+        );
+        assert_eq!(
+            tampered_buf, [0u8; 45],
+            "改ざん検知時のバッファ揮発ゼロクリアに成功。"
+        );
+
+        // 改ざんタグの拒絶
+        let mut decrypt_buf2 = buffer;
+        let mut tampered_tag = tag;
+        tampered_tag[0] ^= 0x01;
+        let res_tag =
+            cipher.decrypt_in_place_detached(&nonce, aad, &mut decrypt_buf2, &tampered_tag);
+        assert_eq!(
+            res_tag,
+            Err(CryptoError::AeadDecryptionFailed),
+            "改ざんタグの拒絶に成功。"
+        );
+
+        // 改ざんAADの拒絶
+        let mut decrypt_buf3 = buffer;
+        let tampered_aad = b"tampered-epoch-counter-00000";
+        let res_aad =
+            cipher.decrypt_in_place_detached(&nonce, tampered_aad, &mut decrypt_buf3, &tag);
+        assert_eq!(
+            res_aad,
+            Err(CryptoError::AeadDecryptionFailed),
+            "改ざんAADの拒絶に成功。"
+        );
+
+        // 不正なノンス長
+        let invalid_nonce = [0x44u8; 24];
+        let mut dummy = [0u8; 10];
+        assert_eq!(
+            cipher.encrypt_in_place_detached(&invalid_nonce, aad, &mut dummy),
+            Err(CryptoError::InvalidNonceSize),
+            "不正ノンス長の暗号化拒絶に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_alloc_encrypt_decrypt_convenience_apis() {
+        let key = [0x77u8; KEY_LEN];
+        let nonce_x = [0x88u8; XCHACHA20_POLY1305_NONCE_LEN];
+        let nonce_aes = [0x99u8; AES_256_GCM_SIV_NONCE_LEN];
+        let aad = b"convenience-aad";
+        let plaintext = b"Arbitrary Dynamic Plaintext Buffer for Testing Alloc APIs";
+
+        // XChaCha20Poly1305
+        let cipher_x = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+        let ct_x = cipher_x
+            .encrypt(&nonce_x, plaintext, aad)
+            .expect("alloc暗号化に成功。");
+        assert_eq!(
+            ct_x.len(),
+            plaintext.len() + TAG_LEN,
+            "暗号文長の検証に成功。"
+        );
+        let pt_x = cipher_x
+            .decrypt(&nonce_x, &ct_x, aad)
+            .expect("alloc復号に成功。");
+        assert_eq!(pt_x, plaintext, "復号平文の一致に成功。");
+
+        // AES-256-GCM-SIV
+        let cipher_aes = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key);
+        let ct_aes = cipher_aes
+            .encrypt(&nonce_aes, plaintext, aad)
+            .expect("alloc暗号化に成功。");
+        assert_eq!(
+            ct_aes.len(),
+            plaintext.len() + TAG_LEN,
+            "暗号文長の検証に成功。"
+        );
+        let pt_aes = cipher_aes
+            .decrypt(&nonce_aes, &ct_aes, aad)
+            .expect("alloc復号に成功。");
+        assert_eq!(pt_aes, plaintext, "復号平文の一致に成功。");
+
+        // 不正タグ長の拒絶
+        let short_ct = alloc::vec![0u8; TAG_LEN - 1];
+        assert_eq!(
+            cipher_aes.decrypt(&nonce_aes, &short_ct, aad),
+            Err(CryptoError::InvalidTagSize),
+            "短小暗号文の拒絶に成功。"
+        );
+    }
+
+    #[test]
+    fn test_rfc8452_aes256_gcm_siv_kat_vectors() {
+        // RFC 8452 Appendix C.2 (256-bit Key) Example 1:
+        // Plaintext: empty, AAD: empty
+        let key_ex1: [u8; KEY_LEN] = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let nonce_ex1: [u8; AES_256_GCM_SIV_NONCE_LEN] = [
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let expected_tag_ex1: [u8; TAG_LEN] = [
+            0x07, 0xf5, 0xf4, 0x16, 0x9b, 0xbf, 0x55, 0xa8, 0x40, 0x0c, 0xd4, 0x7e, 0xa6, 0xfd,
+            0x40, 0x0f,
+        ];
+
+        let cipher_ex1 = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key_ex1);
+        let mut buf_ex1: [u8; 0] = [];
+        let tag_ex1 = cipher_ex1
+            .encrypt_in_place_detached(&nonce_ex1, &[], &mut buf_ex1)
+            .expect("RFC 8452 Example 1 暗号化に成功。");
+        assert_eq!(
+            tag_ex1, expected_tag_ex1,
+            "RFC 8452 Example 1 認証タグ突合に成功。"
+        );
+
+        // RFC 8452 Appendix C.2 Example 4:
+        // Plaintext: 16 bytes, AAD: empty
+        let plaintext_ex4: [u8; 16] = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00,
+        ];
+        let expected_ct_ex4: [u8; 16] = [
+            0x85, 0xa0, 0x1b, 0x63, 0x02, 0x5b, 0xa1, 0x9b, 0x7f, 0xd3, 0xdd, 0xfc, 0x03, 0x3b,
+            0x3e, 0x76,
+        ];
+        let expected_tag_ex4: [u8; TAG_LEN] = [
+            0xc9, 0xea, 0xc6, 0xfa, 0x70, 0x09, 0x42, 0x70, 0x2e, 0x90, 0x86, 0x23, 0x83, 0xc6,
+            0xc3, 0x66,
+        ];
+
+        let mut buf_ex4 = plaintext_ex4;
+        let tag_ex4 = cipher_ex1
+            .encrypt_in_place_detached(&nonce_ex1, &[], &mut buf_ex4)
+            .expect("RFC 8452 Example 4 暗号化に成功。");
+        assert_eq!(
+            buf_ex4, expected_ct_ex4,
+            "RFC 8452 Example 4 暗号文突合に成功。"
+        );
+        assert_eq!(
+            tag_ex4, expected_tag_ex4,
+            "RFC 8452 Example 4 認証タグ突合に成功。"
+        );
+
+        // 復号検証
+        cipher_ex1
+            .decrypt_in_place_detached(&nonce_ex1, &[], &mut buf_ex4, &tag_ex4)
+            .expect("RFC 8452 Example 4 復号に成功。");
+        assert_eq!(
+            buf_ex4, plaintext_ex4,
+            "RFC 8452 Example 4 復号平文復元に成功。"
+        );
+    }
+
+    #[test]
+    fn test_xchacha20_poly1305_kat_vector() {
+        // draft-arciszewski-xchacha-03 Test Vector (Appendix A.1)
+        let key: [u8; KEY_LEN] = [
+            0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d,
+            0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b,
+            0x9c, 0x9d, 0x9e, 0x9f,
+        ];
+        let nonce: [u8; XCHACHA20_POLY1305_NONCE_LEN] = [
+            0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d,
+            0x4e, 0x4f, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,
+        ];
+        let aad: [u8; 12] = [
+            0x50, 0x51, 0x52, 0x53, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7,
+        ];
+        let plaintext = b"Ladies and Gentlemen of the class of '99: \
+            If I could offer you only one tip for the future, sunscreen would be it.";
+
+        let expected_ciphertext: [u8; 114] = [
+            0xbd, 0x6d, 0x17, 0x9d, 0x3e, 0x83, 0xd4, 0x3b, 0x95, 0x76, 0x57, 0x94, 0x93, 0xc0,
+            0xe9, 0x39, 0x57, 0x2a, 0x17, 0x00, 0x25, 0x2b, 0xfa, 0xcc, 0xbe, 0xd2, 0x90, 0x2c,
+            0x21, 0x39, 0x6c, 0xbb, 0x73, 0x1c, 0x7f, 0x1b, 0x0b, 0x4a, 0xa6, 0x44, 0x0b, 0xf3,
+            0xa8, 0x2f, 0x4e, 0xda, 0x7e, 0x39, 0xae, 0x64, 0xc6, 0x70, 0x8c, 0x54, 0xc2, 0x16,
+            0xcb, 0x96, 0xb7, 0x2e, 0x12, 0x13, 0xb4, 0x52, 0x2f, 0x8c, 0x9b, 0xa4, 0x0d, 0xb5,
+            0xd9, 0x45, 0xb1, 0x1b, 0x69, 0xb9, 0x82, 0xc1, 0xbb, 0x9e, 0x3f, 0x3f, 0xac, 0x2b,
+            0xc3, 0x69, 0x48, 0x8f, 0x76, 0xb2, 0x38, 0x35, 0x65, 0xd3, 0xff, 0xf9, 0x21, 0xf9,
+            0x66, 0x4c, 0x97, 0x63, 0x7d, 0xa9, 0x76, 0x88, 0x12, 0xf6, 0x15, 0xc6, 0x8b, 0x13,
+            0xb5, 0x2e,
+        ];
+        let expected_tag: [u8; TAG_LEN] = [
+            0xc0, 0x87, 0x59, 0x24, 0xc1, 0xc7, 0x98, 0x79, 0x47, 0xde, 0xaf, 0xd8, 0x78, 0x0a,
+            0xcf, 0x49,
+        ];
+
+        let cipher = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+        let mut buf = *plaintext;
+        let tag = cipher
+            .encrypt_in_place_detached(&nonce, &aad, &mut buf)
+            .expect("XChaCha20-Poly1305 KAT 暗号化に成功。");
+
+        assert_eq!(
+            buf, expected_ciphertext,
+            "XChaCha20-Poly1305 公式KAT暗号文突合に成功。"
+        );
+        assert_eq!(
+            tag, expected_tag,
+            "XChaCha20-Poly1305 公式KAT認証タグ突合に成功。"
+        );
+
+        // 復号往復の確認
+        cipher
+            .decrypt_in_place_detached(&nonce, &aad, &mut buf, &tag)
+            .expect("XChaCha20-Poly1305 KAT 復号に成功。");
+        assert_eq!(
+            buf.as_slice(),
+            plaintext.as_slice(),
+            "XChaCha20-Poly1305 KAT 平文完全一致の確認に成功。"
+        );
+    }
+}

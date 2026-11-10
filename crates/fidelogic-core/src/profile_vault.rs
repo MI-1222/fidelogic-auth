@@ -3,6 +3,10 @@
 //! 完全なVault運用および高強度暗号処理を提供するプロファイル骨格。
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
+pub use crate::cipher::{
+    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, TAG_LEN, VaultCipher,
+    XCHACHA20_POLY1305_NONCE_LEN,
+};
 pub use crate::error::{CryptoError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{
@@ -190,6 +194,22 @@ mod tests {
             record_len,
             TLV_HEADER_LEN + 3,
             "profile_vault経由のrecord_serialized_len呼び出しに成功。"
+        );
+    }
+
+    #[test]
+    fn test_vault_cipher_reexport() {
+        let key = [0x5au8; KEY_LEN];
+        let cipher = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+        assert_eq!(
+            cipher.suite_id(),
+            CipherSuiteId::XChaCha20Poly1305,
+            "profile_vault経由のVaultCipher生成と再エクスポート検証に成功。"
+        );
+        assert_eq!(
+            cipher.nonce_len(),
+            XCHACHA20_POLY1305_NONCE_LEN,
+            "profile_vault経由のノンス長取得に成功。"
         );
     }
 }

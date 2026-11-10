@@ -25,6 +25,7 @@ pub mod profile_vault;
 #[cfg(feature = "memlock")]
 pub mod memlock;
 
+pub mod cipher;
 pub mod constant_time;
 pub mod curve25519;
 pub mod error;
@@ -32,6 +33,10 @@ pub mod kdf;
 pub mod tlv;
 pub mod zeroize;
 
+pub use cipher::{
+    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, TAG_LEN, VaultCipher,
+    XCHACHA20_POLY1305_NONCE_LEN,
+};
 pub use constant_time::{
     ct_assign_slice, ct_eq_32, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,
 };
