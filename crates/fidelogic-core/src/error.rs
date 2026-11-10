@@ -30,6 +30,8 @@ pub enum TlvParseError {
 pub enum CryptoError {
     /// AEAD復号または認証タグの照合に失敗。
     AeadDecryptionFailed,
+    /// AEAD暗号化処理に失敗。
+    AeadEncryptionFailed,
     /// 鍵導出処理(Argon2id, HKDF等)に失敗。
     KeyDerivationFailed,
     /// 鍵のサイズが要求長と一致しない。
@@ -38,6 +40,8 @@ pub enum CryptoError {
     InvalidNonceSize,
     /// 認証タグのサイズが不正。
     InvalidTagSize,
+    /// 入力スライス長が不正または許容上限を超過。
+    InvalidSliceLength,
     /// 暗号パラメータ(反復回数、メモリサイズ等)が不正。
     InvalidParameter,
 }
@@ -109,10 +113,14 @@ impl core::fmt::Display for CryptoError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::AeadDecryptionFailed => write!(f, "AEAD復号または認証タグの照合に失敗しました。"),
+            Self::AeadEncryptionFailed => write!(f, "AEAD暗号化処理に失敗しました。"),
             Self::KeyDerivationFailed => write!(f, "鍵導出処理に失敗しました。"),
             Self::InvalidKeySize => write!(f, "不正な鍵サイズです。"),
             Self::InvalidNonceSize => write!(f, "不正なノンスサイズです。"),
             Self::InvalidTagSize => write!(f, "不正な認証タグサイズです。"),
+            Self::InvalidSliceLength => {
+                write!(f, "入力スライス長が不正または許容上限を超過しています。")
+            }
             Self::InvalidParameter => write!(f, "不正な暗号パラメータです。"),
         }
     }
@@ -175,8 +183,12 @@ mod tests {
         let err1 = CryptoError::AeadDecryptionFailed;
         let err2 = CryptoError::AeadDecryptionFailed;
         let err3 = CryptoError::KeyDerivationFailed;
+        let err4 = CryptoError::AeadEncryptionFailed;
+        let err5 = CryptoError::InvalidSliceLength;
         assert_eq!(err1, err2, "同一のCryptoErrorバリアント比較に成功。");
         assert_ne!(err1, err3, "異なるCryptoErrorバリアント比較に成功。");
+        assert_ne!(err1, err4, "AeadEncryptionFailedとの比較に成功。");
+        assert_ne!(err1, err5, "InvalidSliceLengthとの比較に成功。");
     }
 
     #[test]
@@ -229,6 +241,18 @@ mod tests {
         assert!(
             crypto_msg.contains("不正な鍵サイズです。"),
             "VaultError::CryptoのDisplay出力に成功。"
+        );
+
+        let encrypt_err_msg = format!("{}", VaultError::Crypto(CryptoError::AeadEncryptionFailed));
+        assert!(
+            encrypt_err_msg.contains("AEAD暗号化処理に失敗しました。"),
+            "AeadEncryptionFailedのDisplay出力に成功。"
+        );
+
+        let slice_err_msg = format!("{}", VaultError::Crypto(CryptoError::InvalidSliceLength));
+        assert!(
+            slice_err_msg.contains("入力スライス長が不正または許容上限を超過しています。"),
+            "InvalidSliceLengthのDisplay出力に成功。"
         );
 
         let system_msg = format!("{}", VaultError::System(SystemError::MemoryLockFailed));

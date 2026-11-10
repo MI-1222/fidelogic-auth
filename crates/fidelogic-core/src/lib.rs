@@ -34,8 +34,8 @@ pub mod tlv;
 pub mod zeroize;
 
 pub use cipher::{
-    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, TAG_LEN, VaultCipher,
-    XCHACHA20_POLY1305_NONCE_LEN,
+    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, MAX_AAD_LEN, MAX_PAYLOAD_LEN, TAG_LEN,
+    VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
 };
 pub use constant_time::{
     ct_assign_slice, ct_eq_32, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,

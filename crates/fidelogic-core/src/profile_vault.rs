@@ -4,8 +4,8 @@
 //! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
 
 pub use crate::cipher::{
-    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, TAG_LEN, VaultCipher,
-    XCHACHA20_POLY1305_NONCE_LEN,
+    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, MAX_AAD_LEN, MAX_PAYLOAD_LEN, TAG_LEN,
+    VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
 };
 pub use crate::error::{CryptoError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "alloc")]
