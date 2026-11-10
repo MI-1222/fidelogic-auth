@@ -6,8 +6,8 @@ edition = "2024"
 
 [features]
 default = ["std", "profile-vault"]
-std = ["alloc"]
-alloc = []
+std = ["alloc", "zeroize/std"]
+alloc = ["zeroize/alloc"]
 # profile-lite: エッジ・高速認証向けの極小バイナリプロファイル。
 profile-lite = ["alloc"]
 # profile-vault: 完全なVault操作と暗号スイートを備えたプロファイル。

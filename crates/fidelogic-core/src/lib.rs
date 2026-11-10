@@ -27,6 +27,10 @@ pub mod tlv;
 pub mod zeroize;
 
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
+pub use zeroize::{SecretBytes, volatile_zeroize};
+
+#[cfg(feature = "alloc")]
+pub use zeroize::SecretVec;
 
 /// 現在有効化されているプロファイルの識別子を返す。
 #[must_use]
