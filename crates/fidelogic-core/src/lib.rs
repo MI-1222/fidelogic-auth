@@ -26,12 +26,16 @@ pub mod profile_vault;
 pub mod memlock;
 
 pub mod constant_time;
+pub mod curve25519;
 pub mod error;
 pub mod tlv;
 pub mod zeroize;
 
 pub use constant_time::{
     ct_assign_slice, ct_eq_32, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,
+};
+pub use curve25519::{
+    edwards_basepoint_mul, ristretto_basepoint_mul, x25519_basepoint_mul, x25519_diffie_hellman,
 };
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 pub use zeroize::{SecretBytes, volatile_zeroize};
@@ -95,6 +99,16 @@ mod tests {
             buf.len(),
             32,
             "エクスポートされたLockedBufferの生成に成功。"
+        );
+    }
+
+    #[test]
+    fn test_curve25519_export() {
+        let private_key = [1u8; 32];
+        let public_key = x25519_basepoint_mul(&private_key);
+        assert_ne!(
+            public_key, [0u8; 32],
+            "エクスポートされたX25519ベースポイント乗算に成功。"
         );
     }
 }
