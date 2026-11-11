@@ -26,10 +26,15 @@ use fidelogic_core::active_profile;
 /// 現在リンクされているコアエンジンのプロファイルステータスコードを取得する。
 ///
 /// 外部C ABIからも直接呼び出し可能なインターフェース骨格。
+/// プロファイルが有効な場合は `1`、未設定(`""` または `"none"`)の場合は `0` を返す。
 #[unsafe(no_mangle)]
 pub extern "C" fn fidelogic_wasm_status() -> u32 {
     let profile = active_profile();
-    if profile.is_empty() { 0 } else { 1 }
+    if profile.is_empty() || profile == "none" {
+        0
+    } else {
+        1
+    }
 }
 
 /// Dead Store Elimination (DSE) 抑止検査用の外部C ABIエクスポート関数。
