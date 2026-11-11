@@ -281,14 +281,18 @@ impl VaultCipher {
     /// インプレース分離復号(Detached Decryption)を実行する。
     ///
     /// `buffer` に暗号文を渡し、`tag` に16バイトの認証タグを渡すと、認証成功時に平文へ上書きされる。
+    /// 内部的にはスライス長を一度だけ検証して固定長配列へ変換し、
+    /// [`Self::decrypt_in_place_detached_tag`] へ委譲する。
     ///
     /// # パニックフリー性と安全検証
-    /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
     /// - 認証タグ長が 16 バイトでない場合は [`CryptoError::InvalidTagSize`] を返す。
+    /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
     /// - 暗号文バッファ長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
     /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
     /// - パラメータ検証エラー、認証タグ不一致、または復号失敗時は、バッファを直ちに
-    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、[`CryptoError::AeadDecryptionFailed`] を返す。
+    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、対応するエラーまたは
+    ///   [`CryptoError::AeadDecryptionFailed`] を返す。
+    #[inline]
     pub fn decrypt_in_place_detached(
         &self,
         nonce: &[u8],
@@ -296,8 +300,34 @@ impl VaultCipher {
         buffer: &mut [u8],
         tag: &[u8],
     ) -> Result<(), CryptoError> {
+        let Ok(tag_arr): Result<&[u8; TAG_LEN], _> = tag.try_into() else {
+            crate::zeroize::volatile_zeroize(buffer);
+            return Err(CryptoError::InvalidTagSize);
+        };
+
+        self.decrypt_in_place_detached_tag(nonce, aad, buffer, tag_arr)
+    }
+
+    /// 固定長配列 `[u8; TAG_LEN]` の認証タグを用いてインプレース分離復号を実行する。
+    ///
+    /// コンパイル時の型システムによりタグ長が 16 バイトであることが保証され、
+    /// タグ長不一致によるランタイム検査・分岐および境界外アクセスを構造的に排除する。
+    ///
+    /// # パニックフリー性と安全検証
+    /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
+    /// - 暗号文バッファ長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
+    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
+    /// - パラメータ検証エラー、認証タグ不一致、または復号失敗時は、バッファを直ちに
+    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、対応するエラーまたは
+    ///   [`CryptoError::AeadDecryptionFailed`] を返す。
+    pub fn decrypt_in_place_detached_tag(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        buffer: &mut [u8],
+        tag: &[u8; TAG_LEN],
+    ) -> Result<(), CryptoError> {
         if let Err(err) = validate_nonce_len(self.suite_id(), nonce)
-            .and_then(|()| validate_tag_len(tag))
             .and_then(|()| validate_payload_len(buffer))
             .and_then(|()| validate_aad_len(aad))
         {
@@ -321,21 +351,6 @@ impl VaultCipher {
             crate::zeroize::volatile_zeroize(buffer);
             CryptoError::AeadDecryptionFailed
         })
-    }
-
-    /// 固定長配列 `[u8; TAG_LEN]` の認証タグを用いてインプレース分離復号を実行する。
-    ///
-    /// コンパイル時の型システムによりタグ長が 16 バイトであることが保証され、
-    /// タグ長不一致によるランタイムエラーや境界外アクセスを構造的に排除する。
-    #[inline]
-    pub fn decrypt_in_place_detached_tag(
-        &self,
-        nonce: &[u8],
-        aad: &[u8],
-        buffer: &mut [u8],
-        tag: &[u8; TAG_LEN],
-    ) -> Result<(), CryptoError> {
-        self.decrypt_in_place_detached(nonce, aad, buffer, tag.as_slice())
     }
 
     /// 平文全体を暗号化し、暗号文の末尾に16バイトの認証タグを付与したバイト列(Ciphertext || Tag)を返す。
@@ -1047,6 +1062,24 @@ mod tests {
         assert_eq!(
             tampered_dec_buf, [0u8; 31],
             "固定長タグ改ざん検出時の揮発ゼロクリアに成功。"
+        );
+
+        // 不正ノンス長での遮断とゼロクリア
+        let mut bad_nonce_dec_buf = roundtrip_buf;
+        let res_bad_nonce = cipher_x.decrypt_in_place_detached_tag(
+            &invalid_nonce,
+            aad,
+            &mut bad_nonce_dec_buf,
+            &valid_tag,
+        );
+        assert_eq!(
+            res_bad_nonce,
+            Err(CryptoError::InvalidNonceSize),
+            "固定長タグ経路の不正ノンス拒絶に成功。"
+        );
+        assert_eq!(
+            bad_nonce_dec_buf, [0u8; 31],
+            "固定長タグ経路の不正ノンス検出時の揮発ゼロクリアに成功。"
         );
 
         // 4. 空平文(0バイト)のパニックフリー暗号化・復号
