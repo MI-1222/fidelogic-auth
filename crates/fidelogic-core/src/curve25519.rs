@@ -65,16 +65,16 @@ pub fn x25519_diffie_hellman(
 ) -> Result<SecretBytes<32>, CryptoError> {
     let peer_point = MontgomeryPoint(*public_key);
     let mut shared = peer_point.mul_clamped(*secret_key.as_bytes());
-    let mut shared_bytes = shared.to_bytes();
+    let mut shared_secret = SecretBytes::zero();
+    *shared_secret.as_mut_bytes() = shared.0;
     shared.zeroize();
 
-    let is_all_zero: bool = ct_eq_32(&shared_bytes, &[0u8; 32]).into();
+    let is_all_zero: bool = ct_eq_32(shared_secret.as_bytes(), &[0u8; 32]).into();
     if is_all_zero {
-        shared_bytes.zeroize();
         return Err(CryptoError::InvalidParameter);
     }
 
-    Ok(SecretBytes::new(shared_bytes))
+    Ok(shared_secret)
 }
 
 #[cfg(test)]
