@@ -138,7 +138,11 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
             out_slice.copy_from_slice(shared.as_bytes());
             0
         }
-        Err(_) => 2,
+        Err(_) => {
+            let out_slice = unsafe { core::slice::from_raw_parts_mut(out_shared_ptr, 32) };
+            fidelogic_core::zeroize::volatile_zeroize(out_slice);
+            2
+        }
     }
 }
 
@@ -443,6 +447,20 @@ mod tests {
             );
             assert_eq!(res, 0, "X25519 DH鍵共有に成功。");
             assert_ne!(shared, [0u8; 32], "非ゼロの共有秘密の導出に成功。");
+
+            // 低位数点(全ゼロ公開鍵)による失敗時は、出力バッファの既存データがゼロ消去されることを検証する。
+            let low_order_pub = [0u8; 32];
+            shared.fill(0xAA);
+            let fail_res = fidelogic_wasm_x25519_dh(
+                priv_a.as_ptr(),
+                low_order_pub.as_ptr(),
+                shared.as_mut_ptr(),
+            );
+            assert_eq!(fail_res, 2, "低位数点検出時にエラーコード2を返却。");
+            assert_eq!(
+                shared, [0u8; 32],
+                "X25519 DH失敗時に出力バッファがゼロ消去されたことを確認。"
+            );
         }
     }
 
