@@ -35,25 +35,21 @@ pub fn ct_eq_bytes(a: &[u8], b: &[u8]) -> Choice {
     let a_gt_b = (len_a as u64).ct_gt(&(len_b as u64));
     let max_len = ct_select(a_gt_b, len_a as u64, len_b as u64) as usize;
 
-    // 空スライスに対する境界外パニック防止用ダミー参照
+    // 空スライスに対する境界外パニック防止用ダミー参照。
     static DUMMY: [u8; 1] = [0];
-    let (buf_a, effective_len_a) = if len_a == 0 {
-        (&DUMMY[..], 0usize)
-    } else {
-        (a, len_a)
-    };
-    let (buf_b, effective_len_b) = if len_b == 0 {
-        (&DUMMY[..], 0usize)
-    } else {
-        (b, len_b)
-    };
+    #[inline]
+    fn non_empty_buf(s: &[u8]) -> &[u8] {
+        if s.is_empty() { &DUMMY[..] } else { s }
+    }
+    let buf_a = non_empty_buf(a);
+    let buf_b = non_empty_buf(b);
 
     let mut diff = 0u8;
 
     for i in 0..max_len {
         let i_u64 = i as u64;
-        let valid_a = i_u64.ct_lt(&(effective_len_a as u64));
-        let valid_b = i_u64.ct_lt(&(effective_len_b as u64));
+        let valid_a = i_u64.ct_lt(&(len_a as u64));
+        let valid_b = i_u64.ct_lt(&(len_b as u64));
 
         // 境界外アクセスの防止: 有効範囲外ならダミーインデックス 0 を定数時間選択
         let idx_a = ct_select(valid_a, i_u64, 0u64) as usize;
