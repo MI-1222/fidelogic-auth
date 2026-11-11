@@ -5,7 +5,7 @@
 //! 確保された後に鍵断片が書き込まれてエラー終了した場合でも、RAII により
 //! ヒープ上へ鍵データが残留しないことを検証する。
 
-#![cfg(feature = "alloc")]
+#![cfg(all(feature = "alloc", feature = "profile-vault"))]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

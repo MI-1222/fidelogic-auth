@@ -25,14 +25,18 @@ pub mod profile_vault;
 #[cfg(feature = "memlock")]
 pub mod memlock;
 
+#[cfg(feature = "profile-vault")]
 pub mod cipher;
 pub mod constant_time;
+#[cfg(feature = "profile-lite")]
 pub mod curve25519;
 pub mod error;
+#[cfg(feature = "profile-vault")]
 pub mod kdf;
 pub mod tlv;
 pub mod zeroize;
 
+#[cfg(feature = "profile-vault")]
 pub use cipher::{
     AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, MAX_AAD_LEN, MAX_PAYLOAD_LEN, TAG_LEN,
     VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
@@ -41,10 +45,12 @@ pub use constant_time::{
     ct_assign_slice, ct_eq_32, ct_eq_array, ct_eq_bytes, ct_eq_bytes_bool, ct_select,
     ct_select_slice,
 };
+#[cfg(feature = "profile-lite")]
 pub use curve25519::{
     edwards_basepoint_mul, ristretto_basepoint_mul, x25519_basepoint_mul, x25519_diffie_hellman,
 };
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
+#[cfg(feature = "profile-vault")]
 pub use kdf::{
     Argon2Params, DEFAULT_KEY_LEN, DEFAULT_NATIVE_M_COST, DEFAULT_NATIVE_P_COST,
     DEFAULT_NATIVE_T_COST, DEFAULT_WASM_M_COST, DEFAULT_WASM_P_COST, DEFAULT_WASM_T_COST,
@@ -117,6 +123,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "profile-lite")]
     #[test]
     fn test_curve25519_export() {
         let private_key = SecretBytes::new([1u8; 32]);

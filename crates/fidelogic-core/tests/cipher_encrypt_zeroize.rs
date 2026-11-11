@@ -4,7 +4,7 @@
 //! ヒープバッファ確保後に暗号化処理がエラー終了した場合でも平文データ片が
 //! ヒープ上に残留しないことを検証する。
 
-#![cfg(feature = "alloc")]
+#![cfg(all(feature = "alloc", feature = "profile-vault"))]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

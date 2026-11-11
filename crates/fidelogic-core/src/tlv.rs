@@ -826,6 +826,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "profile-vault")]
     #[test]
     fn test_rollback_defense_aead_associated_data() {
         use crate::cipher::{
