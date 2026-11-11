@@ -184,6 +184,65 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     }
 }
 
+/// Vault暗号化・復号C ABI関数の共通検証結果を表す構造体。
+#[cfg(feature = "profile-vault")]
+struct VaultOpParams<'a> {
+    cipher: fidelogic_core::VaultCipher,
+    nonce: &'a [u8],
+    aad: &'a [u8],
+    data: &'a mut [u8],
+}
+
+/// Vault暗号化・復号C ABI関数向けの共通引数検証およびスライス構築ヘルパー。
+///
+/// # Safety
+/// 非NULLの各ポインタは指定された長さの有効なメモリ領域を指し、
+/// 返却されるライフタイム `'a` の間は他の参照とエイリアシング規則に違反しないこと。
+#[cfg(feature = "profile-vault")]
+#[allow(clippy::too_many_arguments)]
+unsafe fn parse_vault_params<'a>(
+    suite_id: u8,
+    key_ptr: *const u8,
+    nonce_ptr: *const u8,
+    nonce_len: usize,
+    aad_ptr: *const u8,
+    aad_len: usize,
+    data_ptr: *mut u8,
+    data_len: usize,
+) -> Result<VaultOpParams<'a>, u32> {
+    if key_ptr.is_null() || nonce_ptr.is_null() {
+        return Err(1);
+    }
+    if data_len > 0 && data_ptr.is_null() {
+        return Err(1);
+    }
+    if aad_len > 0 && aad_ptr.is_null() {
+        return Err(1);
+    }
+    let suite = fidelogic_core::CipherSuiteId::from_u8(suite_id).map_err(|_| 2u32)?;
+    let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
+    let cipher = fidelogic_core::VaultCipher::new(suite, key);
+
+    let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
+    let aad = if aad_len > 0 {
+        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
+    } else {
+        &[]
+    };
+    let data = if data_len > 0 {
+        unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) }
+    } else {
+        &mut []
+    };
+
+    Ok(VaultOpParams {
+        cipher,
+        nonce,
+        aad,
+        data,
+    })
+}
+
 #[cfg(feature = "profile-vault")]
 /// Vault インプレース分離暗号化の外部C ABIエクスポート関数。
 ///
@@ -201,35 +260,22 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
     data_len: usize,
     tag_out_ptr: *mut u8,
 ) -> u32 {
-    if key_ptr.is_null() || nonce_ptr.is_null() || tag_out_ptr.is_null() {
+    if tag_out_ptr.is_null() {
         return 1;
     }
-    if data_len > 0 && data_ptr.is_null() {
-        return 1;
-    }
-    if aad_len > 0 && aad_ptr.is_null() {
-        return 1;
-    }
-    let suite = match fidelogic_core::CipherSuiteId::from_u8(suite_id) {
-        Ok(s) => s,
-        Err(_) => return 2,
-    };
-    let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
-    let cipher = fidelogic_core::VaultCipher::new(suite, key);
-
-    let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
-    let aad = if aad_len > 0 {
-        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
-    } else {
-        &[]
-    };
-    let data = if data_len > 0 {
-        unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) }
-    } else {
-        &mut []
+    let params = match unsafe {
+        parse_vault_params(
+            suite_id, key_ptr, nonce_ptr, nonce_len, aad_ptr, aad_len, data_ptr, data_len,
+        )
+    } {
+        Ok(p) => p,
+        Err(code) => return code,
     };
 
-    match cipher.encrypt_in_place_detached(nonce, aad, data) {
+    match params
+        .cipher
+        .encrypt_in_place_detached(params.nonce, params.aad, params.data)
+    {
         Ok(tag) => {
             let tag_out =
                 unsafe { core::slice::from_raw_parts_mut(tag_out_ptr, fidelogic_core::TAG_LEN) };
@@ -257,36 +303,23 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
     data_len: usize,
     tag_ptr: *const u8,
 ) -> u32 {
-    if key_ptr.is_null() || nonce_ptr.is_null() || tag_ptr.is_null() {
+    if tag_ptr.is_null() {
         return 1;
     }
-    if data_len > 0 && data_ptr.is_null() {
-        return 1;
-    }
-    if aad_len > 0 && aad_ptr.is_null() {
-        return 1;
-    }
-    let suite = match fidelogic_core::CipherSuiteId::from_u8(suite_id) {
-        Ok(s) => s,
-        Err(_) => return 2,
-    };
-    let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
-    let cipher = fidelogic_core::VaultCipher::new(suite, key);
-
-    let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
-    let aad = if aad_len > 0 {
-        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
-    } else {
-        &[]
-    };
-    let data = if data_len > 0 {
-        unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) }
-    } else {
-        &mut []
+    let params = match unsafe {
+        parse_vault_params(
+            suite_id, key_ptr, nonce_ptr, nonce_len, aad_ptr, aad_len, data_ptr, data_len,
+        )
+    } {
+        Ok(p) => p,
+        Err(code) => return code,
     };
     let tag = unsafe { core::slice::from_raw_parts(tag_ptr, fidelogic_core::TAG_LEN) };
 
-    match cipher.decrypt_in_place_detached(nonce, aad, data, tag) {
+    match params
+        .cipher
+        .decrypt_in_place_detached(params.nonce, params.aad, params.data, tag)
+    {
         Ok(()) => 0,
         Err(_) => 3,
     }
