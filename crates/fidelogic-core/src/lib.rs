@@ -38,7 +38,8 @@ pub use cipher::{
     VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
 };
 pub use constant_time::{
-    ct_assign_slice, ct_eq_32, ct_eq_bytes, ct_eq_bytes_bool, ct_select, ct_select_slice,
+    ct_assign_slice, ct_eq_32, ct_eq_array, ct_eq_bytes, ct_eq_bytes_bool, ct_select,
+    ct_select_slice,
 };
 pub use curve25519::{
     edwards_basepoint_mul, ristretto_basepoint_mul, x25519_basepoint_mul, x25519_diffie_hellman,

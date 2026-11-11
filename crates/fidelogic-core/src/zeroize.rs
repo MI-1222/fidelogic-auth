@@ -146,7 +146,7 @@ impl<const N: usize> core::fmt::Debug for SecretBytes<N> {
 impl<const N: usize> subtle::ConstantTimeEq for SecretBytes<N> {
     #[inline]
     fn ct_eq(&self, other: &Self) -> subtle::Choice {
-        crate::constant_time::ct_eq_bytes(self.as_slice(), other.as_slice())
+        crate::constant_time::ct_eq_array(self.as_bytes(), other.as_bytes())
     }
 }
 
