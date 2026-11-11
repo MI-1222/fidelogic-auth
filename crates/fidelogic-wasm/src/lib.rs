@@ -66,16 +66,8 @@ pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
     static ZERO_BLOCK: [u8; 32] = [0u8; 32];
     let a_non_null = !a_ptr.is_null();
     let b_non_null = !b_ptr.is_null();
-    let safe_a_ptr = if a_non_null {
-        a_ptr
-    } else {
-        ZERO_BLOCK.as_ptr()
-    };
-    let safe_b_ptr = if b_non_null {
-        b_ptr
-    } else {
-        ZERO_BLOCK.as_ptr()
-    };
+    let safe_a_ptr = core::hint::select_unpredictable(a_non_null, a_ptr, ZERO_BLOCK.as_ptr());
+    let safe_b_ptr = core::hint::select_unpredictable(b_non_null, b_ptr, ZERO_BLOCK.as_ptr());
     let a = unsafe { &*(safe_a_ptr as *const [u8; 32]) };
     let b = unsafe { &*(safe_b_ptr as *const [u8; 32]) };
     let eq = fidelogic_core::ct_eq_32(a, b).unwrap_u8() as u32;
