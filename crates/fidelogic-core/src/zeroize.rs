@@ -119,7 +119,7 @@ impl<const N: usize> AsMut<[u8]> for SecretBytes<N> {
 }
 
 impl<const N: usize> core::ops::Deref for SecretBytes<N> {
-    type Target = [u8];
+    type Target = [u8; N];
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -377,6 +377,61 @@ mod tests {
             assert!(debug_output.contains("[REDACTED]"));
             assert!(!debug_output.contains("18"));
         }
+    }
+
+    #[test]
+    fn test_secret_bytes_deref_array() {
+        fn accept_array(arr: &[u8; 16]) -> u8 {
+            arr[0]
+        }
+        fn accept_mut_array(arr: &mut [u8; 16], val: u8) {
+            arr[1] = val;
+        }
+        fn accept_slice(slice: &[u8]) -> usize {
+            slice.len()
+        }
+        fn accept_mut_slice(slice: &mut [u8], val: u8) {
+            slice[2] = val;
+        }
+
+        let mut bytes = SecretBytes::new([0x11u8; 16]);
+
+        let array_ref: &[u8; 16] = &bytes;
+        assert_eq!(array_ref, &[0x11u8; 16], "固定長配列参照へのDerefに成功。");
+        assert_eq!(
+            accept_array(&bytes),
+            0x11,
+            "固定長配列引数の自動変換に成功。"
+        );
+        assert_eq!(
+            accept_slice(&*bytes),
+            16,
+            "明示的デリファレンス経由のスライス変換に成功。"
+        );
+        assert_eq!(
+            accept_slice(&bytes[..]),
+            16,
+            "範囲インデックス経由のスライス変換に成功。"
+        );
+        assert_eq!(
+            accept_slice(bytes.as_ref()),
+            16,
+            "AsRef経由のスライス変換に成功。"
+        );
+
+        let mut_array_ref: &mut [u8; 16] = &mut bytes;
+        mut_array_ref[0] = 0x22;
+        accept_mut_array(&mut bytes, 0x33);
+        accept_mut_slice(&mut *bytes, 0x44);
+        assert_eq!(
+            bytes[2], 0x44,
+            "明示的デリファレンス経由の可変スライス更新に成功。"
+        );
+        accept_mut_slice(bytes.as_mut(), 0x55);
+
+        assert_eq!(bytes[0], 0x22, "可変固定長配列参照経由の更新に成功。");
+        assert_eq!(bytes[1], 0x33, "可変固定長配列引数の更新に成功。");
+        assert_eq!(bytes[2], 0x55, "AsMut経由の可変スライス更新に成功。");
     }
 
     #[cfg(feature = "alloc")]
