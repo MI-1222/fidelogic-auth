@@ -167,6 +167,23 @@ pub enum VaultCipher {
     Aes256GcmSiv(Aes256GcmSiv),
 }
 
+impl Drop for VaultCipher {
+    #[inline]
+    fn drop(&mut self) {
+        // バリアント内部の XChaCha20Poly1305 および Aes256GcmSiv(内部の aes::Aes256) は、
+        // 本 Drop 完了後に実行される各フィールドの Drop により保持する鍵・拡張ラウンド鍵をゼロ消去する。
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for VaultCipher {}
+
+const _: fn() = || {
+    fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<XChaCha20Poly1305>();
+    assert_zeroize_on_drop::<aes::Aes256>();
+    assert_zeroize_on_drop::<VaultCipher>();
+};
+
 impl VaultCipher {
     /// 32バイト固定長秘密鍵配列および暗号スイート識別子から暗号インスタンスを生成する。
     #[inline]
@@ -1223,5 +1240,32 @@ mod tests {
             .decrypt(&nonce, &ct_empty, aad)
             .expect("空平文復号に成功。");
         assert!(pt_empty.is_empty(), "復号された平文が空であることを確認。");
+    }
+
+    #[test]
+    fn test_vault_cipher_zeroize_on_drop() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>(_val: &T) {}
+
+        assert!(
+            core::mem::needs_drop::<VaultCipher>(),
+            "VaultCipher が Drop 対象であることを確認。"
+        );
+        assert!(
+            core::mem::needs_drop::<XChaCha20Poly1305>(),
+            "XChaCha20Poly1305 が Drop 対象であることを確認。"
+        );
+        assert!(
+            core::mem::needs_drop::<aes::Aes256>(),
+            "aes::Aes256(zeroize有効)が Drop 対象であることを確認。"
+        );
+
+        let key = [0x42u8; KEY_LEN];
+        let cipher_x = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+        assert_zeroize_on_drop(&cipher_x);
+        drop(cipher_x);
+
+        let cipher_aes = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key);
+        assert_zeroize_on_drop(&cipher_aes);
+        drop(cipher_aes);
     }
 }
