@@ -124,8 +124,9 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
     }
     let key_arr = unsafe { &*(secret_key_ptr as *const [u8; 32]) };
     let secret = fidelogic_core::SecretBytes::new(*key_arr);
-    let public = unsafe { &*(public_key_ptr as *const [u8; 32]) };
-    match fidelogic_core::x25519_diffie_hellman(&secret, public) {
+    let public_arr = unsafe { &*(public_key_ptr as *const [u8; 32]) };
+    let public = fidelogic_core::X25519PublicKey::new(*public_arr);
+    match fidelogic_core::x25519_diffie_hellman(&secret, &public) {
         Ok(shared) => {
             let out_slice = unsafe { core::slice::from_raw_parts_mut(out_shared_ptr, 32) };
             out_slice.copy_from_slice(shared.as_bytes());
@@ -425,8 +426,11 @@ mod tests {
         let mut shared = [0u8; 32];
 
         unsafe {
-            let res =
-                fidelogic_wasm_x25519_dh(priv_a.as_ptr(), pub_b.as_ptr(), shared.as_mut_ptr());
+            let res = fidelogic_wasm_x25519_dh(
+                priv_a.as_ptr(),
+                pub_b.as_bytes().as_ptr(),
+                shared.as_mut_ptr(),
+            );
             assert_eq!(res, 0, "X25519 DH鍵共有に成功。");
             assert_ne!(shared, [0u8; 32], "非ゼロの共有秘密の導出に成功。");
         }

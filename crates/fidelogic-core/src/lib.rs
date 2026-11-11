@@ -47,7 +47,8 @@ pub use constant_time::{
 };
 #[cfg(feature = "profile-lite")]
 pub use curve25519::{
-    edwards_basepoint_mul, ristretto_basepoint_mul, x25519_basepoint_mul, x25519_diffie_hellman,
+    X25519PublicKey, X25519SharedSecret, edwards_basepoint_mul, ristretto_basepoint_mul,
+    x25519_basepoint_mul, x25519_diffie_hellman,
 };
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "profile-vault")]
@@ -129,7 +130,8 @@ mod tests {
         let private_key = SecretBytes::new([1u8; 32]);
         let public_key = x25519_basepoint_mul(&private_key);
         assert_ne!(
-            public_key, [0u8; 32],
+            public_key.as_bytes(),
+            &[0u8; 32],
             "エクスポートされたX25519ベースポイント乗算に成功。"
         );
     }
