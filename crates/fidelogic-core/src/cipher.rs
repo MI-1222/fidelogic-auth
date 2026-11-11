@@ -230,21 +230,18 @@ impl VaultCipher {
     /// - ノンス長が暗号スイートの要求長と一致しない場合は [`CryptoError::InvalidNonceSize`] を返す。
     /// - 平文バッファ長が [`MAX_PAYLOAD_LEN`] を超過またはタグ加算でオーバーフローする場合は [`CryptoError::InvalidSliceLength`] を返す。
     /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - 入力検証エラーまたは暗号化失敗時は、バッファを直ちに [`crate::zeroize::volatile_zeroize`] で
-    ///   ゼロクリアして機密残存を防ぎ、暗号化失敗時は [`CryptoError::AeadEncryptionFailed`] を返す。
+    /// - 開始前の引数検証エラー時は呼び出し元バッファを変更せずにエラーを返却し、再試行を可能とする。
+    /// - 暗号化処理自体の失敗時は、部分的な書き換え残留を防ぐためバッファを直ちに [`crate::zeroize::volatile_zeroize`] で
+    ///   ゼロクリアし、[`CryptoError::AeadEncryptionFailed`] 等を返す。
     pub fn encrypt_in_place_detached(
         &self,
         nonce: &[u8],
         aad: &[u8],
         buffer: &mut [u8],
     ) -> Result<[u8; TAG_LEN], CryptoError> {
-        if let Err(err) = validate_nonce_len(self.suite_id(), nonce)
-            .and_then(|()| validate_payload_len(buffer))
-            .and_then(|()| validate_aad_len(aad))
-        {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(err);
-        }
+        validate_nonce_len(self.suite_id(), nonce)?;
+        validate_payload_len(buffer)?;
+        validate_aad_len(aad)?;
 
         let tag = match self {
             Self::XChaCha20Poly1305(cipher) => {
@@ -997,8 +994,9 @@ mod tests {
         let invalid_nonce = [0x66u8; 10];
         let aad = b"test-aad";
 
-        // 1. encrypt_in_place_detached における不正ノンス時のゼロクリアとエラー返却
-        let mut sensitive_buf = *b"Super Secret Plaintext Data To Be Zeroized!";
+        // 1. encrypt_in_place_detached における不正ノンス時のエラー返却と平文バッファ保持(再試行可能)
+        let original_plaintext = *b"Super Secret Plaintext Data Must Survive!";
+        let mut sensitive_buf = original_plaintext;
         let res_enc_err =
             cipher_x.encrypt_in_place_detached(&invalid_nonce, aad, &mut sensitive_buf);
         assert_eq!(
@@ -1007,8 +1005,19 @@ mod tests {
             "不正ノンスによる暗号化拒絶に成功。"
         );
         assert_eq!(
-            sensitive_buf, [0u8; 43],
-            "引数検証エラー時のバッファ揮発ゼロクリアに成功。"
+            sensitive_buf, original_plaintext,
+            "開始前の引数検証エラー時は呼び出し元平文バッファを破壊しないことを確認。"
+        );
+        // 正しいノンスでの再試行が成功することを確認。
+        let retry_tag = cipher_x
+            .encrypt_in_place_detached(&valid_nonce, aad, &mut sensitive_buf)
+            .expect("正しいノンスでの再試行暗号化に成功。");
+        cipher_x
+            .decrypt_in_place_detached_tag(&valid_nonce, aad, &mut sensitive_buf, &retry_tag)
+            .expect("再試行暗号文の復号に成功。");
+        assert_eq!(
+            sensitive_buf, original_plaintext,
+            "再試行後の復号で元の平文を完全に復元。"
         );
 
         // 2. decrypt_in_place_detached における不正タグ長時のゼロクリアとエラー返却
