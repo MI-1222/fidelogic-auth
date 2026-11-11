@@ -348,12 +348,29 @@ impl<const N: usize> LockedBuffer<N> {
             let _ = libc::munlock(void_ptr, len);
         }
     }
+    /// 内部ストレージの確保済み領域全体(パディング領域を含む)を即時ゼロ消去する。
+    #[inline]
+    fn zeroize_backing_storage(&mut self) {
+        match &mut self.storage {
+            #[cfg(unix)]
+            BufferStorage::PageLocked { ptr, alloc_len } => {
+                // SAFETY: `&mut self` により排他的アクセスが保証されており、
+                // `ptr` は `mmap` で確保された `alloc_len` バイトのRW可能な有効領域を指している。
+                let full_page =
+                    unsafe { core::slice::from_raw_parts_mut(ptr.as_ptr(), *alloc_len) };
+                volatile_zeroize(full_page);
+            }
+            BufferStorage::HeapFallback(inner) => {
+                volatile_zeroize(inner.as_mut_slice());
+            }
+        }
+    }
 }
 
 impl<const N: usize> Drop for LockedBuffer<N> {
     fn drop(&mut self) {
-        // ロック解除およびメモリ解放の前に、メモリを確実にゼロ消去する。
-        volatile_zeroize(self.as_mut_slice());
+        // ロック解除およびメモリ解放の前に、パディング領域を含む確保済みメモリ全体を確実にゼロ消去する。
+        self.zeroize_backing_storage();
 
         #[cfg(unix)]
         if let BufferStorage::PageLocked { ptr, alloc_len } = self.storage {
@@ -432,7 +449,7 @@ impl<const N: usize> subtle::ConstantTimeEq for LockedBuffer<N> {
 impl<const N: usize> Zeroize for LockedBuffer<N> {
     #[inline]
     fn zeroize(&mut self) {
-        volatile_zeroize(self.as_mut_slice());
+        self.zeroize_backing_storage();
     }
 }
 
@@ -651,5 +668,32 @@ mod tests {
             buf[2], 0x44,
             "明示的デリファレンス経由の可変スライス更新に成功。"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_locked_buffer_page_locked_padding_zeroize() {
+        let mut buf = LockedBuffer::new([0xaau8; 32]);
+        if let BufferStorage::PageLocked { ptr, alloc_len } = buf.storage {
+            assert!(
+                alloc_len > 32,
+                "ページサイズ単位のアロケーションによりパディング領域が存在することの確認に成功。"
+            );
+
+            // パディング領域(Nバイト目〜alloc_len-1バイト目)に意図的に非ゼロ値を書き込み、
+            // 領域全体がゼロ消去されることを検証する。
+            unsafe {
+                let full_page = core::slice::from_raw_parts_mut(ptr.as_ptr(), alloc_len);
+                full_page[32..].fill(0x55);
+            }
+
+            buf.zeroize();
+
+            let full_page = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), alloc_len) };
+            assert!(
+                full_page.iter().all(|&b| b == 0),
+                "データ領域とパディング領域を含むページ全体のゼロ消去に成功。"
+            );
+        }
     }
 }
