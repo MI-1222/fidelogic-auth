@@ -294,7 +294,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
 }
 
 #[cfg(feature = "profile-vault")]
-/// Vault 全体のTLVデシリアライズ・シリアライズ検証の外部C ABIエクスポート関数。
+/// Vault 全体のTLVデシリアライズ検証の外部C ABIエクスポート関数。
 ///
 /// # Safety
 /// 各ポインタは指定された長さの有効なメモリ領域を指していること。
@@ -305,13 +305,30 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, 
     }
     let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
     match fidelogic_core::tlv::deserialize(bytes) {
-        Ok((vault, _)) => {
-            // シリアライズ処理も確実にリンクされるよう実行する。
-            match fidelogic_core::tlv::serialize(&vault) {
-                Ok(_) => 0,
-                Err(_) => 2,
-            }
-        }
+        Ok((_vault, _)) => 0,
+        Err(_) => 3,
+    }
+}
+
+#[cfg(feature = "profile-vault")]
+/// サイズゲート計測用アンカー: LTOによる `tlv::serialize` のデッドコード除去を抑止する内部検証用スタブ。
+///
+/// 本番API([`fidelogic_wasm_vault_deserialize`])から再シリアライズ副作用を分離するために独立させており、
+/// 通常運用からの呼び出しは想定しない。
+///
+/// # Safety
+/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_size_anchor(bytes_ptr: *const u8, len: usize) -> u32 {
+    if bytes_ptr.is_null() || len == 0 {
+        return 1;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
+    match fidelogic_core::tlv::deserialize(bytes) {
+        Ok((vault, _)) => match fidelogic_core::tlv::serialize(&vault) {
+            Ok(_) => 0,
+            Err(_) => 2,
+        },
         Err(_) => 3,
     }
 }
@@ -614,7 +631,29 @@ mod tests {
 
         unsafe {
             let res = fidelogic_wasm_vault_deserialize(header.as_ptr(), header.len());
-            assert_eq!(res, 0, "Vaultデシリアライズおよびシリアライズに成功。");
+            assert_eq!(res, 0, "Vaultデシリアライズに成功。");
+
+            let null_res = fidelogic_wasm_vault_deserialize(core::ptr::null(), header.len());
+            assert_eq!(null_res, 1, "NULLポインタ指定時に引数エラー1を返却。");
+
+            let empty_res = fidelogic_wasm_vault_deserialize(header.as_ptr(), 0);
+            assert_eq!(empty_res, 1, "長さ0指定時に引数エラー1を返却。");
+
+            let invalid_res = fidelogic_wasm_vault_deserialize(header.as_ptr(), 4);
+            assert_eq!(invalid_res, 3, "不正Vaultバイト列に対してエラー3を返却。");
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_size_anchor() {
+        let header = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+        ];
+
+        unsafe {
+            let res = fidelogic_wasm_size_anchor(header.as_ptr(), header.len());
+            assert_eq!(res, 0, "サイズ計測アンカーの往復処理に成功。");
         }
     }
 }
