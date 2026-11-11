@@ -76,12 +76,12 @@ pub fn validate_payload_len(payload: &[u8]) -> Result<(), CryptoError> {
 
 /// 関連データ(AAD)スライス長が許容上限を満たすかを事前検証する。
 #[inline]
+// 32-bit環境ではMAX_AAD_LENがusize::MAXとなり比較が恒偽になるが、環境非依存の単一コードパス維持のため許可する。
+#[allow(clippy::absurd_extreme_comparisons)]
 pub fn validate_aad_len(aad: &[u8]) -> Result<(), CryptoError> {
-    #[cfg(target_pointer_width = "64")]
     if aad.len() > MAX_AAD_LEN {
         return Err(CryptoError::InvalidSliceLength);
     }
-    let _ = aad;
     Ok(())
 }
 
