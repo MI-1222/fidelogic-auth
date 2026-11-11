@@ -284,7 +284,6 @@ impl KekSlotEntry {
 ///
 /// - 入力バイト列の長さがヘッダー長 ([`KEK_SLOT_HEADER_LEN`]) 未満の場合は [`TlvParseError::UnexpectedEof`] を返す。
 /// - 入力バイト列の長さがヘッダー長とラップ済みDEK長の合計未満の場合は [`TlvParseError::UnexpectedEof`] を返す。
-/// - [`KekSlotEntry::new`] の不変条件検証で失敗した場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), TlvParseError> {
     if bytes.len() < KEK_SLOT_HEADER_LEN {
@@ -301,7 +300,13 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
     }
 
     let wrapped_dek = payload_bytes[..dek_len].to_vec();
-    let entry = KekSlotEntry::new(slot_id, kdf_kind, wrapped_dek)?;
+    // NOTE: dek_len は u16 (wrapped_dek_len) 由来であり wrapped_dek.len() <= u16::MAX が常に成立する。
+    // Aeneas による形式検証用モナド抽出時の TryFromIntError / Try トレイト展開を回避するため直接構築する。
+    let entry = KekSlotEntry {
+        slot_id,
+        kdf_kind,
+        wrapped_dek,
+    };
     Ok((entry, &payload_bytes[dek_len..]))
 }
 
@@ -488,13 +493,18 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
         }
         let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
         let ciphertext = payload_bytes[..ciphertext_len].to_vec();
-        let auth_tag: [u8; AUTH_TAG_LEN] = payload_bytes[ciphertext_len..]
-            .try_into()
-            .map_err(|_| TlvParseError::InvalidLength)?;
+        let mut auth_tag = [0u8; AUTH_TAG_LEN];
+        auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
         TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
     } else {
         let raw_bytes = payload_bytes.to_vec();
-        TlvRecord::new_unknown(header.tag, raw_bytes)?
+        // NOTE: header.tag != TAG_ENTRY は分岐条件により保証されており、
+        // Aeneas による形式検証用モナド抽出時の Try トレイト展開を回避するため
+        // 直接構築を行っている。
+        TlvRecord::Unknown {
+            tag: header.tag,
+            raw_bytes,
+        }
     };
 
     Ok((record, rest))

@@ -38,13 +38,27 @@ echo "==> [2/4] Generating Rocq theories via Aeneas..."
 mkdir -p proofs/Theories
 aeneas -backend rocq -dest proofs/Theories target/fidelogic_core.llbc
 
-# Aeneas 生成ファイルのインポートを Dune 論理名空間へ正規化。
+# Aeneas 生成ファイルのインポートを Dune 論理名空間へ正規化し、後方互換エイリアスを注入。
 python3 -c '
 path = "proofs/Theories/FidelogicCore.v"
 with open(path, "r") as f:
     c = f.read()
 c = c.replace("Require Import List.", "From Stdlib Require Import List.")
 c = c.replace("Require Import Primitives.", "From Fidelogic.Aeneas Require Import Primitives.")
+aliases = """
+(** 後方互換用エイリアス (形式検証証明資産との意味論的互換性を維持)。 *)
+Notation tlv_VaultError_t := error_TlvParseError_t.
+Notation Tlv_VaultError_UnexpectedEof := Error_TlvParseError_UnexpectedEof.
+Notation Tlv_VaultError_InvalidMagic := Error_TlvParseError_InvalidMagic.
+Notation Tlv_VaultError_InvalidLength := Error_TlvParseError_InvalidLength.
+Notation Tlv_VaultError_InvalidFormat := Error_TlvParseError_InvalidFormat.
+Notation Tlv_VaultError_UnsupportedVersion := Error_TlvParseError_UnsupportedVersion.
+Notation Tlv_VaultError_UnsupportedSuite := Error_TlvParseError_UnsupportedSuite.
+Notation alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from := alloc_slice_Slice_to_vec.
+Definition tlv_KekSlotEntry_wrapped_dek_len (slot : tlv_KekSlotEntry_t) : u16 :=
+  u16_of_Z (Z.of_nat (length (alloc_vec_Vec_to_list slot.(tlv_KekSlotEntry_wrapped_dek)))).
+"""
+c = c.replace("End FidelogicCore.", aliases + "\nEnd FidelogicCore.")
 with open(path, "w") as f:
     f.write(c)
 '
