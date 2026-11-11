@@ -264,15 +264,7 @@ impl VaultCipher {
             }
         };
 
-        let mut tag_bytes = [0u8; TAG_LEN];
-        let tag_slice = tag.as_slice();
-        if tag_slice.len() == TAG_LEN {
-            tag_bytes.copy_from_slice(tag_slice);
-            Ok(tag_bytes)
-        } else {
-            crate::zeroize::volatile_zeroize(buffer);
-            Err(CryptoError::InvalidTagSize)
-        }
+        Ok(tag.into())
     }
 
     /// インプレース分離復号(Detached Decryption)を実行する。
