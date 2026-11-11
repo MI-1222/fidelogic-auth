@@ -278,9 +278,9 @@ impl VaultCipher {
     /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
     /// - 暗号文バッファ長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
     /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - パラメータ検証エラー、認証タグ不一致、または復号失敗時は、バッファを直ちに
-    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、対応するエラーまたは
-    ///   [`CryptoError::AeadDecryptionFailed`] を返す。
+    /// - 開始前の引数検証エラー時は呼び出し元バッファを変更せずにエラーを返却し、再試行を可能とする。
+    /// - 認証タグ不一致または復号処理自体の失敗時は、部分的な復号データの残留を防ぐためバッファを直ちに
+    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、[`CryptoError::AeadDecryptionFailed`] を返す。
     #[inline]
     pub fn decrypt_in_place_detached(
         &self,
@@ -289,10 +289,7 @@ impl VaultCipher {
         buffer: &mut [u8],
         tag: &[u8],
     ) -> Result<(), CryptoError> {
-        let Ok(tag_arr): Result<&[u8; TAG_LEN], _> = tag.try_into() else {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidTagSize);
-        };
+        let tag_arr: &[u8; TAG_LEN] = tag.try_into().map_err(|_| CryptoError::InvalidTagSize)?;
 
         self.decrypt_in_place_detached_tag(nonce, aad, buffer, tag_arr)
     }
@@ -306,9 +303,9 @@ impl VaultCipher {
     /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
     /// - 暗号文バッファ長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
     /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - パラメータ検証エラー、認証タグ不一致、または復号失敗時は、バッファを直ちに
-    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、対応するエラーまたは
-    ///   [`CryptoError::AeadDecryptionFailed`] を返す。
+    /// - 開始前の引数検証エラー時は呼び出し元バッファを変更せずにエラーを返却し、再試行を可能とする。
+    /// - 認証タグ不一致または復号処理自体の失敗時は、部分的な復号データの残留を防ぐためバッファを直ちに
+    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、[`CryptoError::AeadDecryptionFailed`] を返す。
     pub fn decrypt_in_place_detached_tag(
         &self,
         nonce: &[u8],
@@ -316,13 +313,9 @@ impl VaultCipher {
         buffer: &mut [u8],
         tag: &[u8; TAG_LEN],
     ) -> Result<(), CryptoError> {
-        if let Err(err) = validate_nonce_len(self.suite_id(), nonce)
-            .and_then(|()| validate_payload_len(buffer))
-            .and_then(|()| validate_aad_len(aad))
-        {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(err);
-        }
+        validate_nonce_len(self.suite_id(), nonce)?;
+        validate_payload_len(buffer)?;
+        validate_aad_len(aad)?;
 
         let tag_arr = GenericArray::from_slice(tag);
         let result = match self {
@@ -352,12 +345,34 @@ impl VaultCipher {
     /// - ノンス長、平文長、および AAD 長を事前に検証し、加算オーバーフローや境界外スライシングを防止する。
     /// - 暗号化失敗時は確保された一時バッファを直ちにゼロクリアし、秘密情報の残留を防ぐ。
     #[cfg(feature = "alloc")]
+    #[inline]
     pub fn encrypt(
         &self,
         nonce: &[u8],
         plaintext: &[u8],
         aad: &[u8],
     ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+        self.encrypt_with_detached(nonce, plaintext, aad, |cipher, n, a, buf| {
+            cipher.encrypt_in_place_detached(n, a, buf)
+        })
+    }
+
+    /// テスト用フック: バッファ確保後のインプレース暗号化処理を差し替えて実行する。
+    ///
+    /// [`Self::encrypt`] と同一の事前検証、ヒープ確保、および失敗時ゼロ消去経路を通るため、
+    /// 暗号化プリミティブ失敗時のヒープ残留検証に利用できる。
+    #[cfg(feature = "alloc")]
+    #[doc(hidden)]
+    pub fn encrypt_with_detached<F>(
+        &self,
+        nonce: &[u8],
+        plaintext: &[u8],
+        aad: &[u8],
+        encrypt_detached: F,
+    ) -> Result<alloc::vec::Vec<u8>, CryptoError>
+    where
+        F: FnOnce(&Self, &[u8], &[u8], &mut [u8]) -> Result<[u8; TAG_LEN], CryptoError>,
+    {
         validate_nonce_len(self.suite_id(), nonce)?;
         validate_payload_len(plaintext)?;
         validate_aad_len(aad)?;
@@ -370,7 +385,7 @@ impl VaultCipher {
         let mut buffer = zeroize::Zeroizing::new(alloc::vec::Vec::with_capacity(total_len));
         buffer.extend_from_slice(plaintext);
 
-        let tag = match self.encrypt_in_place_detached(nonce, aad, &mut buffer) {
+        let tag = match encrypt_detached(self, nonce, aad, &mut buffer) {
             Ok(tag) => tag,
             Err(err) => {
                 crate::zeroize::volatile_zeroize(&mut buffer);
@@ -1022,28 +1037,50 @@ mod tests {
             "再試行後の復号で元の平文を完全に復元。"
         );
 
-        // 2. decrypt_in_place_detached における不正タグ長時のゼロクリアとエラー返却
-        let mut cipher_buf = [0xaau8; 32];
-        let invalid_tag = [0xbbu8; 15];
-        let res_dec_tag_err =
-            cipher_x.decrypt_in_place_detached(&valid_nonce, aad, &mut cipher_buf, &invalid_tag);
-        assert_eq!(
-            res_dec_tag_err,
-            Err(CryptoError::InvalidTagSize),
-            "不正タグ長による復号拒絶に成功。"
-        );
-        assert_eq!(
-            cipher_buf, [0u8; 32],
-            "不正タグ長検出時のバッファ揮発ゼロクリアに成功。"
-        );
-
-        // 3. decrypt_in_place_detached_tag (固定長配列タグ) の正常系および改ざん検知
+        // 2. decrypt_in_place_detached における引数検証エラー時の暗号文バッファ保持(再試行可能)
         let plaintext = b"Fixed Array Tag Decryption Test";
         let mut roundtrip_buf = *plaintext;
         let valid_tag = cipher_x
             .encrypt_in_place_detached(&valid_nonce, aad, &mut roundtrip_buf)
             .expect("暗号化に成功。");
 
+        let mut dec_retry_buf = roundtrip_buf;
+        let invalid_tag = [0xbbu8; 15];
+        let res_dec_tag_err =
+            cipher_x.decrypt_in_place_detached(&valid_nonce, aad, &mut dec_retry_buf, &invalid_tag);
+        assert_eq!(
+            res_dec_tag_err,
+            Err(CryptoError::InvalidTagSize),
+            "不正タグ長による復号拒絶に成功。"
+        );
+        assert_eq!(
+            dec_retry_buf, roundtrip_buf,
+            "不正タグ長検出時は呼び出し元暗号文バッファを破壊しないことを確認。"
+        );
+
+        let res_dec_nonce_err =
+            cipher_x.decrypt_in_place_detached(&invalid_nonce, aad, &mut dec_retry_buf, &valid_tag);
+        assert_eq!(
+            res_dec_nonce_err,
+            Err(CryptoError::InvalidNonceSize),
+            "不正ノンス長による復号拒絶に成功。"
+        );
+        assert_eq!(
+            dec_retry_buf, roundtrip_buf,
+            "不正ノンス長検出時は呼び出し元暗号文バッファを破壊しないことを確認。"
+        );
+
+        // 引数修正後の再試行復号が成功することを確認。
+        cipher_x
+            .decrypt_in_place_detached(&valid_nonce, aad, &mut dec_retry_buf, &valid_tag)
+            .expect("正しい引数での再試行復号に成功。");
+        assert_eq!(
+            dec_retry_buf.as_slice(),
+            plaintext.as_slice(),
+            "再試行後の復号で元の平文を完全に復元。"
+        );
+
+        // 3. decrypt_in_place_detached_tag (固定長配列タグ) の正常系、再試行、および改ざん検知
         // 正常復号
         let mut dec_buf = roundtrip_buf;
         cipher_x
@@ -1055,7 +1092,65 @@ mod tests {
             "固定長タグ配列による平文復元に成功。"
         );
 
-        // 改ざんタグでの遮断
+        // 不正ノンス長での遮断と暗号文バッファ保持(再試行可能)
+        let mut bad_nonce_dec_buf = roundtrip_buf;
+        let res_bad_nonce = cipher_x.decrypt_in_place_detached_tag(
+            &invalid_nonce,
+            aad,
+            &mut bad_nonce_dec_buf,
+            &valid_tag,
+        );
+        assert_eq!(
+            res_bad_nonce,
+            Err(CryptoError::InvalidNonceSize),
+            "固定長タグ経路の不正ノンス拒絶に成功。"
+        );
+        assert_eq!(
+            bad_nonce_dec_buf, roundtrip_buf,
+            "固定長タグ経路の不正ノンス検出時は暗号文バッファを破壊しないことを確認。"
+        );
+        cipher_x
+            .decrypt_in_place_detached_tag(&valid_nonce, aad, &mut bad_nonce_dec_buf, &valid_tag)
+            .expect("固定長タグ経路の再試行復号に成功。");
+        assert_eq!(
+            bad_nonce_dec_buf.as_slice(),
+            plaintext.as_slice(),
+            "固定長タグ経路の再試行復号で元の平文を完全に復元。"
+        );
+
+        // AES-256-GCM-SIV でも同様に事前検証エラー時に暗号文バッファが保持されることを確認。
+        let cipher_aes = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key);
+        let valid_aes_nonce = [0x77u8; AES_256_GCM_SIV_NONCE_LEN];
+        let invalid_aes_nonce = [0x77u8; XCHACHA20_POLY1305_NONCE_LEN];
+        let mut aes_ct_buf = *plaintext;
+        let aes_tag = cipher_aes
+            .encrypt_in_place_detached(&valid_aes_nonce, aad, &mut aes_ct_buf)
+            .expect("AES-256-GCM-SIV 暗号化に成功。");
+        let mut aes_dec_buf = aes_ct_buf;
+        assert_eq!(
+            cipher_aes.decrypt_in_place_detached_tag(
+                &invalid_aes_nonce,
+                aad,
+                &mut aes_dec_buf,
+                &aes_tag
+            ),
+            Err(CryptoError::InvalidNonceSize),
+            "AES-256-GCM-SIV 固定長タグ経路の不正ノンス拒絶に成功。"
+        );
+        assert_eq!(
+            aes_dec_buf, aes_ct_buf,
+            "AES-256-GCM-SIV 不正ノンス検出時は暗号文バッファを破壊しないことを確認。"
+        );
+        cipher_aes
+            .decrypt_in_place_detached_tag(&valid_aes_nonce, aad, &mut aes_dec_buf, &aes_tag)
+            .expect("AES-256-GCM-SIV 再試行復号に成功。");
+        assert_eq!(
+            aes_dec_buf.as_slice(),
+            plaintext.as_slice(),
+            "AES-256-GCM-SIV 再試行復号で元の平文を完全に復元。"
+        );
+
+        // 改ざんタグでの遮断とゼロクリア
         let mut tampered_tag = valid_tag;
         tampered_tag[0] ^= 0xff;
         let mut tampered_dec_buf = roundtrip_buf;
@@ -1073,24 +1168,6 @@ mod tests {
         assert_eq!(
             tampered_dec_buf, [0u8; 31],
             "固定長タグ改ざん検出時の揮発ゼロクリアに成功。"
-        );
-
-        // 不正ノンス長での遮断とゼロクリア
-        let mut bad_nonce_dec_buf = roundtrip_buf;
-        let res_bad_nonce = cipher_x.decrypt_in_place_detached_tag(
-            &invalid_nonce,
-            aad,
-            &mut bad_nonce_dec_buf,
-            &valid_tag,
-        );
-        assert_eq!(
-            res_bad_nonce,
-            Err(CryptoError::InvalidNonceSize),
-            "固定長タグ経路の不正ノンス拒絶に成功。"
-        );
-        assert_eq!(
-            bad_nonce_dec_buf, [0u8; 31],
-            "固定長タグ経路の不正ノンス検出時の揮発ゼロクリアに成功。"
         );
 
         // 4. 空平文(0バイト)のパニックフリー暗号化・復号
