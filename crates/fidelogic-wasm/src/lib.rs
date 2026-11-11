@@ -128,6 +128,9 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
 #[cfg(feature = "profile-vault")]
 /// Argon2id 鍵導出の外部C ABIエクスポート関数。
 ///
+/// Wasm環境向け本番パラメータ([`fidelogic_core::Argon2Params::for_wasm`]: 19 MiB, t=2, p=1)を適用し、
+/// 指定された出力長 `out_len` で鍵を導出する。
+///
 /// # Safety
 /// 呼び出し元は各ポインタが有効であり、指定された長さのメモリ領域を指していることを保証しなければならない。
 #[unsafe(no_mangle)]
@@ -146,10 +149,11 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     let salt = unsafe { core::slice::from_raw_parts(salt_ptr, salt_len) };
     let out = unsafe { core::slice::from_raw_parts_mut(out_ptr, out_len) };
 
+    let wasm_params = fidelogic_core::Argon2Params::for_wasm();
     let params = match fidelogic_core::Argon2Params::custom(
-        fidelogic_core::FAST_TEST_M_COST,
-        fidelogic_core::FAST_TEST_T_COST,
-        fidelogic_core::FAST_TEST_P_COST,
+        wasm_params.m_cost(),
+        wasm_params.t_cost(),
+        wasm_params.p_cost(),
         Some(out_len),
     ) {
         Ok(p) => p,
@@ -360,6 +364,15 @@ mod tests {
         let password = b"master-password";
         let salt = [0x5au8; 16];
         let mut derived_key = [0u8; 32];
+        let mut expected_wasm_key = [0u8; 32];
+        let mut fast_test_key = [0u8; 32];
+
+        fidelogic_core::Argon2Params::for_wasm()
+            .derive_key(password, &salt, &mut expected_wasm_key)
+            .expect("本番Wasmパラメータでの期待値導出に成功。");
+        fidelogic_core::Argon2Params::fast_test()
+            .derive_key(password, &salt, &mut fast_test_key)
+            .expect("テスト用パラメータでの比較値導出に成功。");
 
         unsafe {
             let res = fidelogic_wasm_kdf_derive_key(
@@ -372,6 +385,25 @@ mod tests {
             );
             assert_eq!(res, 0, "Argon2id鍵導出に成功。");
             assert_ne!(derived_key, [0u8; 32], "非ゼロ鍵の導出に成功。");
+            assert_eq!(
+                derived_key, expected_wasm_key,
+                "Wasm本番用パラメータ(Argon2Params::for_wasm)の出力と一致。"
+            );
+            assert_ne!(
+                derived_key, fast_test_key,
+                "テスト用極小パラメータ(FAST_TEST_*)ではないことを確認。"
+            );
+
+            // 不正な出力長(out_len = 0)に対するパラメータ検証エラー(戻り値2)を確認。
+            let invalid_res = fidelogic_wasm_kdf_derive_key(
+                password.as_ptr(),
+                password.len(),
+                salt.as_ptr(),
+                salt.len(),
+                derived_key.as_mut_ptr(),
+                0,
+            );
+            assert_eq!(invalid_res, 2, "不正な出力長に対してエラーコード2を返却。");
         }
     }
 
