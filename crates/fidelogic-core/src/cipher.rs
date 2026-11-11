@@ -438,6 +438,7 @@ impl VaultCipher {
         let tag = ciphertext_with_tag
             .get(split_idx..)
             .ok_or(CryptoError::InvalidTagSize)?;
+        let tag_arr: &[u8; TAG_LEN] = tag.try_into().map_err(|_| CryptoError::InvalidTagSize)?;
 
         validate_nonce_len(self.suite_id(), nonce)?;
         validate_payload_len(ct_slice)?;
@@ -445,7 +446,7 @@ impl VaultCipher {
 
         let mut buffer = SecretVec::from_slice(ct_slice);
 
-        self.decrypt_in_place_detached(nonce, aad, buffer.as_mut_slice(), tag)?;
+        self.decrypt_in_place_detached_tag(nonce, aad, buffer.as_mut_slice(), tag_arr)?;
 
         Ok(buffer)
     }
