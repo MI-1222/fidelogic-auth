@@ -7,6 +7,10 @@ pub use crate::cipher::{
     AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, MAX_AAD_LEN, MAX_PAYLOAD_LEN, TAG_LEN,
     VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
 };
+pub use crate::envelope::{
+    DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SLOT_ID_PRF, SLOT_ID_RECOVERY, SlotKind, SlotStatus,
+    VaultEngine, VaultEvent, VaultState,
+};
 pub use crate::error::{CryptoError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{

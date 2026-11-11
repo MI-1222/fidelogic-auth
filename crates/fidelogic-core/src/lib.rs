@@ -30,6 +30,8 @@ pub mod cipher;
 pub mod constant_time;
 #[cfg(feature = "profile-lite")]
 pub mod curve25519;
+#[cfg(feature = "profile-vault")]
+pub mod envelope;
 pub mod error;
 #[cfg(feature = "profile-vault")]
 pub mod kdf;
@@ -49,6 +51,11 @@ pub use constant_time::{
 pub use curve25519::{
     X25519PublicKey, X25519SharedSecret, edwards_basepoint_mul, ristretto_basepoint_mul,
     x25519_basepoint_mul, x25519_diffie_hellman,
+};
+#[cfg(feature = "profile-vault")]
+pub use envelope::{
+    DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SLOT_ID_PRF, SLOT_ID_RECOVERY, SlotKind, SlotStatus,
+    VaultEngine, VaultEvent, VaultState,
 };
 pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "profile-vault")]

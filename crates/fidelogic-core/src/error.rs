@@ -69,6 +69,8 @@ pub enum VaultError {
     System(SystemError),
     /// 指定された識別子のKEKスロットが存在しない。
     SlotNotFound,
+    /// 現在のVault状態に対して不正な状態遷移または操作が要求された。
+    InvalidState,
     /// 外部公開境界における一様認証失敗例外(オラクル排除・情報流非干渉性保証用)。
     AuthenticationFailed,
     /// 世代カウンター(`epoch_id`)の巻き戻し・ロールバック攻撃を検知した例外。
@@ -142,6 +144,7 @@ impl core::fmt::Display for VaultError {
             Self::Crypto(err) => write!(f, "暗号エラー: {err}"),
             Self::System(err) => write!(f, "システムエラー: {err}"),
             Self::SlotNotFound => write!(f, "指定されたスロットが存在しません。"),
+            Self::InvalidState => write!(f, "現在の状態では実行できない不正な状態遷移です。"),
             Self::AuthenticationFailed => write!(f, "認証に失敗しました。"),
             Self::RollbackDetected => {
                 write!(f, "世代カウンターの巻き戻し(ロールバック)を検知しました。")
@@ -265,6 +268,12 @@ mod tests {
         assert_eq!(
             slot_msg, "指定されたスロットが存在しません。",
             "VaultError::SlotNotFoundのDisplay出力に成功。"
+        );
+
+        let invalid_state_msg = format!("{}", VaultError::InvalidState);
+        assert_eq!(
+            invalid_state_msg, "現在の状態では実行できない不正な状態遷移です。",
+            "VaultError::InvalidStateのDisplay出力に成功。"
         );
 
         let auth_msg = format!("{}", VaultError::AuthenticationFailed);
