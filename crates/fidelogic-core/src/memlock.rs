@@ -397,18 +397,18 @@ impl<const N: usize> AsMut<[u8]> for LockedBuffer<N> {
 }
 
 impl<const N: usize> core::ops::Deref for LockedBuffer<N> {
-    type Target = [u8];
+    type Target = [u8; N];
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.as_slice()
+        self.as_bytes()
     }
 }
 
 impl<const N: usize> core::ops::DerefMut for LockedBuffer<N> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.as_mut_slice()
+        self.as_mut_bytes()
     }
 }
 
@@ -607,5 +607,49 @@ mod tests {
         let mut buf = LockedBuffer::new([0xaau8; 16]);
         buf.zeroize();
         assert_eq!(buf.as_slice(), &[0u8; 16], "明示的ゼロ消去に成功。");
+    }
+
+    #[test]
+    fn test_locked_buffer_deref_array() {
+        fn accept_array(arr: &[u8; 16]) -> u8 {
+            arr[0]
+        }
+        fn accept_mut_array(arr: &mut [u8; 16], val: u8) {
+            arr[1] = val;
+        }
+        fn accept_slice(slice: &[u8]) -> usize {
+            slice.len()
+        }
+        fn accept_mut_slice(slice: &mut [u8], val: u8) {
+            slice[2] = val;
+        }
+
+        let mut buf = LockedBuffer::new([0x11u8; 16]);
+
+        let array_ref: &[u8; 16] = &buf;
+        assert_eq!(array_ref, &[0x11u8; 16], "固定長配列参照へのDerefに成功。");
+        assert_eq!(accept_array(&buf), 0x11, "固定長配列引数の自動変換に成功。");
+        assert_eq!(
+            accept_slice(&*buf),
+            16,
+            "明示的デリファレンス経由のスライス変換に成功。"
+        );
+        assert_eq!(
+            accept_slice(buf.as_ref()),
+            16,
+            "AsRef経由のスライス変換に成功。"
+        );
+
+        let mut_array_ref: &mut [u8; 16] = &mut buf;
+        mut_array_ref[0] = 0x22;
+        accept_mut_array(&mut buf, 0x33);
+        accept_mut_slice(&mut *buf, 0x44);
+
+        assert_eq!(buf[0], 0x22, "可変固定長配列参照経由の更新に成功。");
+        assert_eq!(buf[1], 0x33, "可変固定長配列引数の更新に成功。");
+        assert_eq!(
+            buf[2], 0x44,
+            "明示的デリファレンス経由の可変スライス更新に成功。"
+        );
     }
 }
