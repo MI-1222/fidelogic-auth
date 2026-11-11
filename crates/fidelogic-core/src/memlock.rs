@@ -17,7 +17,7 @@
 use alloc::boxed::Box;
 #[cfg(unix)]
 use core::ptr::NonNull;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::SystemError;
 use crate::zeroize::{SecretBytes, volatile_zeroize};
@@ -452,6 +452,14 @@ impl<const N: usize> Zeroize for LockedBuffer<N> {
         self.zeroize_backing_storage();
     }
 }
+
+impl<const N: usize> ZeroizeOnDrop for LockedBuffer<N> {}
+
+const _: fn() = || {
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<LockedBuffer<0>>();
+    assert_zeroize_on_drop::<LockedBuffer<32>>();
+};
 
 #[cfg(test)]
 mod tests {
