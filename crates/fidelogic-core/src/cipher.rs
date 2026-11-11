@@ -236,15 +236,10 @@ impl VaultCipher {
         aad: &[u8],
         buffer: &mut [u8],
     ) -> Result<[u8; TAG_LEN], CryptoError> {
-        if nonce.len() != self.nonce_len() {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidNonceSize);
-        }
-        if buffer.len() > MAX_PAYLOAD_LEN {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidSliceLength);
-        }
-        if let Err(err) = validate_aad_len(aad) {
+        if let Err(err) = validate_nonce_len(self.suite_id(), nonce)
+            .and_then(|()| validate_payload_len(buffer))
+            .and_then(|()| validate_aad_len(aad))
+        {
             crate::zeroize::volatile_zeroize(buffer);
             return Err(err);
         }
@@ -299,19 +294,11 @@ impl VaultCipher {
         buffer: &mut [u8],
         tag: &[u8],
     ) -> Result<(), CryptoError> {
-        if nonce.len() != self.nonce_len() {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidNonceSize);
-        }
-        if tag.len() != TAG_LEN {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidTagSize);
-        }
-        if buffer.len() > MAX_PAYLOAD_LEN {
-            crate::zeroize::volatile_zeroize(buffer);
-            return Err(CryptoError::InvalidSliceLength);
-        }
-        if let Err(err) = validate_aad_len(aad) {
+        if let Err(err) = validate_nonce_len(self.suite_id(), nonce)
+            .and_then(|()| validate_tag_len(tag))
+            .and_then(|()| validate_payload_len(buffer))
+            .and_then(|()| validate_aad_len(aad))
+        {
             crate::zeroize::volatile_zeroize(buffer);
             return Err(err);
         }
@@ -361,28 +348,15 @@ impl VaultCipher {
         plaintext: &[u8],
         aad: &[u8],
     ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
-        if nonce.len() != self.nonce_len() {
-            return Err(CryptoError::InvalidNonceSize);
-        }
         let total_len = plaintext
             .len()
             .checked_add(TAG_LEN)
             .ok_or(CryptoError::InvalidSliceLength)?;
-        if plaintext.len() > MAX_PAYLOAD_LEN {
-            return Err(CryptoError::InvalidSliceLength);
-        }
-        validate_aad_len(aad)?;
 
         let mut buffer = alloc::vec::Vec::with_capacity(total_len);
         buffer.extend_from_slice(plaintext);
 
-        let tag = match self.encrypt_in_place_detached(nonce, aad, &mut buffer) {
-            Ok(t) => t,
-            Err(err) => {
-                crate::zeroize::volatile_zeroize(&mut buffer);
-                return Err(err);
-            }
-        };
+        let tag = self.encrypt_in_place_detached(nonce, aad, &mut buffer)?;
 
         buffer.extend_from_slice(&tag);
         Ok(buffer)
@@ -401,21 +375,10 @@ impl VaultCipher {
         ciphertext_with_tag: &[u8],
         aad: &[u8],
     ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
-        if nonce.len() != self.nonce_len() {
-            return Err(CryptoError::InvalidNonceSize);
-        }
-        if ciphertext_with_tag.len() < TAG_LEN {
-            return Err(CryptoError::InvalidTagSize);
-        }
-        validate_aad_len(aad)?;
-
         let split_idx = ciphertext_with_tag
             .len()
             .checked_sub(TAG_LEN)
             .ok_or(CryptoError::InvalidTagSize)?;
-        if split_idx > MAX_PAYLOAD_LEN {
-            return Err(CryptoError::InvalidSliceLength);
-        }
 
         let ct_slice = ciphertext_with_tag
             .get(..split_idx)
@@ -426,10 +389,7 @@ impl VaultCipher {
 
         let mut buffer = alloc::vec::Vec::from(ct_slice);
 
-        if let Err(err) = self.decrypt_in_place_detached(nonce, aad, &mut buffer, tag) {
-            crate::zeroize::volatile_zeroize(&mut buffer);
-            return Err(err);
-        }
+        self.decrypt_in_place_detached(nonce, aad, &mut buffer, tag)?;
 
         Ok(buffer)
     }
