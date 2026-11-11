@@ -53,18 +53,34 @@ pub unsafe extern "C" fn fidelogic_wasm_zeroize_test(ptr: *mut u8, len: usize) {
 ///
 /// 暗号照合ブロック内部にコンパイラ最適化による早期リターンや
 /// 条件分岐命令(`br_if`, `if`, `br_table`)が注入されていないかを機械的静的検査で検証するための対象関数。
+/// `a_ptr` または `b_ptr` が NULL の場合は分岐命令を発生させずに `0`(不一致)を返す。
 ///
 /// # Safety
-/// 呼び出し元は `a_ptr` および `b_ptr` が有効であり、それぞれ少なくとも32バイトの連続した
+/// 呼び出し元は非NULLの `a_ptr` および `b_ptr` について、それぞれ少なくとも32バイトの連続した
 /// 読み取り可能メモリ領域を指していることを保証しなければならない。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
     a_ptr: *const u8,
     b_ptr: *const u8,
 ) -> u32 {
-    let a = unsafe { &*(a_ptr as *const [u8; 32]) };
-    let b = unsafe { &*(b_ptr as *const [u8; 32]) };
-    fidelogic_core::ct_eq_32(a, b).unwrap_u8() as u32
+    static ZERO_BLOCK: [u8; 32] = [0u8; 32];
+    let a_non_null = !a_ptr.is_null();
+    let b_non_null = !b_ptr.is_null();
+    let safe_a_ptr = if a_non_null {
+        a_ptr
+    } else {
+        ZERO_BLOCK.as_ptr()
+    };
+    let safe_b_ptr = if b_non_null {
+        b_ptr
+    } else {
+        ZERO_BLOCK.as_ptr()
+    };
+    let a = unsafe { &*(safe_a_ptr as *const [u8; 32]) };
+    let b = unsafe { &*(safe_b_ptr as *const [u8; 32]) };
+    let eq = fidelogic_core::ct_eq_32(a, b).unwrap_u8() as u32;
+    let valid = (a_non_null & b_non_null) as u32;
+    eq & valid
 }
 
 /// TLV Vault ヘッダーのデシリアライズを行う外部C ABIエクスポート関数。
@@ -306,6 +322,7 @@ mod tests {
         let tag2 = [0x42u8; 32];
         let mut tag3 = [0x42u8; 32];
         tag3[31] = 0x43;
+        let zero_tag = [0u8; 32];
 
         unsafe {
             assert_eq!(
@@ -315,6 +332,26 @@ mod tests {
             assert_eq!(
                 fidelogic_wasm_constant_time_eq_32(tag1.as_ptr(), tag3.as_ptr()),
                 0
+            );
+            assert_eq!(
+                fidelogic_wasm_constant_time_eq_32(core::ptr::null(), tag1.as_ptr()),
+                0,
+                "a_ptrがNULLの場合は0を返却。"
+            );
+            assert_eq!(
+                fidelogic_wasm_constant_time_eq_32(tag1.as_ptr(), core::ptr::null()),
+                0,
+                "b_ptrがNULLの場合は0を返却。"
+            );
+            assert_eq!(
+                fidelogic_wasm_constant_time_eq_32(core::ptr::null(), core::ptr::null()),
+                0,
+                "両ポインタがNULLの場合も0を返却。"
+            );
+            assert_eq!(
+                fidelogic_wasm_constant_time_eq_32(zero_tag.as_ptr(), core::ptr::null()),
+                0,
+                "ゼロ配列とNULLポインタの比較でも誤一致せず0を返却。"
             );
         }
     }
