@@ -126,21 +126,10 @@ pub fn ct_eq_32(a: &[u8; 32], b: &[u8; 32]) -> Choice {
 /// 固定長バイト配列(`N` バイト)の等価性を定数時間で判定する。
 ///
 /// 型システムにより両配列の長さ `N` がコンパイル時に一致しているため、
-/// 可変長スライス向けの長さ比較や境界選択オーバーヘッドを排除した演算を行う。
-/// 特に主要用途である 32 バイト配列(`N == 32`)については、
-/// 完全アンロール済みの分岐フリー関数 [`ct_eq_32`] へコンパイル時ディスパッチする。
+/// 可変長スライス向けの長さ比較や境界選択オーバーヘッドを排除した定数時間ループを実行する。
 #[inline]
 #[must_use]
 pub fn ct_eq_array<const N: usize>(a: &[u8; N], b: &[u8; N]) -> Choice {
-    if N == 32
-        && let (Ok(a32), Ok(b32)) = (
-            <&[u8; 32]>::try_from(a.as_slice()),
-            <&[u8; 32]>::try_from(b.as_slice()),
-        )
-    {
-        return ct_eq_32(a32, b32);
-    }
-
     let mut diff = 0u8;
     for (&x, &y) in a.iter().zip(b.iter()) {
         diff |= x ^ y;
@@ -389,7 +378,7 @@ mod tests {
         assert_eq!(ct_eq_array(&[], &[]).unwrap_u8(), 1);
         assert_eq!(empty_a.ct_eq(&empty_b).unwrap_u8(), 1);
 
-        // N = 32 の主要サイズ(ct_eq_32 経路)で先頭・末尾の差分を検出する。
+        // N = 32 の主要サイズで先頭・末尾の差分を検出する。
         let k1 = SecretBytes::new([0x3Cu8; 32]);
         let k2 = SecretBytes::new([0x3Cu8; 32]);
         let mut k_head_diff = [0x3Cu8; 32];
