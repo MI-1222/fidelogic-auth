@@ -291,7 +291,34 @@ impl Argon2Params {
         self.derive_key_with_secret(password, salt, &[], out)
     }
 
+    /// 指定されたペッパー(`secret`)と現在のパラメータから `Argon2` インスタンスを構築する。
+    fn build_argon2<'a>(&self, secret: &'a [u8]) -> Result<Argon2<'a>, CryptoError> {
+        let params = self.to_argon2_params()?;
+        if secret.is_empty() {
+            Ok(Argon2::new(self.algorithm, self.version, params))
+        } else {
+            Argon2::new_with_secret(secret, self.algorithm, self.version, params)
+                .map_err(|_| CryptoError::InvalidParameter)
+        }
+    }
+
+    /// 構築済み `Argon2` インスタンスで鍵を導出し、失敗時は出力バッファを即座にゼロクリアする。
+    fn hash_into_buffer(
+        argon2: &Argon2<'_>,
+        password: &[u8],
+        salt: &[u8],
+        out: &mut [u8],
+    ) -> Result<(), CryptoError> {
+        if argon2.hash_password_into(password, salt, out).is_err() {
+            crate::zeroize::volatile_zeroize(out);
+            return Err(CryptoError::KeyDerivationFailed);
+        }
+        Ok(())
+    }
+
     /// パスワード、ソルト、および秘密ペッパーから鍵を導出し、バッファ `out` に格納する。
+    ///
+    /// 鍵導出処理が失敗した場合は、部分的な書き込み残留を防ぐため出力バッファ `out` を即座にゼロクリアする。
     pub fn derive_key_with_secret(
         &self,
         password: &[u8],
@@ -303,20 +330,8 @@ impl Argon2Params {
             return Err(CryptoError::InvalidKeySize);
         }
 
-        let params = self.to_argon2_params()?;
-
-        let argon2 = if secret.is_empty() {
-            Argon2::new(self.algorithm, self.version, params)
-        } else {
-            Argon2::new_with_secret(secret, self.algorithm, self.version, params)
-                .map_err(|_| CryptoError::InvalidParameter)?
-        };
-
-        argon2
-            .hash_password_into(password, salt, out)
-            .map_err(|_| CryptoError::KeyDerivationFailed)?;
-
-        Ok(())
+        let argon2 = self.build_argon2(secret)?;
+        Self::hash_into_buffer(&argon2, password, salt, out)
     }
 
     /// 32バイト固定長の鍵を導出し、メモリゼロ消去が保証された [`SecretBytes<32>`] で返す。
@@ -341,9 +356,9 @@ impl Argon2Params {
             return Err(CryptoError::InvalidKeySize);
         }
 
-        let mut key_bytes = [0u8; 32];
-        self.derive_key_with_secret(password, salt, secret, &mut key_bytes)?;
-        Ok(SecretBytes::new(key_bytes))
+        let mut key_bytes = SecretBytes::<32>::zero();
+        self.derive_key_with_secret(password, salt, secret, key_bytes.as_mut_slice())?;
+        Ok(key_bytes)
     }
 
     /// 任意の出力長の鍵を導出し、メモリゼロ消去が保証された [`SecretVec`] で返す。
@@ -353,6 +368,9 @@ impl Argon2Params {
     }
 
     /// ペッパーを併用して任意の出力長の鍵を導出し、[`SecretVec`] で返す。
+    ///
+    /// バッファは最初から [`SecretVec::zeroed`] として確保するため、
+    /// 鍵導出途中でエラーやパニックが発生した場合でも RAII により確実にゼロ消去される。
     #[cfg(feature = "alloc")]
     pub fn derive_key_vec_with_secret(
         &self,
@@ -360,9 +378,29 @@ impl Argon2Params {
         salt: &[u8],
         secret: &[u8],
     ) -> Result<SecretVec, CryptoError> {
-        let mut key_vec = alloc::vec![0u8; self.output_len];
-        self.derive_key_with_secret(password, salt, secret, &mut key_vec)?;
-        Ok(SecretVec::from_vec(key_vec))
+        self.derive_key_vec_with_secret_fn(password, salt, secret, Self::hash_into_buffer)
+    }
+
+    /// テスト用フック: 出力用 [`SecretVec`] 確保後の鍵導出処理を差し替えて実行する。
+    ///
+    /// [`Self::derive_key_vec_with_secret`] と同一の事前検証、[`SecretVec::zeroed`] による
+    /// ヒープ確保、および失敗時 RAII ゼロ消去経路を通るため、鍵導出失敗時のヒープ残留検証に利用できる。
+    #[cfg(feature = "alloc")]
+    #[doc(hidden)]
+    pub fn derive_key_vec_with_secret_fn<F>(
+        &self,
+        password: &[u8],
+        salt: &[u8],
+        secret: &[u8],
+        hash_fn: F,
+    ) -> Result<SecretVec, CryptoError>
+    where
+        F: FnOnce(&Argon2<'_>, &[u8], &[u8], &mut [u8]) -> Result<(), CryptoError>,
+    {
+        let argon2 = self.build_argon2(secret)?;
+        let mut key_vec = SecretVec::zeroed(self.output_len);
+        hash_fn(&argon2, password, salt, key_vec.as_mut_slice())?;
+        Ok(key_vec)
     }
 }
 
@@ -559,6 +597,51 @@ mod tests {
         assert!(key_vec.is_ok(), "SecretVecによる鍵導出に成功。");
         let key_vec = key_vec.unwrap();
         assert_eq!(key_vec.len(), 32, "導出ベクタ長の検証に成功。");
+
+        // ペッパー指定時の導出結果の不一致および事前パラメータ検証を確認する。
+        let peppered = params
+            .derive_key_vec_with_secret(password, salt, b"pepper-secret")
+            .unwrap();
+        assert_ne!(
+            key_vec.as_slice(),
+            peppered.as_slice(),
+            "ペッパー有無によるSecretVec導出鍵の変化に成功。"
+        );
+
+        // 過大な output_len 指定時でも事前検証でヒープ確保前に拒絶することを確認する。
+        let oversized = Argon2Params::fast_test().with_output_len(usize::MAX);
+        assert_eq!(
+            oversized
+                .derive_key_vec_with_secret(password, salt, &[])
+                .err(),
+            Some(CryptoError::InvalidParameter),
+            "過大output_lenのヒープ確保前拒絶に成功。"
+        );
+
+        // 導出失敗時(ソルト長不足)のエラー返却を確認する。
+        assert_eq!(
+            params
+                .derive_key_vec_with_secret(password, b"short", b"pepper")
+                .err(),
+            Some(CryptoError::KeyDerivationFailed),
+            "不正ソルト長による鍵導出失敗の検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_argon2_derive_key_with_secret_zeroizes_on_failure() {
+        let params = Argon2Params::fast_test();
+        let mut out = [0xAAu8; 32];
+        let res = params.derive_key_with_secret(b"password", b"short", b"pepper", &mut out);
+        assert_eq!(
+            res,
+            Err(CryptoError::KeyDerivationFailed),
+            "短すぎるソルトによる鍵導出失敗の確認に成功。"
+        );
+        assert_eq!(
+            out, [0u8; 32],
+            "鍵導出失敗時に出力バッファがゼロクリアされることの確認に成功。"
+        );
     }
 
     #[test]
