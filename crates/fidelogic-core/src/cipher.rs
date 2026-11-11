@@ -194,9 +194,6 @@ impl VaultCipher {
     /// 鍵長が 32 バイトでない場合はパニックさせず、直ちに [`CryptoError::InvalidKeySize`] を返却する。
     #[inline]
     pub fn new_from_slice(suite_id: CipherSuiteId, key: &[u8]) -> Result<Self, CryptoError> {
-        if key.len() != KEY_LEN {
-            return Err(CryptoError::InvalidKeySize);
-        }
         let key_arr: &[u8; KEY_LEN] = key.try_into().map_err(|_| CryptoError::InvalidKeySize)?;
         Ok(Self::new(suite_id, key_arr))
     }
