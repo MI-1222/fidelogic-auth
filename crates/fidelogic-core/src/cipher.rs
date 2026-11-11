@@ -358,18 +358,28 @@ impl VaultCipher {
         plaintext: &[u8],
         aad: &[u8],
     ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+        validate_nonce_len(self.suite_id(), nonce)?;
+        validate_payload_len(plaintext)?;
+        validate_aad_len(aad)?;
+
         let total_len = plaintext
             .len()
             .checked_add(TAG_LEN)
             .ok_or(CryptoError::InvalidSliceLength)?;
 
-        let mut buffer = alloc::vec::Vec::with_capacity(total_len);
+        let mut buffer = zeroize::Zeroizing::new(alloc::vec::Vec::with_capacity(total_len));
         buffer.extend_from_slice(plaintext);
 
-        let tag = self.encrypt_in_place_detached(nonce, aad, &mut buffer)?;
+        let tag = match self.encrypt_in_place_detached(nonce, aad, &mut buffer) {
+            Ok(tag) => tag,
+            Err(err) => {
+                crate::zeroize::volatile_zeroize(&mut buffer);
+                return Err(err);
+            }
+        };
 
         buffer.extend_from_slice(&tag);
-        Ok(buffer)
+        Ok(core::mem::take(&mut *buffer))
     }
 
     /// 認証タグ付き暗号文(Ciphertext || Tag)を復号し、Drop時自動ゼロ消去が保証された [`SecretVec`] を返す。
@@ -1123,7 +1133,14 @@ mod tests {
         assert_eq!(
             cipher_aes.encrypt(&invalid_nonce, b"hello", aad),
             Err(CryptoError::InvalidNonceSize),
-            "不正ノンス長での暗号化拒絶に成功。"
+            "AES-GCM-SIV 不正ノンス長での暗号化拒絶に成功。"
+        );
+        let cipher_x = VaultCipher::new(CipherSuiteId::XChaCha20Poly1305, &key);
+        let invalid_x_nonce = [0x99u8; AES_256_GCM_SIV_NONCE_LEN];
+        assert_eq!(
+            cipher_x.encrypt(&invalid_x_nonce, b"hello", aad),
+            Err(CryptoError::InvalidNonceSize),
+            "XChaCha20-Poly1305 不正ノンス長での暗号化拒絶に成功。"
         );
 
         // 空平文の alloc 暗号化・復号
