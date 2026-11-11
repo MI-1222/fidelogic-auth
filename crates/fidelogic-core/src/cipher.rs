@@ -11,6 +11,8 @@ use chacha20poly1305::XChaCha20Poly1305;
 
 use crate::error::CryptoError;
 use crate::zeroize::SecretBytes;
+#[cfg(feature = "alloc")]
+use crate::zeroize::SecretVec;
 
 /// 暗号鍵長(バイト単位: 256ビット = 32バイト)
 pub const KEY_LEN: usize = 32;
@@ -338,6 +340,10 @@ impl VaultCipher {
 
     /// 平文全体を暗号化し、暗号文の末尾に16バイトの認証タグを付与したバイト列(Ciphertext || Tag)を返す。
     ///
+    /// ヒープ割り当てを伴わないゼロコストなメインストリームとして、
+    /// 通常は [`Self::encrypt_in_place_detached`] の利用を推奨する。
+    /// 本メソッドは `alloc` 環境向けの利便性補助APIである。
+    ///
     /// # パニックフリー性と安全検証
     /// - ノンス長、平文長、および AAD 長を事前に検証し、加算オーバーフローや境界外スライシングを防止する。
     /// - 暗号化失敗時は確保された一時バッファを直ちにゼロクリアし、秘密情報の残留を防ぐ。
@@ -362,19 +368,25 @@ impl VaultCipher {
         Ok(buffer)
     }
 
-    /// 認証タグ付き暗号文(Ciphertext || Tag)を復号し、平文バイト列を返す。
+    /// 認証タグ付き暗号文(Ciphertext || Tag)を復号し、Drop時自動ゼロ消去が保証された [`SecretVec`] を返す。
+    ///
+    /// ヒープ割り当てや平文コピー自体を排除するゼロコストかつ安全なメインストリームとして、
+    /// 通常はインプレース復号([`Self::decrypt_in_place_detached`] または [`Self::decrypt_in_place_detached_tag`])の利用を推奨する。
+    /// 本メソッドは `alloc` 環境向けの利便性補助APIであり、返却した平文バッファの破棄時に
+    /// [`SecretVec`] によってメモリが自動的にゼロ消去される。
     ///
     /// # パニックフリー性と安全検証
     /// - 入力長がタグ長(`TAG_LEN = 16`)未満の場合はパニックせず直ちに [`CryptoError::InvalidTagSize`] を返す。
     /// - スライス分割には `get()` による安全なインデックス参照を用い、境界外トラップを排除する。
-    /// - 復号失敗時は平文候補バッファを即座にゼロクリアする。
+    /// - バッファ確保前にノンス長、暗号文長、AAD長を検証し、不正入力による無駄なヒープ割り当てを防ぐ。
+    /// - 復号失敗時は [`SecretVec`] 内の平文候補バッファを即座にゼロクリアした上でエラーを返す。
     #[cfg(feature = "alloc")]
     pub fn decrypt(
         &self,
         nonce: &[u8],
         ciphertext_with_tag: &[u8],
         aad: &[u8],
-    ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+    ) -> Result<SecretVec, CryptoError> {
         let split_idx = ciphertext_with_tag
             .len()
             .checked_sub(TAG_LEN)
@@ -387,9 +399,13 @@ impl VaultCipher {
             .get(split_idx..)
             .ok_or(CryptoError::InvalidTagSize)?;
 
-        let mut buffer = alloc::vec::Vec::from(ct_slice);
+        validate_nonce_len(self.suite_id(), nonce)?;
+        validate_payload_len(ct_slice)?;
+        validate_aad_len(aad)?;
 
-        self.decrypt_in_place_detached(nonce, aad, &mut buffer, tag)?;
+        let mut buffer = SecretVec::from_slice(ct_slice);
+
+        self.decrypt_in_place_detached(nonce, aad, buffer.as_mut_slice(), tag)?;
 
         Ok(buffer)
     }
@@ -697,10 +713,10 @@ mod tests {
             plaintext.len() + TAG_LEN,
             "暗号文長の検証に成功。"
         );
-        let pt_x = cipher_x
+        let pt_x: SecretVec = cipher_x
             .decrypt(&nonce_x, &ct_x, aad)
             .expect("alloc復号に成功。");
-        assert_eq!(pt_x, plaintext, "復号平文の一致に成功。");
+        assert_eq!(pt_x.as_slice(), plaintext, "復号平文の一致に成功。");
 
         // AES-256-GCM-SIV
         let cipher_aes = VaultCipher::new(CipherSuiteId::Aes256GcmSiv, &key);
@@ -712,16 +728,25 @@ mod tests {
             plaintext.len() + TAG_LEN,
             "暗号文長の検証に成功。"
         );
-        let pt_aes = cipher_aes
+        let pt_aes: SecretVec = cipher_aes
             .decrypt(&nonce_aes, &ct_aes, aad)
             .expect("alloc復号に成功。");
-        assert_eq!(pt_aes, plaintext, "復号平文の一致に成功。");
+        assert_eq!(pt_aes.as_slice(), plaintext, "復号平文の一致に成功。");
+
+        // 改ざん暗号文の拒絶
+        let mut tampered_ct = ct_aes.clone();
+        tampered_ct[0] ^= 0x01;
+        assert_eq!(
+            cipher_aes.decrypt(&nonce_aes, &tampered_ct, aad).err(),
+            Some(CryptoError::AeadDecryptionFailed),
+            "改ざん暗号文の拒絶に成功。"
+        );
 
         // 不正タグ長の拒絶
         let short_ct = alloc::vec![0u8; TAG_LEN - 1];
         assert_eq!(
-            cipher_aes.decrypt(&nonce_aes, &short_ct, aad),
-            Err(CryptoError::InvalidTagSize),
+            cipher_aes.decrypt(&nonce_aes, &short_ct, aad).err(),
+            Some(CryptoError::InvalidTagSize),
             "短小暗号文の拒絶に成功。"
         );
     }
@@ -1047,8 +1072,8 @@ mod tests {
             let short_data = alloc::vec![0xcc; len];
             let res = cipher_aes.decrypt(&nonce, &short_data, aad);
             assert_eq!(
-                res,
-                Err(CryptoError::InvalidTagSize),
+                res.err(),
+                Some(CryptoError::InvalidTagSize),
                 "タグ長未満データのパニックフリー遮断に成功。"
             );
         }
@@ -1057,8 +1082,8 @@ mod tests {
         let invalid_nonce = [0x99u8; 24];
         let dummy_ct = alloc::vec![0xdd; TAG_LEN + 10];
         assert_eq!(
-            cipher_aes.decrypt(&invalid_nonce, &dummy_ct, aad),
-            Err(CryptoError::InvalidNonceSize),
+            cipher_aes.decrypt(&invalid_nonce, &dummy_ct, aad).err(),
+            Some(CryptoError::InvalidNonceSize),
             "不正ノンス長での復号拒絶に成功。"
         );
         assert_eq!(
