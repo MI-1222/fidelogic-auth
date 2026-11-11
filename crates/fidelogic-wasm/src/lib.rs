@@ -205,6 +205,9 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
     if data_len > 0 && data_ptr.is_null() {
         return 1;
     }
+    if aad_len > 0 && aad_ptr.is_null() {
+        return 1;
+    }
     let suite = match fidelogic_core::CipherSuiteId::from_u8(suite_id) {
         Ok(s) => s,
         Err(_) => return 2,
@@ -213,7 +216,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
     let cipher = fidelogic_core::VaultCipher::new(suite, key);
 
     let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
-    let aad = if aad_len > 0 && !aad_ptr.is_null() {
+    let aad = if aad_len > 0 {
         unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
     } else {
         &[]
@@ -258,6 +261,9 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
     if data_len > 0 && data_ptr.is_null() {
         return 1;
     }
+    if aad_len > 0 && aad_ptr.is_null() {
+        return 1;
+    }
     let suite = match fidelogic_core::CipherSuiteId::from_u8(suite_id) {
         Ok(s) => s,
         Err(_) => return 2,
@@ -266,7 +272,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
     let cipher = fidelogic_core::VaultCipher::new(suite, key);
 
     let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
-    let aad = if aad_len > 0 && !aad_ptr.is_null() {
+    let aad = if aad_len > 0 {
         unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
     } else {
         &[]
@@ -488,6 +494,88 @@ mod tests {
             );
             assert_eq!(dec_res, 0, "Vault復号に成功。");
             assert_eq!(buffer.as_slice(), original_data, "平文の復元に成功。");
+
+            // aad_len > 0 かつ aad_ptr == NULL はサイレント脱落させず引数エラー(1)で拒絶する。
+            let mut untouched_buf = original_data.to_vec();
+            let mut untouched_tag = [0u8; 16];
+            let null_aad_enc_res = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                core::ptr::null(),
+                aad.len(),
+                untouched_buf.as_mut_ptr(),
+                untouched_buf.len(),
+                untouched_tag.as_mut_ptr(),
+            );
+            assert_eq!(
+                null_aad_enc_res, 1,
+                "aad_len > 0 かつ aad_ptr == NULL の暗号化は引数エラー1を返却。"
+            );
+            assert_eq!(
+                untouched_buf.as_slice(),
+                original_data,
+                "暗号化エラー時はデータバッファを変更しないことを確認。"
+            );
+            assert_eq!(
+                untouched_tag, [0u8; 16],
+                "暗号化エラー時は出力タグバッファを変更しないことを確認。"
+            );
+
+            let null_aad_dec_res = fidelogic_wasm_vault_decrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                core::ptr::null(),
+                aad.len(),
+                untouched_buf.as_mut_ptr(),
+                untouched_buf.len(),
+                tag.as_ptr(),
+            );
+            assert_eq!(
+                null_aad_dec_res, 1,
+                "aad_len > 0 かつ aad_ptr == NULL の復号は引数エラー1を返却。"
+            );
+            assert_eq!(
+                untouched_buf.as_slice(),
+                original_data,
+                "復号の引数エラー時はデータバッファを変更しないことを確認。"
+            );
+
+            // aad_len == 0 かつ aad_ptr == NULL は空AADとして正常に往復できることを確認する。
+            let mut empty_aad_buf = original_data.to_vec();
+            let mut empty_aad_tag = [0u8; 16];
+            let empty_aad_enc_res = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                core::ptr::null(),
+                0,
+                empty_aad_buf.as_mut_ptr(),
+                empty_aad_buf.len(),
+                empty_aad_tag.as_mut_ptr(),
+            );
+            assert_eq!(empty_aad_enc_res, 0, "空AAD(NULL, 0)での暗号化に成功。");
+            let empty_aad_dec_res = fidelogic_wasm_vault_decrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                core::ptr::null(),
+                0,
+                empty_aad_buf.as_mut_ptr(),
+                empty_aad_buf.len(),
+                empty_aad_tag.as_ptr(),
+            );
+            assert_eq!(empty_aad_dec_res, 0, "空AAD(NULL, 0)での復号に成功。");
+            assert_eq!(
+                empty_aad_buf.as_slice(),
+                original_data,
+                "空AAD往復後の平文復元に成功。"
+            );
         }
     }
 
