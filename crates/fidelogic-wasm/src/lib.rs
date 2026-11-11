@@ -113,6 +113,7 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
     }
 }
 
+#[cfg(any(feature = "profile-lite", feature = "profile-vault"))]
 /// RFC 7748 X25519 Diffie-Hellman 鍵共有演算の外部C ABIエクスポート関数。
 ///
 /// # Safety
@@ -333,7 +334,10 @@ mod tests {
 
     #[test]
     fn test_wasm_status() {
+        #[cfg(any(feature = "profile-lite", feature = "profile-vault"))]
         assert_eq!(fidelogic_wasm_status(), 1);
+        #[cfg(all(not(feature = "profile-lite"), not(feature = "profile-vault")))]
+        assert_eq!(fidelogic_wasm_status(), 0);
     }
 
     #[test]
@@ -423,6 +427,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "profile-lite", feature = "profile-vault"))]
     #[test]
     fn test_x25519_dh() {
         let priv_a = [0x01u8; 32];
