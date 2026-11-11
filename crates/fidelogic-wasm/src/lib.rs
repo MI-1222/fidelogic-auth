@@ -130,9 +130,8 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
     if secret_key_ptr.is_null() || public_key_ptr.is_null() || out_shared_ptr.is_null() {
         return 1;
     }
-    let mut secret = fidelogic_core::SecretBytes::<32>::zero();
-    let secret_slice = unsafe { core::slice::from_raw_parts(secret_key_ptr, 32) };
-    secret.as_mut_slice().copy_from_slice(secret_slice);
+    let key_arr = unsafe { &*(secret_key_ptr as *const [u8; 32]) };
+    let secret = fidelogic_core::SecretBytes::new(*key_arr);
     let public = unsafe { &*(public_key_ptr as *const [u8; 32]) };
     match fidelogic_core::x25519_diffie_hellman(&secret, public) {
         Ok(shared) => {
