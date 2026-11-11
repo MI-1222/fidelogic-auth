@@ -23,6 +23,38 @@ static ALLOCATOR: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
 use fidelogic_core::active_profile;
 
+/// Wasm C ABI 関数の処理結果を表すステータスコード。
+///
+/// 外部 C ABI 関数の戻り値(`u32`)に対応し、成否とエラーの種類を型安全に表す。
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WasmStatusCode {
+    /// 処理が正常に完了。
+    Success = 0,
+    /// 引数ポインタが NULL、またはバッファが必要な最小の長さを満たさない。
+    InvalidPointer = 1,
+    /// 指定された暗号スイートID・鍵長・入力パラメータが不正。
+    InvalidParameter = 2,
+    /// 暗号演算・鍵導出・デシリアライズ処理に失敗。
+    ExecutionFailed = 3,
+}
+
+impl WasmStatusCode {
+    /// C ABI 戻り値向けの `u32` 値に変換する。
+    #[inline]
+    #[must_use]
+    pub const fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+impl From<WasmStatusCode> for u32 {
+    #[inline]
+    fn from(code: WasmStatusCode) -> Self {
+        code as u32
+    }
+}
+
 /// 現在リンクされているコアエンジンのプロファイルステータスコードを取得する。
 ///
 /// 外部C ABIからも直接呼び出し可能なインターフェース骨格。
@@ -95,7 +127,7 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
     out_epoch_id: *mut u64,
 ) -> u32 {
     if header_bytes_ptr.is_null() || len < fidelogic_core::tlv::VAULT_HEADER_LEN {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let slice = unsafe { core::slice::from_raw_parts(header_bytes_ptr, len) };
     match fidelogic_core::tlv::deserialize_header(slice) {
@@ -107,9 +139,9 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
                 // JS/Wasm 側のパック済みバッファ等からの非アラインポインタ渡しでも未定義動作にならないよう書き込む。
                 unsafe { core::ptr::write_unaligned(out_epoch_id, header.epoch_id) };
             }
-            0
+            WasmStatusCode::Success.as_u32()
         }
-        Err(_) => 2,
+        Err(_) => WasmStatusCode::InvalidParameter.as_u32(),
     }
 }
 
@@ -126,7 +158,7 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
     out_shared_ptr: *mut u8,
 ) -> u32 {
     if secret_key_ptr.is_null() || public_key_ptr.is_null() || out_shared_ptr.is_null() {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let key_arr = unsafe { &*(secret_key_ptr as *const [u8; 32]) };
     let secret = fidelogic_core::SecretBytes::new(*key_arr);
@@ -136,12 +168,12 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
         Ok(shared) => {
             let out_slice = unsafe { core::slice::from_raw_parts_mut(out_shared_ptr, 32) };
             out_slice.copy_from_slice(shared.as_bytes());
-            0
+            WasmStatusCode::Success.as_u32()
         }
         Err(_) => {
             let out_slice = unsafe { core::slice::from_raw_parts_mut(out_shared_ptr, 32) };
             fidelogic_core::zeroize::volatile_zeroize(out_slice);
-            2
+            WasmStatusCode::InvalidParameter.as_u32()
         }
     }
 }
@@ -164,7 +196,7 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     out_len: usize,
 ) -> u32 {
     if password_ptr.is_null() || salt_ptr.is_null() || out_ptr.is_null() {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let password = unsafe { core::slice::from_raw_parts(password_ptr, password_len) };
     let salt = unsafe { core::slice::from_raw_parts(salt_ptr, salt_len) };
@@ -175,12 +207,12 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
         .validated()
     {
         Ok(p) => p,
-        Err(_) => return 2,
+        Err(_) => return WasmStatusCode::InvalidParameter.as_u32(),
     };
 
     match params.derive_key(password, salt, out) {
-        Ok(()) => 0,
-        Err(_) => 3,
+        Ok(()) => WasmStatusCode::Success.as_u32(),
+        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
     }
 }
 
@@ -209,17 +241,18 @@ unsafe fn parse_vault_params<'a>(
     aad_len: usize,
     data_ptr: *mut u8,
     data_len: usize,
-) -> Result<VaultOpParams<'a>, u32> {
+) -> Result<VaultOpParams<'a>, WasmStatusCode> {
     if key_ptr.is_null() || nonce_ptr.is_null() {
-        return Err(1);
+        return Err(WasmStatusCode::InvalidPointer);
     }
     if data_len > 0 && data_ptr.is_null() {
-        return Err(1);
+        return Err(WasmStatusCode::InvalidPointer);
     }
     if aad_len > 0 && aad_ptr.is_null() {
-        return Err(1);
+        return Err(WasmStatusCode::InvalidPointer);
     }
-    let suite = fidelogic_core::CipherSuiteId::from_u8(suite_id).map_err(|_| 2u32)?;
+    let suite = fidelogic_core::CipherSuiteId::from_u8(suite_id)
+        .map_err(|_| WasmStatusCode::InvalidParameter)?;
     let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
     let cipher = fidelogic_core::VaultCipher::new(suite, key);
 
@@ -261,7 +294,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
     tag_out_ptr: *mut u8,
 ) -> u32 {
     if tag_out_ptr.is_null() {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let params = match unsafe {
         parse_vault_params(
@@ -269,7 +302,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
         )
     } {
         Ok(p) => p,
-        Err(code) => return code,
+        Err(code) => return code.as_u32(),
     };
 
     match params
@@ -280,9 +313,9 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
             let tag_out =
                 unsafe { core::slice::from_raw_parts_mut(tag_out_ptr, fidelogic_core::TAG_LEN) };
             tag_out.copy_from_slice(&tag);
-            0
+            WasmStatusCode::Success.as_u32()
         }
-        Err(_) => 3,
+        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
     }
 }
 
@@ -304,7 +337,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
     tag_ptr: *const u8,
 ) -> u32 {
     if tag_ptr.is_null() {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let params = match unsafe {
         parse_vault_params(
@@ -312,7 +345,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
         )
     } {
         Ok(p) => p,
-        Err(code) => return code,
+        Err(code) => return code.as_u32(),
     };
     let tag = unsafe { core::slice::from_raw_parts(tag_ptr, fidelogic_core::TAG_LEN) };
 
@@ -320,8 +353,8 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
         .cipher
         .decrypt_in_place_detached(params.nonce, params.aad, params.data, tag)
     {
-        Ok(()) => 0,
-        Err(_) => 3,
+        Ok(()) => WasmStatusCode::Success.as_u32(),
+        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
     }
 }
 
@@ -333,12 +366,12 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, len: usize) -> u32 {
     if bytes_ptr.is_null() || len == 0 {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
     match fidelogic_core::tlv::deserialize(bytes) {
-        Ok((_vault, _)) => 0,
-        Err(_) => 3,
+        Ok((_vault, _)) => WasmStatusCode::Success.as_u32(),
+        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
     }
 }
 
@@ -353,21 +386,29 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_size_anchor(bytes_ptr: *const u8, len: usize) -> u32 {
     if bytes_ptr.is_null() || len == 0 {
-        return 1;
+        return WasmStatusCode::InvalidPointer.as_u32();
     }
     let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
     match fidelogic_core::tlv::deserialize(bytes) {
         Ok((vault, _)) => match fidelogic_core::tlv::serialize(&vault) {
-            Ok(_) => 0,
-            Err(_) => 2,
+            Ok(_) => WasmStatusCode::Success.as_u32(),
+            Err(_) => WasmStatusCode::InvalidParameter.as_u32(),
         },
-        Err(_) => 3,
+        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_wasm_status_code_repr() {
+        assert_eq!(WasmStatusCode::Success.as_u32(), 0);
+        assert_eq!(u32::from(WasmStatusCode::InvalidPointer), 1);
+        assert_eq!(WasmStatusCode::InvalidParameter.as_u32(), 2);
+        assert_eq!(u32::from(WasmStatusCode::ExecutionFailed), 3);
+    }
 
     #[test]
     fn test_wasm_status() {
