@@ -37,17 +37,19 @@ pub fn ristretto_basepoint_mul(scalar: &Scalar) -> RistrettoPoint {
 
 /// RFC 7748 X25519 ベースポイントスカラー倍算を実行する。
 ///
-/// クランプ処理を内部で行い、可変ベースポイントフォールバックにより計算された公開鍵(u座標32バイト)を返す。
+/// [`SecretBytes<32>`] で保護された秘密鍵に対してクランプ処理を内部で行い、
+/// 可変ベースポイントフォールバックにより計算された公開鍵(u座標32バイト)を返す。
 #[inline]
 #[must_use]
-pub fn x25519_basepoint_mul(secret_key: &[u8; 32]) -> [u8; 32] {
-    let point = MontgomeryPoint::mul_base_clamped(*secret_key);
+pub fn x25519_basepoint_mul(secret_key: &SecretBytes<32>) -> [u8; 32] {
+    let point = MontgomeryPoint::mul_base_clamped(*secret_key.as_bytes());
     point.to_bytes()
 }
 
 /// RFC 7748 X25519 Diffie-Hellman 鍵共有演算を実行する。
 ///
-/// 秘密鍵とピアの公開鍵からクランプ乗算を行い、共有秘密(u座標32バイト)を導出する。
+/// [`SecretBytes<32>`] の秘密鍵とピアの公開鍵(`&[u8; 32]`)からクランプ乗算を行い、共有秘密(u座標32バイト)を導出する。
+/// 秘密鍵と公開鍵を型レベルで区別することで、引数順序の取り違えをコンパイル時に防止する。
 /// RFC 7748 Section 6.1 の規定に基づき、低位数点攻撃を防御するため、
 /// 導出された共有秘密が全ゼロ(All-zero output)であるかを定数時間で検証する。
 /// 全ゼロが検出された場合は処理を中断し、[`CryptoError::InvalidParameter`] を返却する。
@@ -58,20 +60,21 @@ pub fn x25519_basepoint_mul(secret_key: &[u8; 32]) -> [u8; 32] {
 /// [`CryptoError::InvalidParameter`] を返す。
 #[inline]
 pub fn x25519_diffie_hellman(
-    secret_key: &[u8; 32],
+    secret_key: &SecretBytes<32>,
     public_key: &[u8; 32],
 ) -> Result<SecretBytes<32>, CryptoError> {
     let peer_point = MontgomeryPoint(*public_key);
-    let shared = peer_point.mul_clamped(*secret_key);
-    let mut bytes = shared.to_bytes();
+    let mut shared = peer_point.mul_clamped(*secret_key.as_bytes());
+    let mut shared_bytes = shared.to_bytes();
+    shared.zeroize();
 
-    let is_all_zero: bool = ct_eq_32(&bytes, &[0u8; 32]).into();
+    let is_all_zero: bool = ct_eq_32(&shared_bytes, &[0u8; 32]).into();
     if is_all_zero {
-        bytes.zeroize();
+        shared_bytes.zeroize();
         return Err(CryptoError::InvalidParameter);
     }
 
-    Ok(SecretBytes::new(bytes))
+    Ok(SecretBytes::new(shared_bytes))
 }
 
 #[cfg(test)]
@@ -120,11 +123,11 @@ mod tests {
     #[test]
     fn test_x25519_rfc7748_test_vectors() {
         // RFC 7748 Section 6.1 テストベクタ
-        let alice_private = [
+        let alice_private = SecretBytes::new([
             0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2,
             0x66, 0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5,
             0x1d, 0xb9, 0x2c, 0x2a,
-        ];
+        ]);
         // Alice expected public key:
         // 85 20 f0 09 89 30 a7 54 74 8b 7d dc b4 3e f7 5a 0d bf 3a 0d 26 38 1a f4 eb a4 a9 8e aa 9b 4e 6a
         let alice_expected_public = [
@@ -139,11 +142,11 @@ mod tests {
         );
 
         // Bob private key (RFC 7748: 5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb)
-        let bob_private = [
+        let bob_private = SecretBytes::new([
             0x5d, 0xab, 0x08, 0x7e, 0x62, 0x4a, 0x8a, 0x4b, 0x79, 0xe1, 0x7f, 0x8b, 0x83, 0x80,
             0x0e, 0xe6, 0x6f, 0x3b, 0xb1, 0x29, 0x26, 0x18, 0xb6, 0xfd, 0x1c, 0x2f, 0x8b, 0x27,
             0xff, 0x88, 0xe0, 0xeb,
-        ];
+        ]);
         let bob_expected_public = [
             0xde, 0x9e, 0xdb, 0x7d, 0x7b, 0x7d, 0xc1, 0xb4, 0xd3, 0x5b, 0x61, 0xc2, 0xec, 0xe4,
             0x35, 0x37, 0x3f, 0x83, 0x43, 0xc8, 0x5b, 0x78, 0x67, 0x4d, 0xad, 0xfc, 0x7e, 0x14,
@@ -182,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_x25519_small_subgroup_all_zero_rejection() {
-        let private_key = [0x42u8; 32];
+        let private_key = SecretBytes::new([0x42u8; 32]);
 
         // 1. 全ゼロ公開鍵 (低位数点 u = 0)
         let zero_public = [0u8; 32];

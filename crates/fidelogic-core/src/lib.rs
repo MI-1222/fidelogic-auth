@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_curve25519_export() {
-        let private_key = [1u8; 32];
+        let private_key = SecretBytes::new([1u8; 32]);
         let public_key = x25519_basepoint_mul(&private_key);
         assert_ne!(
             public_key, [0u8; 32],

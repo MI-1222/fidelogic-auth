@@ -111,9 +111,11 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
     if secret_key_ptr.is_null() || public_key_ptr.is_null() || out_shared_ptr.is_null() {
         return 1;
     }
-    let secret = unsafe { &*(secret_key_ptr as *const [u8; 32]) };
+    let mut secret = fidelogic_core::SecretBytes::<32>::zero();
+    let secret_slice = unsafe { core::slice::from_raw_parts(secret_key_ptr, 32) };
+    secret.as_mut_slice().copy_from_slice(secret_slice);
     let public = unsafe { &*(public_key_ptr as *const [u8; 32]) };
-    match fidelogic_core::x25519_diffie_hellman(secret, public) {
+    match fidelogic_core::x25519_diffie_hellman(&secret, public) {
         Ok(shared) => {
             let out_slice = unsafe { core::slice::from_raw_parts_mut(out_shared_ptr, 32) };
             out_slice.copy_from_slice(shared.as_bytes());
@@ -340,7 +342,8 @@ mod tests {
     #[test]
     fn test_x25519_dh() {
         let priv_a = [0x01u8; 32];
-        let pub_b = fidelogic_core::x25519_basepoint_mul(&[0x02u8; 32]);
+        let pub_b =
+            fidelogic_core::x25519_basepoint_mul(&fidelogic_core::SecretBytes::new([0x02u8; 32]));
         let mut shared = [0u8; 32];
 
         unsafe {
