@@ -51,30 +51,27 @@ pub const MAX_AAD_LEN: usize = usize::MAX;
 #[inline]
 pub fn validate_nonce_len(suite_id: CipherSuiteId, nonce: &[u8]) -> Result<(), CryptoError> {
     if nonce.len() != suite_id.nonce_len() {
-        Err(CryptoError::InvalidNonceSize)
-    } else {
-        Ok(())
+        return Err(CryptoError::InvalidNonceSize);
     }
+    Ok(())
 }
 
 /// 認証タグ長が 16 バイト([`TAG_LEN`])と一致するかを事前検証する。
 #[inline]
 pub fn validate_tag_len(tag: &[u8]) -> Result<(), CryptoError> {
     if tag.len() != TAG_LEN {
-        Err(CryptoError::InvalidTagSize)
-    } else {
-        Ok(())
+        return Err(CryptoError::InvalidTagSize);
     }
+    Ok(())
 }
 
 /// 平文または暗号文スライス長が許容最大長およびオーバーフロー境界を満たすかを事前検証する。
 #[inline]
 pub fn validate_payload_len(payload: &[u8]) -> Result<(), CryptoError> {
     if payload.len() > MAX_PAYLOAD_LEN {
-        Err(CryptoError::InvalidSliceLength)
-    } else {
-        Ok(())
+        return Err(CryptoError::InvalidSliceLength);
     }
+    Ok(())
 }
 
 /// 関連データ(AAD)スライス長が許容上限を満たすかを事前検証する。
