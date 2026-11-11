@@ -60,17 +60,13 @@ pub use memlock::LockedBuffer;
 /// 現在有効化されているプロファイルの識別子を返す。
 #[must_use]
 pub fn active_profile() -> &'static str {
-    #[cfg(all(feature = "profile-lite", feature = "profile-vault"))]
+    #[cfg(feature = "profile-vault")]
     {
-        "hybrid (profile-lite + profile-vault)"
+        "profile-vault"
     }
     #[cfg(all(feature = "profile-lite", not(feature = "profile-vault")))]
     {
         "profile-lite"
-    }
-    #[cfg(all(not(feature = "profile-lite"), feature = "profile-vault"))]
-    {
-        "profile-vault"
     }
     #[cfg(all(not(feature = "profile-lite"), not(feature = "profile-vault")))]
     {
@@ -86,6 +82,13 @@ mod tests {
     fn test_active_profile_not_empty() {
         let profile_name = active_profile();
         assert!(!profile_name.is_empty());
+
+        #[cfg(feature = "profile-vault")]
+        assert_eq!(profile_name, "profile-vault");
+        #[cfg(all(feature = "profile-lite", not(feature = "profile-vault")))]
+        assert_eq!(profile_name, "profile-lite");
+        #[cfg(all(not(feature = "profile-lite"), not(feature = "profile-vault")))]
+        assert_eq!(profile_name, "none");
     }
 
     #[cfg(feature = "profile-lite")]
