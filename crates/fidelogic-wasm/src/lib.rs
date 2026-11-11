@@ -167,13 +167,10 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     let salt = unsafe { core::slice::from_raw_parts(salt_ptr, salt_len) };
     let out = unsafe { core::slice::from_raw_parts_mut(out_ptr, out_len) };
 
-    let wasm_params = fidelogic_core::Argon2Params::for_wasm();
-    let params = match fidelogic_core::Argon2Params::custom(
-        wasm_params.m_cost(),
-        wasm_params.t_cost(),
-        wasm_params.p_cost(),
-        Some(out_len),
-    ) {
+    let params = match fidelogic_core::Argon2Params::for_wasm()
+        .with_output_len(out_len)
+        .validated()
+    {
         Ok(p) => p,
         Err(_) => return 2,
     };

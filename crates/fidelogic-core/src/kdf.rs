@@ -134,6 +134,53 @@ impl Argon2Params {
         }
     }
 
+    /// メモリコスト(KiB単位)を上書きした新しいパラメータを返す。
+    ///
+    /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
+    #[must_use]
+    pub const fn with_m_cost(mut self, m_cost: u32) -> Self {
+        self.m_cost = m_cost;
+        self
+    }
+
+    /// 時間コスト(反復回数)を上書きした新しいパラメータを返す。
+    ///
+    /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
+    #[must_use]
+    pub const fn with_t_cost(mut self, t_cost: u32) -> Self {
+        self.t_cost = t_cost;
+        self
+    }
+
+    /// 並列度(スレッド/レーン数)を上書きした新しいパラメータを返す。
+    ///
+    /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
+    #[must_use]
+    pub const fn with_p_cost(mut self, p_cost: u32) -> Self {
+        self.p_cost = p_cost;
+        self
+    }
+
+    /// 導出鍵長(バイト単位)を上書きした新しいパラメータを返す。
+    ///
+    /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
+    #[must_use]
+    pub const fn with_output_len(mut self, output_len: usize) -> Self {
+        self.output_len = output_len;
+        self
+    }
+
+    /// パラメータを検証し、妥当であれば自身を返す。
+    ///
+    /// # エラー
+    ///
+    /// パラメータが RFC 9106 または `argon2` クレートの制約を満たさない場合に
+    /// [`CryptoError::InvalidParameter`] を返す。
+    pub fn validated(self) -> Result<Self, CryptoError> {
+        self.validate()?;
+        Ok(self)
+    }
+
     /// カスタムパラメータを指定して検証済みの構造体を生成する。
     ///
     /// # エラー
@@ -148,17 +195,12 @@ impl Argon2Params {
     ) -> Result<Self, CryptoError> {
         let out_len = output_len.unwrap_or(DEFAULT_KEY_LEN);
 
-        let params = Self {
-            m_cost,
-            t_cost,
-            p_cost,
-            output_len: out_len,
-            algorithm: Algorithm::Argon2id,
-            version: Version::V0x13,
-        };
-
-        params.validate()?;
-        Ok(params)
+        Self::for_wasm()
+            .with_m_cost(m_cost)
+            .with_t_cost(t_cost)
+            .with_p_cost(p_cost)
+            .with_output_len(out_len)
+            .validated()
     }
 
     /// パラメータが有効範囲内にあるかを検証する。
@@ -560,6 +602,41 @@ mod tests {
             derived.as_slice(),
             &expected_tag,
             "Argon2idマルチレーン並列公式テストベクタ照合に成功。"
+        );
+    }
+
+    #[test]
+    fn test_argon2_builder_methods() {
+        let wasm_custom_len = Argon2Params::for_wasm()
+            .with_output_len(64)
+            .validated()
+            .expect("Wasm基準の出力長上書き検証に成功。");
+        assert_eq!(wasm_custom_len.m_cost(), DEFAULT_WASM_M_COST);
+        assert_eq!(wasm_custom_len.t_cost(), DEFAULT_WASM_T_COST);
+        assert_eq!(wasm_custom_len.p_cost(), DEFAULT_WASM_P_COST);
+        assert_eq!(wasm_custom_len.output_len(), 64);
+
+        let native_custom = Argon2Params::for_native()
+            .with_m_cost(131072)
+            .with_t_cost(4)
+            .with_p_cost(2)
+            .with_output_len(48)
+            .validated()
+            .expect("Native基準の個別パラメータ上書き検証に成功。");
+        assert_eq!(native_custom.m_cost(), 131072);
+        assert_eq!(native_custom.t_cost(), 4);
+        assert_eq!(native_custom.p_cost(), 2);
+        assert_eq!(native_custom.output_len(), 48);
+
+        assert_eq!(
+            Argon2Params::for_wasm().with_output_len(0).validated(),
+            Err(CryptoError::InvalidParameter),
+            "不正な出力長0の拒絶に成功。"
+        );
+        assert_eq!(
+            Argon2Params::for_native().with_m_cost(16).validated(),
+            Err(CryptoError::InvalidParameter),
+            "並列度に対する最小メモリコスト違反の拒絶に成功。"
         );
     }
 }
