@@ -88,6 +88,8 @@ pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
 /// # Safety
 /// 呼び出し元は `header_bytes_ptr` が有効であり、少なくとも `len` バイトの
 /// 読み取り可能メモリ領域を指していることを保証しなければならない。
+/// また、非NULLの `out_suite_id` および `out_epoch_id` は、それぞれ 1 バイトおよび
+/// 8 バイトの書き込み可能メモリ領域を指している必要がある(`out_epoch_id` は非アライン可)。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_header_parse(
     header_bytes_ptr: *const u8,
@@ -105,7 +107,8 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
                 unsafe { *out_suite_id = header.suite_id };
             }
             if !out_epoch_id.is_null() {
-                unsafe { *out_epoch_id = header.epoch_id };
+                // JS/Wasm 側のパック済みバッファ等からの非アラインポインタ渡しでも未定義動作にならないよう書き込む。
+                unsafe { core::ptr::write_unaligned(out_epoch_id, header.epoch_id) };
             }
             0
         }
@@ -383,6 +386,29 @@ mod tests {
             let invalid_res =
                 fidelogic_wasm_header_parse(valid_header.as_ptr(), 5, &mut suite_id, &mut epoch_id);
             assert_eq!(invalid_res, 1, "長さ不足時の検証エラーに成功。");
+
+            // 非アラインポインタへの epoch_id 書き込みが安全に動作することを検証する。
+            #[repr(align(8))]
+            struct AlignedBuf([u8; 16]);
+            let mut unaligned_buf = AlignedBuf([0u8; 16]);
+            let unaligned_suite_ptr = unaligned_buf.0.as_mut_ptr();
+            let unaligned_epoch_ptr = unaligned_buf.0.as_mut_ptr().add(1) as *mut u64;
+            let unaligned_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                unaligned_suite_ptr,
+                unaligned_epoch_ptr,
+            );
+            assert_eq!(unaligned_res, 0, "非アライン出力ポインタでのパースに成功。");
+            assert_eq!(
+                unaligned_buf.0[0], 1,
+                "先頭1バイトの暗号スイートID書き込みに成功。"
+            );
+            assert_eq!(
+                core::ptr::read_unaligned(unaligned_epoch_ptr),
+                42,
+                "非アラインアドレスへの世代カウンター書き込みに成功。"
+            );
         }
     }
 
