@@ -12,6 +12,14 @@ pub use crate::envelope::{
     VaultEngine, VaultEvent, VaultState,
 };
 pub use crate::error::{CryptoError, SystemError, TlvParseError, VaultError};
+pub use crate::slots::{
+    Argon2idSlotPayload, KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY, KdfKind,
+    MAX_SLOT0_M_COST, MAX_SLOT0_P_COST, MAX_SLOT0_T_COST, SLOT_CIPHER_SUITE, SLOT0_CIPHERTEXT_LEN,
+    SLOT0_NONCE_LEN, SLOT0_PARAMS_LEN, SLOT0_SALT_LEN, SLOT0_TAG_LEN, SLOT0_WRAPPED_DEK_LEN,
+    find_slot_entry, inspect_kek_slots, is_valid_slot0_entry, unwrap_dek_slot0,
+    unwrap_dek_slot0_for_header, unwrap_dek_slot0_with_secret, validate_slot0_argon2_params,
+    wrap_dek_slot0, wrap_dek_slot0_for_header, wrap_dek_slot0_with_secret,
+};
 #[cfg(feature = "alloc")]
 pub use crate::tlv::{
     EntryPayload, KekSlotEntry, TlvPayload, TlvRecord, Vault, deserialize, deserialize_record,
