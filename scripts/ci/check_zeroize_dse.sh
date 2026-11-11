@@ -56,19 +56,19 @@ profile = "${profile_name}"
 with open(wat_path, "r", encoding="utf-8") as f:
     content = f.read()
 
-# 1. エクスポートシンボルから関数ID(数値または識別子)を探索.
-export_pattern = r'\(export\s+"' + re.escape(target_sym) + r'"\s+\(func\s+(?:\$)?([0-9a-zA-Z_.]+)\)\)'
-export_match = re.search(export_pattern, content)
+# 1. エクスポートシンボルを収集.
+export_re = re.compile(r'\(export\s+"([^"]+)"\s+\(func\s+(?:\$)?([0-9a-zA-Z_.]+)\)\)')
+exports = {m.group(1): m.group(2) for m in export_re.finditer(content)}
 
-func_id = None
-if export_match:
-    func_id = export_match.group(1)
-else:
-    # 直接関数名がアタッチされているケースを探索.
-    named_func_pattern = r'\(func\s+\$' + re.escape(target_sym) + r'\b'
+def resolve_export(sym):
+    if sym in exports:
+        return exports[sym]
+    named_func_pattern = r'\(func\s+\$' + re.escape(sym) + r'\b'
     if re.search(named_func_pattern, content):
-        func_id = target_sym
+        return sym
+    return None
 
+func_id = resolve_export(target_sym)
 if not func_id:
     print(f"Error: [{profile}] WAT内にエクスポートシンボル '{target_sym}' が見つかりません。", file=sys.stderr)
     sys.exit(1)
@@ -114,31 +114,32 @@ if func_id not in funcs:
 store_pattern = re.compile(r'\b(i32\.store8|i32\.store16|i32\.store|i64\.store|memory\.fill)\b')
 call_pattern = re.compile(r'\bcall\s+(?:\$)?([0-9a-zA-Z_.]+)\b')
 
-visited = set()
-queue = deque([func_id])
-matched_stores = []
-call_chain = []
+def trace_reachable(root_id):
+    visited = set()
+    queue = deque([root_id])
+    matched_stores = []
+    call_chain = []
+    while queue:
+        curr_id = queue.popleft()
+        if curr_id in visited:
+            continue
+        visited.add(curr_id)
+        call_chain.append(curr_id)
+        if curr_id not in funcs:
+            continue
+        start_line, f_lines = funcs[curr_id]
+        for rel_idx, line in enumerate(f_lines):
+            abs_line = start_line + rel_idx
+            m_store = store_pattern.search(line)
+            if m_store:
+                matched_stores.append((curr_id, abs_line, line.strip(), m_store.group(1)))
+            for m_call in call_pattern.finditer(line):
+                callee_id = m_call.group(1)
+                if callee_id not in visited:
+                    queue.append(callee_id)
+    return call_chain, matched_stores
 
-while queue:
-    curr_id = queue.popleft()
-    if curr_id in visited:
-        continue
-    visited.add(curr_id)
-    call_chain.append(curr_id)
-
-    if curr_id not in funcs:
-        continue
-
-    start_line, f_lines = funcs[curr_id]
-    for rel_idx, line in enumerate(f_lines):
-        abs_line = start_line + rel_idx
-        m_store = store_pattern.search(line)
-        if m_store:
-            matched_stores.append((curr_id, abs_line, line.strip(), m_store.group(1)))
-        for m_call in call_pattern.finditer(line):
-            callee_id = m_call.group(1)
-            if callee_id not in visited:
-                queue.append(callee_id)
+call_chain, matched_stores = trace_reachable(func_id)
 
 if not matched_stores:
     print(f"Error: [{profile}] '{target_sym}' のスコープ内(呼び出しチェーン: {' -> '.join(call_chain)})に揮発性ストア命令(i32.store8 / i32.store / memory.fill)が検出されませんでした！", file=sys.stderr)
@@ -148,6 +149,39 @@ if not matched_stores:
 print(f"==> [{profile}] [SUCCESS] Verified zeroize stores preserved in '{target_sym}' scope (call chain: {' -> '.join(call_chain)}):")
 for fid, line_no, code, inst in matched_stores:
     print(f"  Line {line_no} in func {fid}: [{inst}] -> {code}")
+
+# zeroize ゼロクリアストア関数群(i32.const 0 に続く i32.store8 ループ、または memory.fill によるゼロ埋め)を抽出.
+zero_loop_funcs = set()
+for fid, (_, f_lines) in funcs.items():
+    body = "\n".join(f_lines)
+    if ("loop" in body and re.search(r'i32\.const\s+0\s*\n\s*i32\.store8\b', body)) or re.search(r'i32\.const\s+0\s*\n[^\n]*\n\s*memory\.fill\b', body):
+        zero_loop_funcs.add(fid)
+
+volatile_zeroize_callees = set(call_chain) - {func_id}
+if not (volatile_zeroize_callees & zero_loop_funcs) and not matched_stores:
+    print(f"Error: [{profile}] '{target_sym}' の呼び出し先にゼロクリアストア命令を特定できませんでした。", file=sys.stderr)
+    sys.exit(1)
+
+# 4. 本番エクスポート関数でのゼロ消去到達検証(DSE/DCE バイパス防止).
+prod_checks = [("fidelogic_wasm_x25519_dh", zero_loop_funcs | volatile_zeroize_callees)]
+if profile == "profile-vault":
+    prod_checks.extend([
+        ("fidelogic_wasm_vault_encrypt", volatile_zeroize_callees),
+        ("fidelogic_wasm_vault_decrypt", volatile_zeroize_callees),
+        ("fidelogic_wasm_kdf_derive_key", zero_loop_funcs | volatile_zeroize_callees),
+    ])
+
+for prod_sym, expected_targets in prod_checks:
+    prod_fid = resolve_export(prod_sym)
+    if not prod_fid:
+        print(f"Error: [{profile}] 本番シンボル '{prod_sym}' が WAT 内に見つかりません。", file=sys.stderr)
+        sys.exit(1)
+    prod_chain, _ = trace_reachable(prod_fid)
+    reached = sorted(set(prod_chain) & expected_targets)
+    if not reached:
+        print(f"Error: [{profile}] 本番関数 '{prod_sym}' (func {prod_fid}) から zeroize / volatile_zeroize 処理への到達が DSE または DCE により消失しました！", file=sys.stderr)
+        sys.exit(1)
+    print(f"==> [{profile}] [SUCCESS] Verified production '{prod_sym}' preserves zeroize reachability -> funcs {reached}")
 EOF
 }
 
@@ -162,12 +196,12 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "### Zeroize & DSE Prevention Verification Summary"
     echo ""
-    echo "| Profile | Target Function | Memory Clearing Stores (\`store8\`, \`store\`, \`fill\`) | Result |"
+    echo "| Profile | Checked Targets | Memory Clearing Stores | Result |"
     echo "| :--- | :--- | :--- | :--- |"
-    echo "| \`profile-lite\` | \`${TARGET_SYMBOL}\` | Preserved | **PASS** |"
-    echo "| \`profile-vault\` | \`${TARGET_SYMBOL}\` | Preserved | **PASS** |"
+    echo "| \`profile-lite\` | \`${TARGET_SYMBOL}\`, \`fidelogic_wasm_x25519_dh\` | Preserved | **PASS** |"
+    echo "| \`profile-vault\` | \`${TARGET_SYMBOL}\`, \`fidelogic_wasm_x25519_dh\`, \`fidelogic_wasm_vault_encrypt\`, \`fidelogic_wasm_vault_decrypt\`, \`fidelogic_wasm_kdf_derive_key\` | Preserved | **PASS** |"
     echo ""
-    echo "WebAssembly逆アセンブル解析により、Dead Store Elimination (DSE) によるゼロ消去ストア命令の欠落がないことを確認しました。"
+    echo "WebAssembly逆アセンブル解析により、検証用スタブおよび本番暗号・鍵導出エクスポート関数からのゼロ消去処理到達(DSE抑止)を確認しました。"
   } >> "${GITHUB_STEP_SUMMARY}"
 fi
 
