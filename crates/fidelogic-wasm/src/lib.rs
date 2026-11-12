@@ -117,7 +117,7 @@ pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
 /// # Safety
 /// 呼び出し元は `header_bytes_ptr` が有効であり、少なくとも `len` バイトの
 /// 読み取り可能メモリ領域を指していることを保証しなければならない。
-/// また、非NULLの `out_suite_id` および `out_epoch_id` は、それぞれ 1 バイトおよび
+/// また、`out_suite_id` および `out_epoch_id` は非NULLであり、それぞれ 1 バイトおよび
 /// 8 バイトの書き込み可能メモリ領域を指している必要がある(`out_epoch_id` は非アライン可)。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_header_parse(
@@ -126,18 +126,20 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
     out_suite_id: *mut u8,
     out_epoch_id: *mut u64,
 ) -> u32 {
-    if header_bytes_ptr.is_null() || len < fidelogic_core::tlv::VAULT_HEADER_LEN {
+    if header_bytes_ptr.is_null()
+        || out_suite_id.is_null()
+        || out_epoch_id.is_null()
+        || len < fidelogic_core::tlv::VAULT_HEADER_LEN
+    {
         return WasmStatusCode::InvalidPointer.as_u32();
     }
     let slice = unsafe { core::slice::from_raw_parts(header_bytes_ptr, len) };
     match fidelogic_core::tlv::deserialize_header(slice) {
         Ok((header, _)) => {
-            if !out_suite_id.is_null() {
-                unsafe { *out_suite_id = header.suite_id };
-            }
-            if !out_epoch_id.is_null() {
+            unsafe {
+                *out_suite_id = header.suite_id;
                 // JS/Wasm 側のパック済みバッファ等からの非アラインポインタ渡しでも未定義動作にならないよう書き込む。
-                unsafe { core::ptr::write_unaligned(out_epoch_id, header.epoch_id) };
+                core::ptr::write_unaligned(out_epoch_id, header.epoch_id);
             }
             WasmStatusCode::Success.as_u32()
         }
@@ -479,6 +481,40 @@ mod tests {
             let invalid_res =
                 fidelogic_wasm_header_parse(valid_header.as_ptr(), 5, &mut suite_id, &mut epoch_id);
             assert_eq!(invalid_res, 1, "長さ不足時の検証エラーに成功。");
+
+            // NULLポインタ引数に対するエラーの検証
+            let null_header_res = fidelogic_wasm_header_parse(
+                core::ptr::null(),
+                valid_header.len(),
+                &mut suite_id,
+                &mut epoch_id,
+            );
+            assert_eq!(
+                null_header_res, 1,
+                "ヘッダーポインタNULL時にエラーコード1を返却。"
+            );
+
+            let null_suite_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                core::ptr::null_mut(),
+                &mut epoch_id,
+            );
+            assert_eq!(
+                null_suite_res, 1,
+                "suite_id出力ポインタNULL時にエラーコード1を返却。"
+            );
+
+            let null_epoch_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                &mut suite_id,
+                core::ptr::null_mut(),
+            );
+            assert_eq!(
+                null_epoch_res, 1,
+                "epoch_id出力ポインタNULL時にエラーコード1を返却。"
+            );
 
             // 非アラインポインタへの epoch_id 書き込みが安全に動作することを検証する。
             #[repr(align(8))]
