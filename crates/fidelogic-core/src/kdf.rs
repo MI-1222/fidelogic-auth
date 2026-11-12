@@ -1,17 +1,26 @@
 //! # 鍵導出モジュール (KDF: Key Derivation Function)
 //!
-//! Argon2id(RFC 9106)に基づくパスワード鍵導出機能を提供する。
-//! Native環境におけるマルチコア並列化(`parallel` フィーチャーおよびレーン並列度)と、
-//! WebAssembly(Wasm)やエッジ環境におけるシングルスレッド実行の差異を吸収する、
+//! Argon2id (RFC 9106) に基づくパスワード鍵導出機能、
+//! および HKDF-SHA256 (RFC 5869) に基づく鍵展開機能を提供する。
+//! Native環境におけるマルチコア並列化 (`parallel` フィーチャーおよびレーン並列度) と、
+//! WebAssembly (Wasm) やエッジ環境におけるシングルスレッド実行の差異を吸収する、
 //! パラメータ抽象化構造体 [`Argon2Params`] を定義する。
 
 use argon2::{Algorithm, Argon2, Params, Version};
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 use crate::error::CryptoError;
-use crate::zeroize::SecretBytes;
+use crate::zeroize::{SecretBytes, volatile_zeroize};
 
 #[cfg(feature = "alloc")]
 use crate::zeroize::SecretVec;
+
+/// SHA-256 ダイジェストおよび HKDF-SHA256 PRK の標準長 (32バイト)。
+pub const HKDF_SHA256_HASH_LEN: usize = 32;
+
+/// RFC 5869 規定における HKDF-SHA256 の最大出力長 (`255 * HashLen` = 8160バイト)。
+pub const HKDF_SHA256_MAX_OUTPUT_LEN: usize = 255 * HKDF_SHA256_HASH_LEN;
 
 /// Native環境における既定のメモリコスト(KiB単位: 64 MiB)
 pub const DEFAULT_NATIVE_M_COST: u32 = 65536;
@@ -404,6 +413,76 @@ impl Argon2Params {
     }
 }
 
+/// RFC 5869 準拠の HKDF-SHA256 (Extract-and-Expand) により鍵を導出し、`out` へ格納する。
+///
+/// Extract 段階で生成された疑似乱数鍵 (PRK) は直ちに [`volatile_zeroize`] で消去し、
+/// 出力長不正や Expand 失敗時は `out` 全体を即座にゼロクリアする。
+///
+/// # Errors
+///
+/// - `out` が空、または [`HKDF_SHA256_MAX_OUTPUT_LEN`] (8160バイト) を超える場合は、
+///   [`CryptoError::InvalidKeySize`] を返す。
+/// - Expand 処理に失敗した場合は [`CryptoError::KeyDerivationFailed`] を返す。
+pub fn hkdf_sha256_derive(
+    salt: &[u8],
+    ikm: &[u8],
+    info: &[u8],
+    out: &mut [u8],
+) -> Result<(), CryptoError> {
+    if out.is_empty() || out.len() > HKDF_SHA256_MAX_OUTPUT_LEN {
+        volatile_zeroize(out);
+        return Err(CryptoError::InvalidKeySize);
+    }
+
+    let (mut prk, hk) = Hkdf::<Sha256>::extract(Some(salt), ikm);
+    volatile_zeroize(prk.as_mut_slice());
+
+    if hk.expand(info, out).is_err() {
+        volatile_zeroize(out);
+        return Err(CryptoError::KeyDerivationFailed);
+    }
+
+    Ok(())
+}
+
+/// RFC 5869 準拠の HKDF-SHA256 により 32バイト固定長の鍵を導出し、[`SecretBytes<32>`] で返す。
+///
+/// # Errors
+///
+/// 鍵導出処理に失敗した場合は [`CryptoError`] を返す。
+pub fn hkdf_sha256_derive_32(
+    salt: &[u8],
+    ikm: &[u8],
+    info: &[u8],
+) -> Result<SecretBytes<32>, CryptoError> {
+    let mut key = SecretBytes::<32>::zero();
+    hkdf_sha256_derive(salt, ikm, info, key.as_mut_slice())?;
+    Ok(key)
+}
+
+/// RFC 5869 準拠の HKDF-SHA256 により任意長 (`1..=8160` バイト) の鍵を導出し、[`SecretVec`] で返す。
+///
+/// # Errors
+///
+/// - `output_len` が `0` または [`HKDF_SHA256_MAX_OUTPUT_LEN`] を超える場合は、
+///   ヒープ確保を行わずに [`CryptoError::InvalidKeySize`] を返す。
+/// - 鍵導出処理に失敗した場合は [`CryptoError::KeyDerivationFailed`] を返す。
+#[cfg(feature = "alloc")]
+pub fn hkdf_sha256_derive_vec(
+    salt: &[u8],
+    ikm: &[u8],
+    info: &[u8],
+    output_len: usize,
+) -> Result<SecretVec, CryptoError> {
+    if output_len == 0 || output_len > HKDF_SHA256_MAX_OUTPUT_LEN {
+        return Err(CryptoError::InvalidKeySize);
+    }
+
+    let mut key_vec = SecretVec::zeroed(output_len);
+    hkdf_sha256_derive(salt, ikm, info, key_vec.as_mut_slice())?;
+    Ok(key_vec)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,5 +800,79 @@ mod tests {
             Err(CryptoError::InvalidParameter),
             "並列度に対する最小メモリコスト違反の拒絶に成功。"
         );
+    }
+
+    #[test]
+    fn test_hkdf_sha256_rfc5869_kat_vectors() {
+        // RFC 5869 Appendix A.1 (Test Case 1: Basic)
+        let ikm1 = [0x0bu8; 22];
+        let salt1 = [
+            0x00u8, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+        ];
+        let info1 = [0xf0u8, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9];
+        let expected_okm1: [u8; 42] = [
+            0x3c, 0xb2, 0x5f, 0x25, 0xfa, 0xac, 0xd5, 0x7a, 0x90, 0x43, 0x4f, 0x64, 0xd0, 0x36,
+            0x2f, 0x2a, 0x2d, 0x2d, 0x0a, 0x90, 0xcf, 0x1a, 0x5a, 0x4c, 0x5d, 0xb0, 0x2d, 0x56,
+            0xec, 0xc4, 0xc5, 0xbf, 0x34, 0x00, 0x72, 0x08, 0xd5, 0xb8, 0x87, 0x18, 0x58, 0x65,
+        ];
+        let mut okm1 = [0u8; 42];
+        hkdf_sha256_derive(&salt1, &ikm1, &info1, &mut okm1).unwrap();
+        // RFC 5869 Test Case 1 のテストベクターに一致することを確認。
+        assert_eq!(okm1, expected_okm1);
+
+        // RFC 5869 Appendix A.3 (Test Case 3: Zero-length salt/info)
+        let ikm3 = [0x0bu8; 22];
+        let expected_okm3: [u8; 42] = [
+            0x8d, 0xa4, 0xe7, 0x75, 0xa5, 0x63, 0xc1, 0x8f, 0x71, 0x5f, 0x80, 0x2a, 0x06, 0x3c,
+            0x5a, 0x31, 0xb8, 0xa1, 0x1f, 0x5c, 0x5e, 0xe1, 0x87, 0x9e, 0xc3, 0x45, 0x4e, 0x5f,
+            0x3c, 0x73, 0x8d, 0x2d, 0x9d, 0x20, 0x13, 0x95, 0xfa, 0xa4, 0xb6, 0x1a, 0x96, 0xc8,
+        ];
+        let mut okm3 = [0u8; 42];
+        hkdf_sha256_derive(&[], &ikm3, &[], &mut okm3).unwrap();
+        // RFC 5869 Test Case 3 のテストベクターに一致することを確認。
+        assert_eq!(okm3, expected_okm3);
+    }
+
+    #[test]
+    fn test_hkdf_sha256_derive_32_and_error_handling() {
+        let salt = b"vault-salt-1234567890";
+        let ikm = [0x42u8; 32];
+        let info = b"fidelogic-test-info";
+
+        let key_a = hkdf_sha256_derive_32(salt, &ikm, info).unwrap();
+        let key_b = hkdf_sha256_derive_32(salt, &ikm, info).unwrap();
+        assert_eq!(key_a.as_slice(), key_b.as_slice());
+
+        let key_diff_info = hkdf_sha256_derive_32(salt, &ikm, b"other-info").unwrap();
+        assert_ne!(key_a.as_slice(), key_diff_info.as_slice());
+
+        // 空出力長および上限超過時のエラー返却とゼロクリアの検証。
+        let mut empty_out = [];
+        assert_eq!(
+            hkdf_sha256_derive(salt, &ikm, info, &mut empty_out),
+            Err(CryptoError::InvalidKeySize)
+        );
+
+        let mut oversized = [0xAAu8; HKDF_SHA256_MAX_OUTPUT_LEN + 1];
+        assert_eq!(
+            hkdf_sha256_derive(salt, &ikm, info, &mut oversized),
+            Err(CryptoError::InvalidKeySize)
+        );
+        // HKDF 出力長不正時における出力バッファのゼロ消去を確認。
+        assert!(oversized.iter().all(|&b| b == 0));
+
+        #[cfg(feature = "alloc")]
+        {
+            let vec_key = hkdf_sha256_derive_vec(salt, &ikm, info, 32).unwrap();
+            assert_eq!(vec_key.as_slice(), key_a.as_slice());
+            assert_eq!(
+                hkdf_sha256_derive_vec(salt, &ikm, info, 0).err(),
+                Some(CryptoError::InvalidKeySize)
+            );
+            assert_eq!(
+                hkdf_sha256_derive_vec(salt, &ikm, info, HKDF_SHA256_MAX_OUTPUT_LEN + 1).err(),
+                Some(CryptoError::InvalidKeySize)
+            );
+        }
     }
 }

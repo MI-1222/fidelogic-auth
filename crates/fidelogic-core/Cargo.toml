@@ -18,6 +18,8 @@ profile-vault = [
     "dep:aes-gcm-siv",
     "dep:argon2",
     "dep:chacha20poly1305",
+    "dep:hkdf",
+    "dep:sha2",
 ]
 # memlock: ネイティブ環境向けにmlockおよびmadviseによるメモリ保護を提供するプロファイル。
 memlock = ["std", "dep:libc"]
@@ -30,7 +32,9 @@ aes-gcm-siv = { workspace = true, features = ["alloc", "aes"], optional = true }
 argon2 = { workspace = true, features = ["alloc", "zeroize"], optional = true }
 chacha20poly1305 = { workspace = true, features = ["alloc"], optional = true }
 curve25519-dalek = { workspace = true, features = ["alloc", "zeroize"], optional = true }
+hkdf = { workspace = true, optional = true }
 libc = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 subtle = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
 

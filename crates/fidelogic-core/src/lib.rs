@@ -64,16 +64,24 @@ pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
 pub use kdf::{
     Argon2Params, DEFAULT_KEY_LEN, DEFAULT_NATIVE_M_COST, DEFAULT_NATIVE_P_COST,
     DEFAULT_NATIVE_T_COST, DEFAULT_WASM_M_COST, DEFAULT_WASM_P_COST, DEFAULT_WASM_T_COST,
-    FAST_TEST_M_COST, FAST_TEST_P_COST, FAST_TEST_T_COST,
+    FAST_TEST_M_COST, FAST_TEST_P_COST, FAST_TEST_T_COST, HKDF_SHA256_HASH_LEN,
+    HKDF_SHA256_MAX_OUTPUT_LEN, hkdf_sha256_derive, hkdf_sha256_derive_32, hkdf_sha256_derive_vec,
 };
 #[cfg(feature = "profile-vault")]
 pub use slots::{
     Argon2idSlotPayload, KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY, KdfKind,
-    MAX_SLOT0_M_COST, MAX_SLOT0_P_COST, MAX_SLOT0_T_COST, SLOT_CIPHER_SUITE, SLOT0_CIPHERTEXT_LEN,
-    SLOT0_NONCE_LEN, SLOT0_PARAMS_LEN, SLOT0_SALT_LEN, SLOT0_TAG_LEN, SLOT0_WRAPPED_DEK_LEN,
-    find_slot_entry, inspect_kek_slots, is_valid_slot0_entry, unwrap_dek_slot0,
-    unwrap_dek_slot0_for_header, unwrap_dek_slot0_with_secret, validate_slot0_argon2_params,
-    wrap_dek_slot0, wrap_dek_slot0_for_header, wrap_dek_slot0_with_secret,
+    MAX_SLOT0_M_COST, MAX_SLOT0_P_COST, MAX_SLOT0_T_COST, PrfSlotPayload, RecoverySlotPayload,
+    SLOT_CIPHER_SUITE, SLOT0_CIPHERTEXT_LEN, SLOT0_NONCE_LEN, SLOT0_PARAMS_LEN, SLOT0_SALT_LEN,
+    SLOT0_TAG_LEN, SLOT0_WRAPPED_DEK_LEN, SLOT1_CIPHERTEXT_LEN, SLOT1_MIN_PRF_LEN, SLOT1_NONCE_LEN,
+    SLOT1_SALT_LEN, SLOT1_TAG_LEN, SLOT1_WRAPPED_DEK_LEN, SLOT2_CIPHERTEXT_LEN, SLOT2_MIN_CODE_LEN,
+    SLOT2_MIN_SECRET_LEN, SLOT2_NONCE_LEN, SLOT2_SALT_LEN, SLOT2_TAG_LEN, SLOT2_WRAPPED_DEK_LEN,
+    SlotCredential, find_slot_entry, inspect_kek_slots, is_valid_slot0_entry, is_valid_slot1_entry,
+    is_valid_slot2_entry, normalize_recovery_code, unwrap_dek_slot0, unwrap_dek_slot0_for_header,
+    unwrap_dek_slot0_with_secret, unwrap_dek_slot1, unwrap_dek_slot1_for_header, unwrap_dek_slot2,
+    unwrap_dek_slot2_code, unwrap_dek_slot2_code_for_header, unwrap_dek_slot2_for_header,
+    validate_slot0_argon2_params, wrap_dek_slot0, wrap_dek_slot0_for_header,
+    wrap_dek_slot0_with_secret, wrap_dek_slot1, wrap_dek_slot1_for_header, wrap_dek_slot2,
+    wrap_dek_slot2_code, wrap_dek_slot2_code_for_header, wrap_dek_slot2_for_header,
 };
 pub use zeroize::{SecretBytes, volatile_zeroize};
 

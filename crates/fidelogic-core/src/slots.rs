@@ -13,15 +13,26 @@
 //! - `nonce`: 24 バイト (XChaCha20-Poly1305 192-bit ノンス)。
 //! - `ciphertext`: 32 バイト (暗号化済み 256-bit DEK)。
 //! - `auth_tag`: 16 バイト (Poly1305 認証タグ)。
+//!
+//! ## Slot 1 (WebAuthn PRF / HKDF-SHA256) および Slot 2 (リカバリーコード) フォーマット
+//!
+//! [`KekSlotEntry::wrapped_dek`] には以下の固定長 104 バイト構造を格納する。
+//! - `salt`: 32 バイト (HKDF-SHA256 ソルト)。
+//! - `nonce`: 24 バイト (XChaCha20-Poly1305 192-bit ノンス)。
+//! - `ciphertext`: 32 バイト (暗号化済み 256-bit DEK)。
+//! - `auth_tag`: 16 バイト (Poly1305 認証タグ)。
 
 use crate::cipher::{
     CipherSuiteId, MAX_AAD_LEN, TAG_LEN, VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
 };
-use crate::envelope::{DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SlotKind, SlotStatus, VaultEngine};
+use crate::envelope::{
+    DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SLOT_ID_PRF, SLOT_ID_RECOVERY, SlotKind, SlotStatus,
+    VaultEngine,
+};
 use crate::error::{CryptoError, TlvParseError, VaultError};
-use crate::kdf::Argon2Params;
+use crate::kdf::{Argon2Params, hkdf_sha256_derive_32};
 use crate::tlv::{KekSlotEntry, Vault, VaultHeader};
-use crate::zeroize::{SecretBytes, volatile_zeroize};
+use crate::zeroize::{SecretBytes, SecretVec, volatile_zeroize};
 
 /// Slot 0 (Argon2id マスターパスワード) の KDF 種別識別子。
 pub const KDF_KIND_ARGON2ID: u8 = 1;
@@ -72,6 +83,67 @@ const SLOT0_AAD_PREFIX: &[u8; 18] = b"fidelogic-slot0-v1";
 ///
 /// [`SLOT0_AAD_PREFIX`] (18B) + `slot_id` (1B) + `kdf_kind` (1B) + `params` (12B) + `salt` (16B) で構成される。
 const SLOT0_AAD_FIXED_LEN: usize = 18 + 2 + SLOT0_PARAMS_LEN + SLOT0_SALT_LEN;
+
+/// Slot 1 (WebAuthn PRF / HKDF-SHA256) におけるソルト長 (32バイト = 256ビット)。
+pub const SLOT1_SALT_LEN: usize = 32;
+
+/// Slot 1 (WebAuthn PRF) におけるノンス長 (XChaCha20-Poly1305 192-bit = 24バイト)。
+pub const SLOT1_NONCE_LEN: usize = XCHACHA20_POLY1305_NONCE_LEN;
+
+/// Slot 1 (WebAuthn PRF) における暗号化済み DEK 本体のバイト長 (256-bit = 32バイト)。
+pub const SLOT1_CIPHERTEXT_LEN: usize = DEK_LEN;
+
+/// Slot 1 (WebAuthn PRF) における認証タグ長 (128-bit = 16バイト)。
+pub const SLOT1_TAG_LEN: usize = TAG_LEN;
+
+/// Slot 1 (WebAuthn PRF) の `wrapped_dek` フィールド総バイト長 (104バイト)。
+pub const SLOT1_WRAPPED_DEK_LEN: usize =
+    SLOT1_SALT_LEN + SLOT1_NONCE_LEN + SLOT1_CIPHERTEXT_LEN + SLOT1_TAG_LEN;
+
+/// Slot 1 (WebAuthn PRF) で要求する最小 PRF シークレット長 (32バイト = 256ビット)。
+pub const SLOT1_MIN_PRF_LEN: usize = 32;
+
+/// Slot 2 (高エントロピーリカバリーコード) におけるソルト長 (32バイト = 256ビット)。
+pub const SLOT2_SALT_LEN: usize = 32;
+
+/// Slot 2 (リカバリーコード) におけるノンス長 (XChaCha20-Poly1305 192-bit = 24バイト)。
+pub const SLOT2_NONCE_LEN: usize = XCHACHA20_POLY1305_NONCE_LEN;
+
+/// Slot 2 (リカバリーコード) における暗号化済み DEK 本体のバイト長 (256-bit = 32バイト)。
+pub const SLOT2_CIPHERTEXT_LEN: usize = DEK_LEN;
+
+/// Slot 2 (リカバリーコード) における認証タグ長 (128-bit = 16バイト)。
+pub const SLOT2_TAG_LEN: usize = TAG_LEN;
+
+/// Slot 2 (リカバリーコード) の `wrapped_dek` フィールド総バイト長 (104バイト)。
+pub const SLOT2_WRAPPED_DEK_LEN: usize =
+    SLOT2_SALT_LEN + SLOT2_NONCE_LEN + SLOT2_CIPHERTEXT_LEN + SLOT2_TAG_LEN;
+
+/// Slot 2 で要求する最小生リカバリーシークレット長 (16バイト = 128ビット)。
+pub const SLOT2_MIN_SECRET_LEN: usize = 16;
+
+/// Slot 2 の整形済み英数字リカバリーコードについて、正準化後に要求する最小文字数 (24文字)。
+pub const SLOT2_MIN_CODE_LEN: usize = 24;
+
+/// 整形済みリカバリーコード入力の許容最大バイト長 (512バイト)。
+const MAX_RECOVERY_CODE_INPUT_LEN: usize = 512;
+
+/// Slot 1 の AEAD 関連データ (AAD) に付与するドメイン分離プレフィックス。
+const SLOT1_AAD_PREFIX: &[u8; 18] = b"fidelogic-slot1-v1";
+
+/// Slot 1 の HKDF-SHA256 展開時に使用するドメイン分離コンテキスト文字列。
+const SLOT1_HKDF_INFO: &[u8] = b"fidelogic-slot1-hkdf-sha256-kek-v1";
+
+/// Slot 2 の AEAD 関連データ (AAD) に付与するドメイン分離プレフィックス。
+const SLOT2_AAD_PREFIX: &[u8; 18] = b"fidelogic-slot2-v1";
+
+/// Slot 2 の HKDF-SHA256 展開時に使用するドメイン分離コンテキスト文字列。
+const SLOT2_HKDF_INFO: &[u8] = b"fidelogic-slot2-recovery-hkdf-sha256-kek-v1";
+
+/// Slot 1 および Slot 2 に共通する HKDF スロット固定 AAD ヘッダー長 (52バイト)。
+///
+/// AAD プレフィックス (18B) + `slot_id` (1B) + `kdf_kind` (1B) + `salt` (32B) で構成される。
+const HKDF_SLOT_AAD_FIXED_LEN: usize = 18 + 2 + SLOT1_SALT_LEN;
 
 /// KEK スロットで使用される鍵導出方式の種別を表す列挙型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -222,6 +294,231 @@ impl Argon2idSlotPayload {
     }
 }
 
+/// Slot 1 および Slot 2 で共有される固定長 104 バイト HKDF スロットの内部表現。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HkdfSlotFields {
+    salt: [u8; SLOT1_SALT_LEN],
+    nonce: [u8; SLOT1_NONCE_LEN],
+    ciphertext: [u8; SLOT1_CIPHERTEXT_LEN],
+    auth_tag: [u8; SLOT1_TAG_LEN],
+}
+
+impl HkdfSlotFields {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, VaultError> {
+        if bytes.len() != SLOT1_WRAPPED_DEK_LEN {
+            return Err(VaultError::Parse(TlvParseError::InvalidLength));
+        }
+
+        let mut salt = [0u8; SLOT1_SALT_LEN];
+        salt.copy_from_slice(&bytes[0..32]);
+
+        let mut nonce = [0u8; SLOT1_NONCE_LEN];
+        nonce.copy_from_slice(&bytes[32..56]);
+
+        let mut ciphertext = [0u8; SLOT1_CIPHERTEXT_LEN];
+        ciphertext.copy_from_slice(&bytes[56..88]);
+
+        let mut auth_tag = [0u8; SLOT1_TAG_LEN];
+        auth_tag.copy_from_slice(&bytes[88..104]);
+
+        Ok(Self {
+            salt,
+            nonce,
+            ciphertext,
+            auth_tag,
+        })
+    }
+
+    fn to_bytes(&self) -> [u8; SLOT1_WRAPPED_DEK_LEN] {
+        let mut out = [0u8; SLOT1_WRAPPED_DEK_LEN];
+        out[0..32].copy_from_slice(&self.salt);
+        out[32..56].copy_from_slice(&self.nonce);
+        out[56..88].copy_from_slice(&self.ciphertext);
+        out[88..104].copy_from_slice(&self.auth_tag);
+        out
+    }
+
+    fn from_slot_entry(entry: &KekSlotEntry, spec: &HkdfSlotSpec) -> Result<Self, VaultError> {
+        if entry.slot_id() != spec.slot_id || entry.kdf_kind() != spec.kdf_kind {
+            return Err(VaultError::Parse(TlvParseError::InvalidFormat));
+        }
+        Self::from_bytes(entry.wrapped_dek())
+    }
+
+    fn to_slot_entry(&self, spec: &HkdfSlotSpec) -> Result<KekSlotEntry, VaultError> {
+        let bytes = self.to_bytes();
+        KekSlotEntry::new(spec.slot_id, spec.kdf_kind, bytes.to_vec()).map_err(VaultError::from)
+    }
+}
+
+/// Slot 1 および Slot 2 のドメイン分離パラメータを集約する内部仕様構造体。
+#[derive(Clone, Copy)]
+struct HkdfSlotSpec {
+    slot_id: u8,
+    kdf_kind: u8,
+    aad_prefix: &'static [u8; 18],
+    hkdf_info: &'static [u8],
+    min_secret_len: usize,
+}
+
+const SLOT1_SPEC: HkdfSlotSpec = HkdfSlotSpec {
+    slot_id: SLOT_ID_PRF,
+    kdf_kind: KDF_KIND_HKDF_SHA256,
+    aad_prefix: SLOT1_AAD_PREFIX,
+    hkdf_info: SLOT1_HKDF_INFO,
+    min_secret_len: SLOT1_MIN_PRF_LEN,
+};
+
+const SLOT2_SPEC: HkdfSlotSpec = HkdfSlotSpec {
+    slot_id: SLOT_ID_RECOVERY,
+    kdf_kind: KDF_KIND_RECOVERY,
+    aad_prefix: SLOT2_AAD_PREFIX,
+    hkdf_info: SLOT2_HKDF_INFO,
+    min_secret_len: SLOT2_MIN_SECRET_LEN,
+};
+
+/// Slot 1 (WebAuthn PRF / HKDF-SHA256) の暗号化 DEK ペイロード構造体。
+///
+/// HKDF-SHA256 ソルト (32バイト), 192-bit ノンス (24バイト), 暗号化 DEK 本体 (32バイト), Poly1305 認証タグ (16バイト) の計 104 バイトを保持する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrfSlotPayload {
+    /// HKDF-SHA256 ソルト (32バイト)。
+    pub salt: [u8; SLOT1_SALT_LEN],
+    /// XChaCha20-Poly1305 ノンス (24バイト)。
+    pub nonce: [u8; SLOT1_NONCE_LEN],
+    /// 暗号化された 256-bit DEK 本体 (32バイト)。
+    pub ciphertext: [u8; SLOT1_CIPHERTEXT_LEN],
+    /// Poly1305 認証タグ (16バイト)。
+    pub auth_tag: [u8; SLOT1_TAG_LEN],
+}
+
+impl PrfSlotPayload {
+    fn as_fields(&self) -> HkdfSlotFields {
+        HkdfSlotFields {
+            salt: self.salt,
+            nonce: self.nonce,
+            ciphertext: self.ciphertext,
+            auth_tag: self.auth_tag,
+        }
+    }
+
+    fn from_fields(fields: HkdfSlotFields) -> Self {
+        Self {
+            salt: fields.salt,
+            nonce: fields.nonce,
+            ciphertext: fields.ciphertext,
+            auth_tag: fields.auth_tag,
+        }
+    }
+
+    /// 固定長 104 バイトのバイナリ表現から [`PrfSlotPayload`] をデコードする。
+    ///
+    /// # Errors
+    ///
+    /// 入力長が [`SLOT1_WRAPPED_DEK_LEN`] と一致しない場合は、
+    /// [`VaultError::Parse`] ([`TlvParseError::InvalidLength`]) を返す。
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, VaultError> {
+        HkdfSlotFields::from_bytes(bytes).map(Self::from_fields)
+    }
+
+    /// 構造体を固定長 104 バイトのバイナリ表現へシリアライズする。
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; SLOT1_WRAPPED_DEK_LEN] {
+        self.as_fields().to_bytes()
+    }
+
+    /// TLV の [`KekSlotEntry`] が有効な Slot 1 エントリであるかを検証し、ペイロードを抽出する。
+    ///
+    /// # Errors
+    ///
+    /// - `slot_id != SLOT_ID_PRF` または `kdf_kind != KDF_KIND_HKDF_SHA256` の場合は、
+    ///   [`VaultError::Parse`] ([`TlvParseError::InvalidFormat`]) を返す。
+    /// - ペイロード長が不正な場合は [`VaultError::Parse`] ([`TlvParseError::InvalidLength`]) を返す。
+    pub fn from_slot_entry(entry: &KekSlotEntry) -> Result<Self, VaultError> {
+        HkdfSlotFields::from_slot_entry(entry, &SLOT1_SPEC).map(Self::from_fields)
+    }
+
+    /// TLV の [`KekSlotEntry`] へ変換する。
+    ///
+    /// # Errors
+    ///
+    /// スロットエントリ長制限を超過する場合は [`VaultError::Parse`] を返す。
+    pub fn to_slot_entry(&self) -> Result<KekSlotEntry, VaultError> {
+        self.as_fields().to_slot_entry(&SLOT1_SPEC)
+    }
+}
+
+/// Slot 2 (高エントロピーリカバリーコード) の暗号化 DEK ペイロード構造体。
+///
+/// HKDF-SHA256 ソルト (32バイト), 192-bit ノンス (24バイト), 暗号化 DEK 本体 (32バイト), Poly1305 認証タグ (16バイト) の計 104 バイトを保持する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoverySlotPayload {
+    /// HKDF-SHA256 ソルト (32バイト)。
+    pub salt: [u8; SLOT2_SALT_LEN],
+    /// XChaCha20-Poly1305 ノンス (24バイト)。
+    pub nonce: [u8; SLOT2_NONCE_LEN],
+    /// 暗号化された 256-bit DEK 本体 (32バイト)。
+    pub ciphertext: [u8; SLOT2_CIPHERTEXT_LEN],
+    /// Poly1305 認証タグ (16バイト)。
+    pub auth_tag: [u8; SLOT2_TAG_LEN],
+}
+
+impl RecoverySlotPayload {
+    fn as_fields(&self) -> HkdfSlotFields {
+        HkdfSlotFields {
+            salt: self.salt,
+            nonce: self.nonce,
+            ciphertext: self.ciphertext,
+            auth_tag: self.auth_tag,
+        }
+    }
+
+    fn from_fields(fields: HkdfSlotFields) -> Self {
+        Self {
+            salt: fields.salt,
+            nonce: fields.nonce,
+            ciphertext: fields.ciphertext,
+            auth_tag: fields.auth_tag,
+        }
+    }
+
+    /// 固定長 104 バイトのバイナリ表現から [`RecoverySlotPayload`] をデコードする。
+    ///
+    /// # Errors
+    ///
+    /// 入力長が [`SLOT2_WRAPPED_DEK_LEN`] と一致しない場合は、
+    /// [`VaultError::Parse`] ([`TlvParseError::InvalidLength`]) を返す。
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, VaultError> {
+        HkdfSlotFields::from_bytes(bytes).map(Self::from_fields)
+    }
+
+    /// 構造体を固定長 104 バイトのバイナリ表現へシリアライズする。
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; SLOT2_WRAPPED_DEK_LEN] {
+        self.as_fields().to_bytes()
+    }
+
+    /// TLV の [`KekSlotEntry`] が有効な Slot 2 エントリであるかを検証し、ペイロードを抽出する。
+    ///
+    /// # Errors
+    ///
+    /// - `slot_id != SLOT_ID_RECOVERY` または `kdf_kind != KDF_KIND_RECOVERY` の場合は、
+    ///   [`VaultError::Parse`] ([`TlvParseError::InvalidFormat`]) を返す。
+    /// - ペイロード長が不正な場合は [`VaultError::Parse`] ([`TlvParseError::InvalidLength`]) を返す。
+    pub fn from_slot_entry(entry: &KekSlotEntry) -> Result<Self, VaultError> {
+        HkdfSlotFields::from_slot_entry(entry, &SLOT2_SPEC).map(Self::from_fields)
+    }
+
+    /// TLV の [`KekSlotEntry`] へ変換する。
+    ///
+    /// # Errors
+    ///
+    /// スロットエントリ長制限を超過する場合は [`VaultError::Parse`] を返す。
+    pub fn to_slot_entry(&self) -> Result<KekSlotEntry, VaultError> {
+        self.as_fields().to_slot_entry(&SLOT2_SPEC)
+    }
+}
+
 /// Slot 0 用の Argon2id パラメータがアルゴリズム, 出力長, 安全上限の要件を満たすかを検証する。
 ///
 /// # Errors
@@ -295,6 +592,56 @@ pub fn wrap_dek_slot0(
     wrap_dek_slot0_with_secret(dek, password, salt, nonce, params, &[], vault_aad)
 }
 
+/// 導出済み KEK を用いて 256-bit DEK を XChaCha20-Poly1305 で暗号化ラップする共通コア。
+///
+/// KEK および作業バッファは、正常終了時とエラー終了時を問わず直ちに [`volatile_zeroize`] で消去する。
+fn wrap_dek_with_kek(
+    dek: &SecretBytes<DEK_LEN>,
+    kek: &mut SecretBytes<DEK_LEN>,
+    nonce: &[u8; XCHACHA20_POLY1305_NONCE_LEN],
+    aad: &[u8],
+) -> Result<([u8; DEK_LEN], [u8; TAG_LEN]), VaultError> {
+    let cipher = VaultCipher::new_from_secret(SLOT_CIPHER_SUITE, kek);
+    volatile_zeroize(kek.as_mut_slice());
+
+    let mut work_buf = SecretBytes::new(*dek.as_bytes());
+    let encrypt_res = cipher.encrypt_in_place_detached(nonce, aad, work_buf.as_mut_slice());
+    let auth_tag = match encrypt_res {
+        Ok(tag) => tag,
+        Err(err) => {
+            volatile_zeroize(work_buf.as_mut_slice());
+            return Err(VaultError::Crypto(err));
+        }
+    };
+
+    let ciphertext = *work_buf.as_bytes();
+    volatile_zeroize(work_buf.as_mut_slice());
+    Ok((ciphertext, auth_tag))
+}
+
+/// 導出済み KEK を用いて暗号化済み DEK を XChaCha20-Poly1305 で認証復号する共通コア。
+///
+/// KEK および失敗時の DEK 作業バッファは直ちに [`volatile_zeroize`] で消去する。
+fn unwrap_dek_with_kek(
+    kek: &mut SecretBytes<DEK_LEN>,
+    nonce: &[u8; XCHACHA20_POLY1305_NONCE_LEN],
+    aad: &[u8],
+    ciphertext: &[u8; DEK_LEN],
+    auth_tag: &[u8; TAG_LEN],
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    let cipher = VaultCipher::new_from_secret(SLOT_CIPHER_SUITE, kek);
+    volatile_zeroize(kek.as_mut_slice());
+
+    let mut dek = SecretBytes::new(*ciphertext);
+    if let Err(err) = cipher.decrypt_in_place_detached_tag(nonce, aad, dek.as_mut_slice(), auth_tag)
+    {
+        volatile_zeroize(dek.as_mut_slice());
+        return Err(VaultError::Crypto(err));
+    }
+
+    Ok(dek)
+}
+
 /// ペッパー (`secret`) を併用し、Slot 0 により KEK を導出して 256-bit DEK を暗号化ラップする。
 ///
 /// 処理中に生成される KEK および作業バッファは, [`SecretBytes`] と [`volatile_zeroize`] により、
@@ -316,27 +663,15 @@ pub fn wrap_dek_slot0_with_secret(
     let aad = build_slot0_aad(params, salt, vault_aad)?;
 
     let mut kek = params.derive_key_32_with_secret(password, salt, secret)?;
-    let cipher = VaultCipher::new_from_secret(SLOT_CIPHER_SUITE, &kek);
-    volatile_zeroize(kek.as_mut_slice());
-
-    let mut work_buf = SecretBytes::new(*dek.as_bytes());
-    let encrypt_res = cipher.encrypt_in_place_detached(nonce, &aad, work_buf.as_mut_slice());
-    let auth_tag = match encrypt_res {
-        Ok(tag) => tag,
-        Err(err) => {
-            volatile_zeroize(work_buf.as_mut_slice());
-            return Err(VaultError::Crypto(err));
-        }
-    };
+    let (ciphertext, auth_tag) = wrap_dek_with_kek(dek, &mut kek, nonce, &aad)?;
 
     let payload = Argon2idSlotPayload {
         params: *params,
         salt: *salt,
         nonce: *nonce,
-        ciphertext: *work_buf.as_bytes(),
+        ciphertext,
         auth_tag,
     };
-    volatile_zeroize(work_buf.as_mut_slice());
 
     payload.to_slot_entry()
 }
@@ -399,21 +734,13 @@ pub fn unwrap_dek_slot0_with_secret(
     let mut kek = payload
         .params
         .derive_key_32_with_secret(password, &payload.salt, secret)?;
-    let cipher = VaultCipher::new_from_secret(SLOT_CIPHER_SUITE, &kek);
-    volatile_zeroize(kek.as_mut_slice());
-
-    let mut dek = SecretBytes::new(payload.ciphertext);
-    if let Err(err) = cipher.decrypt_in_place_detached_tag(
+    unwrap_dek_with_kek(
+        &mut kek,
         &payload.nonce,
         &aad,
-        dek.as_mut_slice(),
+        &payload.ciphertext,
         &payload.auth_tag,
-    ) {
-        volatile_zeroize(dek.as_mut_slice());
-        return Err(VaultError::Crypto(err));
-    }
-
-    Ok(dek)
+    )
 }
 
 /// [`VaultHeader`] を関連データとしてバインドし、Slot 0 の暗号化エントリから 256-bit DEK を復号する。
@@ -434,6 +761,324 @@ pub fn unwrap_dek_slot0_for_header(
 #[must_use]
 pub fn is_valid_slot0_entry(entry: &KekSlotEntry) -> bool {
     Argon2idSlotPayload::from_slot_entry(entry).is_ok()
+}
+
+/// Slot 1 および Slot 2 に共通する HKDF スロット用 AEAD 関連データ (AAD) を構築する。
+fn build_hkdf_slot_aad(
+    spec: &HkdfSlotSpec,
+    salt: &[u8; SLOT1_SALT_LEN],
+    vault_aad: &[u8],
+) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+    let total_len = HKDF_SLOT_AAD_FIXED_LEN
+        .checked_add(vault_aad.len())
+        .ok_or(CryptoError::InvalidSliceLength)?;
+    if total_len > MAX_AAD_LEN {
+        return Err(CryptoError::InvalidSliceLength);
+    }
+
+    let mut aad = alloc::vec::Vec::with_capacity(total_len);
+    aad.extend_from_slice(spec.aad_prefix);
+    aad.push(spec.slot_id);
+    aad.push(spec.kdf_kind);
+    aad.extend_from_slice(salt);
+    aad.extend_from_slice(vault_aad);
+    Ok(aad)
+}
+
+/// Slot 1 および Slot 2 に共通する HKDF-SHA256 鍵導出および DEK ラップ処理を実行する。
+fn wrap_dek_hkdf_slot(
+    spec: &HkdfSlotSpec,
+    dek: &SecretBytes<DEK_LEN>,
+    ikm: &[u8],
+    salt: &[u8; SLOT1_SALT_LEN],
+    nonce: &[u8; SLOT1_NONCE_LEN],
+    vault_aad: &[u8],
+) -> Result<KekSlotEntry, VaultError> {
+    if ikm.len() < spec.min_secret_len {
+        return Err(VaultError::Crypto(CryptoError::InvalidKeySize));
+    }
+
+    let aad = build_hkdf_slot_aad(spec, salt, vault_aad)?;
+    let mut kek = hkdf_sha256_derive_32(salt, ikm, spec.hkdf_info)?;
+    let (ciphertext, auth_tag) = wrap_dek_with_kek(dek, &mut kek, nonce, &aad)?;
+
+    let fields = HkdfSlotFields {
+        salt: *salt,
+        nonce: *nonce,
+        ciphertext,
+        auth_tag,
+    };
+    fields.to_slot_entry(spec)
+}
+
+/// Slot 1 および Slot 2 に共通する HKDF-SHA256 鍵再導出および DEK 認証復号処理を実行する。
+fn unwrap_dek_hkdf_slot(
+    spec: &HkdfSlotSpec,
+    entry: &KekSlotEntry,
+    ikm: &[u8],
+    vault_aad: &[u8],
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    let fields = HkdfSlotFields::from_slot_entry(entry, spec)?;
+    if ikm.len() < spec.min_secret_len {
+        return Err(VaultError::Crypto(CryptoError::InvalidKeySize));
+    }
+
+    let aad = build_hkdf_slot_aad(spec, &fields.salt, vault_aad)?;
+    let mut kek = hkdf_sha256_derive_32(&fields.salt, ikm, spec.hkdf_info)?;
+    unwrap_dek_with_kek(
+        &mut kek,
+        &fields.nonce,
+        &aad,
+        &fields.ciphertext,
+        &fields.auth_tag,
+    )
+}
+
+/// Slot 1 (WebAuthn PRF / HKDF-SHA256) により KEK を導出し、256-bit DEK を暗号化ラップする。
+///
+/// `prf_secret` には WebAuthn PRF 拡張から取得した 32バイト以上の高エントロピー出力を指定する。
+/// `vault_aad` には通常 [`VaultHeader::associated_data`] を渡し、Vault ヘッダーと暗号学的に結合する。
+///
+/// # Errors
+///
+/// - `prf_secret` が [`SLOT1_MIN_PRF_LEN`] (32バイト) 未満の場合は [`VaultError::Crypto`] ([`CryptoError::InvalidKeySize`]) を返す。
+/// - `vault_aad` 長が許容上限を超過する場合は [`VaultError::Crypto`] ([`CryptoError::InvalidSliceLength`]) を返す。
+/// - 鍵導出または AEAD 暗号化に失敗した場合は [`VaultError::Crypto`] を返す。
+pub fn wrap_dek_slot1(
+    dek: &SecretBytes<DEK_LEN>,
+    prf_secret: &[u8],
+    salt: &[u8; SLOT1_SALT_LEN],
+    nonce: &[u8; SLOT1_NONCE_LEN],
+    vault_aad: &[u8],
+) -> Result<KekSlotEntry, VaultError> {
+    wrap_dek_hkdf_slot(&SLOT1_SPEC, dek, prf_secret, salt, nonce, vault_aad)
+}
+
+/// [`VaultHeader`] を関連データとしてバインドし、Slot 1 により 256-bit DEK を暗号化ラップする。
+///
+/// # Errors
+///
+/// ラップ処理に失敗した場合は対応する [`VaultError`] を返す。
+#[inline]
+pub fn wrap_dek_slot1_for_header(
+    dek: &SecretBytes<DEK_LEN>,
+    prf_secret: &[u8],
+    salt: &[u8; SLOT1_SALT_LEN],
+    nonce: &[u8; SLOT1_NONCE_LEN],
+    header: &VaultHeader,
+) -> Result<KekSlotEntry, VaultError> {
+    wrap_dek_slot1(dek, prf_secret, salt, nonce, &header.associated_data())
+}
+
+/// Slot 1 の暗号化エントリから HKDF-SHA256 により KEK を再導出し、256-bit DEK を復号する。
+///
+/// # Errors
+///
+/// - スロット形式または長さが不正な場合は [`VaultError::Parse`] を返す。
+/// - `prf_secret` が [`SLOT1_MIN_PRF_LEN`] 未満の場合は [`VaultError::Crypto`] ([`CryptoError::InvalidKeySize`]) を返す。
+/// - PRF シークレット不一致, AAD 不一致, 改ざんによるタグ照合失敗時は、
+///   [`VaultError::Crypto`] ([`CryptoError::AeadDecryptionFailed`]) を返す。
+pub fn unwrap_dek_slot1(
+    entry: &KekSlotEntry,
+    prf_secret: &[u8],
+    vault_aad: &[u8],
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    unwrap_dek_hkdf_slot(&SLOT1_SPEC, entry, prf_secret, vault_aad)
+}
+
+/// [`VaultHeader`] を関連データとしてバインドし、Slot 1 の暗号化エントリから 256-bit DEK を復号する。
+///
+/// # Errors
+///
+/// 復号処理に失敗した場合は対応する [`VaultError`] を返す。
+#[inline]
+pub fn unwrap_dek_slot1_for_header(
+    entry: &KekSlotEntry,
+    prf_secret: &[u8],
+    header: &VaultHeader,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    unwrap_dek_slot1(entry, prf_secret, &header.associated_data())
+}
+
+/// スロットエントリのフォーマットが Slot 1 (WebAuthn PRF / HKDF-SHA256) として有効かを判定する。
+#[must_use]
+pub fn is_valid_slot1_entry(entry: &KekSlotEntry) -> bool {
+    PrfSlotPayload::from_slot_entry(entry).is_ok()
+}
+
+/// 整形済み英数字リカバリーコード (ハイフン・空白区切り・大小混在可) を正準化する。
+///
+/// ASCII の `'-'` および `' '` を区切り文字として除去し、ASCII 英小文字 (`a..=z`) を大文字へ統一する。
+/// 制御文字や非英数字記号が含まれる場合や、正準化後の長さが [`SLOT2_MIN_CODE_LEN`] 未満の場合は、
+/// 作業バッファを直ちにゼロ消去した上でエラーを返す。
+///
+/// # Errors
+///
+/// - 入力長が許容上限 (512バイト) を超える場合は [`VaultError::Crypto`] ([`CryptoError::InvalidSliceLength`]) を返す。
+/// - 英数字および `'-'` / `' '` 以外の不正文字が含まれる場合は [`VaultError::Crypto`] ([`CryptoError::InvalidParameter`]) を返す。
+/// - 正準化後の文字数が [`SLOT2_MIN_CODE_LEN`] (24文字) 未満の場合は [`VaultError::Crypto`] ([`CryptoError::InvalidKeySize`]) を返す。
+pub fn normalize_recovery_code(code: &[u8]) -> Result<SecretVec, VaultError> {
+    if code.len() > MAX_RECOVERY_CODE_INPUT_LEN {
+        return Err(VaultError::Crypto(CryptoError::InvalidSliceLength));
+    }
+
+    let mut normalized = SecretVec::with_capacity(code.len());
+    for &byte in code {
+        if byte == b'-' || byte == b' ' {
+            continue;
+        }
+        if byte.is_ascii_alphanumeric() {
+            normalized.push(byte.to_ascii_uppercase());
+        } else {
+            volatile_zeroize(normalized.as_mut_slice());
+            return Err(VaultError::Crypto(CryptoError::InvalidParameter));
+        }
+    }
+
+    if normalized.len() < SLOT2_MIN_CODE_LEN {
+        volatile_zeroize(normalized.as_mut_slice());
+        return Err(VaultError::Crypto(CryptoError::InvalidKeySize));
+    }
+
+    Ok(normalized)
+}
+
+/// Slot 2 (高エントロピーリカバリーシークレット) により KEK を導出し、256-bit DEK を暗号化ラップする。
+///
+/// `recovery_secret` には [`SLOT2_MIN_SECRET_LEN`] (16バイト = 128ビット) 以上の高エントロピー鍵素材を指定する。
+/// 整形済み英数字コードを用いる場合は [`wrap_dek_slot2_code`] を使用する。
+///
+/// # Errors
+///
+/// - `recovery_secret` が [`SLOT2_MIN_SECRET_LEN`] 未満の場合は [`VaultError::Crypto`] ([`CryptoError::InvalidKeySize`]) を返す。
+/// - `vault_aad` 長が許容上限を超過する場合は [`VaultError::Crypto`] ([`CryptoError::InvalidSliceLength`]) を返す。
+/// - 鍵導出または AEAD 暗号化に失敗した場合は [`VaultError::Crypto`] を返す。
+pub fn wrap_dek_slot2(
+    dek: &SecretBytes<DEK_LEN>,
+    recovery_secret: &[u8],
+    salt: &[u8; SLOT2_SALT_LEN],
+    nonce: &[u8; SLOT2_NONCE_LEN],
+    vault_aad: &[u8],
+) -> Result<KekSlotEntry, VaultError> {
+    wrap_dek_hkdf_slot(&SLOT2_SPEC, dek, recovery_secret, salt, nonce, vault_aad)
+}
+
+/// [`VaultHeader`] を関連データとしてバインドし、Slot 2 により 256-bit DEK を暗号化ラップする。
+///
+/// # Errors
+///
+/// ラップ処理に失敗した場合は対応する [`VaultError`] を返す。
+#[inline]
+pub fn wrap_dek_slot2_for_header(
+    dek: &SecretBytes<DEK_LEN>,
+    recovery_secret: &[u8],
+    salt: &[u8; SLOT2_SALT_LEN],
+    nonce: &[u8; SLOT2_NONCE_LEN],
+    header: &VaultHeader,
+) -> Result<KekSlotEntry, VaultError> {
+    wrap_dek_slot2(dek, recovery_secret, salt, nonce, &header.associated_data())
+}
+
+/// 整形済み英数字リカバリーコードを正準化した上で、Slot 2 により 256-bit DEK を暗号化ラップする。
+///
+/// 正準化で生成された中間バッファは、RAII および明示的 [`volatile_zeroize`] により即座にゼロ消去する。
+///
+/// # Errors
+///
+/// [`normalize_recovery_code`] または [`wrap_dek_slot2`] が失敗した場合は対応する [`VaultError`] を返す。
+pub fn wrap_dek_slot2_code(
+    dek: &SecretBytes<DEK_LEN>,
+    recovery_code: &[u8],
+    salt: &[u8; SLOT2_SALT_LEN],
+    nonce: &[u8; SLOT2_NONCE_LEN],
+    vault_aad: &[u8],
+) -> Result<KekSlotEntry, VaultError> {
+    let mut normalized = normalize_recovery_code(recovery_code)?;
+    let res = wrap_dek_slot2(dek, normalized.as_slice(), salt, nonce, vault_aad);
+    volatile_zeroize(normalized.as_mut_slice());
+    res
+}
+
+/// [`VaultHeader`] を関連データとしてバインドし、整形済みリカバリーコードで Slot 2 を暗号化ラップする。
+///
+/// # Errors
+///
+/// ラップ処理に失敗した場合は対応する [`VaultError`] を返す。
+#[inline]
+pub fn wrap_dek_slot2_code_for_header(
+    dek: &SecretBytes<DEK_LEN>,
+    recovery_code: &[u8],
+    salt: &[u8; SLOT2_SALT_LEN],
+    nonce: &[u8; SLOT2_NONCE_LEN],
+    header: &VaultHeader,
+) -> Result<KekSlotEntry, VaultError> {
+    wrap_dek_slot2_code(dek, recovery_code, salt, nonce, &header.associated_data())
+}
+
+/// Slot 2 の暗号化エントリから生リカバリーシークレットを用いて 256-bit DEK を復号する。
+///
+/// # Errors
+///
+/// - スロット形式または長さが不正な場合は [`VaultError::Parse`] を返す。
+/// - `recovery_secret` が [`SLOT2_MIN_SECRET_LEN`] 未満の場合は [`VaultError::Crypto`] ([`CryptoError::InvalidKeySize`]) を返す。
+/// - リカバリーシークレット不一致, AAD 不一致, 改ざんによるタグ照合失敗時は、
+///   [`VaultError::Crypto`] ([`CryptoError::AeadDecryptionFailed`]) を返す。
+pub fn unwrap_dek_slot2(
+    entry: &KekSlotEntry,
+    recovery_secret: &[u8],
+    vault_aad: &[u8],
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    unwrap_dek_hkdf_slot(&SLOT2_SPEC, entry, recovery_secret, vault_aad)
+}
+
+/// [`VaultHeader`] を関連データとしてバインドし、Slot 2 の暗号化エントリから 256-bit DEK を復号する。
+///
+/// # Errors
+///
+/// 復号処理に失敗した場合は対応する [`VaultError`] を返す。
+#[inline]
+pub fn unwrap_dek_slot2_for_header(
+    entry: &KekSlotEntry,
+    recovery_secret: &[u8],
+    header: &VaultHeader,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    unwrap_dek_slot2(entry, recovery_secret, &header.associated_data())
+}
+
+/// 整形済み英数字リカバリーコードを正準化した上で、Slot 2 の暗号化エントリから 256-bit DEK を復号する。
+///
+/// # Errors
+///
+/// [`normalize_recovery_code`] または [`unwrap_dek_slot2`] が失敗した場合は対応する [`VaultError`] を返す。
+pub fn unwrap_dek_slot2_code(
+    entry: &KekSlotEntry,
+    recovery_code: &[u8],
+    vault_aad: &[u8],
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    let mut normalized = normalize_recovery_code(recovery_code)?;
+    let res = unwrap_dek_slot2(entry, normalized.as_slice(), vault_aad);
+    volatile_zeroize(normalized.as_mut_slice());
+    res
+}
+
+/// [`VaultHeader`] を関連データとしてバインドし、整形済みリカバリーコードで Slot 2 を復号する。
+///
+/// # Errors
+///
+/// 復号処理に失敗した場合は対応する [`VaultError`] を返す。
+#[inline]
+pub fn unwrap_dek_slot2_code_for_header(
+    entry: &KekSlotEntry,
+    recovery_code: &[u8],
+    header: &VaultHeader,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    unwrap_dek_slot2_code(entry, recovery_code, &header.associated_data())
+}
+
+/// スロットエントリのフォーマットが Slot 2 (リカバリーコード) として有効かを判定する。
+#[must_use]
+pub fn is_valid_slot2_entry(entry: &KekSlotEntry) -> bool {
+    RecoverySlotPayload::from_slot_entry(entry).is_ok()
 }
 
 /// TLV スロットエントリ一覧から指定された `slot_id` に一致する単一エントリを検索する。
@@ -459,7 +1104,7 @@ pub fn find_slot_entry(entries: &[KekSlotEntry], slot_id: u8) -> Result<&KekSlot
 
 /// TLV の [`KekSlotEntry`] スライスを検査し、[`KekSlots`] の健全性モデルを構築する。
 ///
-/// 各スロット ID (`0`, `1`, `2`) について未設定, 有効, 無効(または重複)を判定する。
+/// 各スロット ID (`0`, `1`, `2`) について、未設定, 有効, 無効 (または重複) を判定する。
 /// Slot 0 についてはフォーマット長, KDF 種別, Argon2id パラメータの境界まで検証する。
 #[must_use]
 pub fn inspect_kek_slots(entries: &[KekSlotEntry]) -> KekSlots {
@@ -487,14 +1132,14 @@ pub fn inspect_kek_slots(entries: &[KekSlotEntry]) -> KekSlots {
                 }
             }
             SlotKind::Prf => {
-                if entry.kdf_kind() == KDF_KIND_HKDF_SHA256 && !entry.wrapped_dek().is_empty() {
+                if is_valid_slot1_entry(entry) {
                     SlotStatus::Valid
                 } else {
                     SlotStatus::Invalid
                 }
             }
             SlotKind::Recovery => {
-                if entry.kdf_kind() == KDF_KIND_RECOVERY && !entry.wrapped_dek().is_empty() {
+                if is_valid_slot2_entry(entry) {
                     SlotStatus::Valid
                 } else {
                     SlotStatus::Invalid
@@ -507,11 +1152,118 @@ pub fn inspect_kek_slots(entries: &[KekSlotEntry]) -> KekSlots {
     slots
 }
 
+/// Vault 解錠試行時に呼び出し元が提示する各 KEK スロット向けの認証資格情報。
+#[derive(Clone, Copy)]
+pub enum SlotCredential<'a> {
+    /// Slot 0: Argon2id マスターパスワードおよび任意ペッパー。
+    Password {
+        /// マスターパスワードバイト列。
+        password: &'a [u8],
+        /// 任意ペッパーシークレット。
+        secret: &'a [u8],
+    },
+    /// Slot 1: WebAuthn PRF 出力シークレット。
+    Prf(&'a [u8]),
+    /// Slot 2: 生の高エントロピーリカバリーシークレット。
+    Recovery(&'a [u8]),
+    /// Slot 2: 整形済み英数字リカバリーコード (正準化対象)。
+    RecoveryCode(&'a [u8]),
+}
+
+impl<'a> SlotCredential<'a> {
+    /// ペッパーなしの Slot 0 パスワード資格情報を生成する。
+    #[inline]
+    #[must_use]
+    pub const fn password(password: &'a [u8]) -> Self {
+        Self::Password {
+            password,
+            secret: &[],
+        }
+    }
+
+    /// ペッパー併用の Slot 0 パスワード資格情報を生成する。
+    #[inline]
+    #[must_use]
+    pub const fn password_with_secret(password: &'a [u8], secret: &'a [u8]) -> Self {
+        Self::Password { password, secret }
+    }
+
+    /// Slot 1 (WebAuthn PRF) 資格情報を生成する。
+    #[inline]
+    #[must_use]
+    pub const fn prf(prf_secret: &'a [u8]) -> Self {
+        Self::Prf(prf_secret)
+    }
+
+    /// Slot 2 (生リカバリーシークレット) 資格情報を生成する。
+    #[inline]
+    #[must_use]
+    pub const fn recovery(recovery_secret: &'a [u8]) -> Self {
+        Self::Recovery(recovery_secret)
+    }
+
+    /// Slot 2 (整形済みリカバリーコード) 資格情報を生成する。
+    #[inline]
+    #[must_use]
+    pub const fn recovery_code(recovery_code: &'a [u8]) -> Self {
+        Self::RecoveryCode(recovery_code)
+    }
+
+    /// 資格情報に対応する [`SlotKind`] を返す。
+    #[inline]
+    #[must_use]
+    pub const fn slot_kind(self) -> SlotKind {
+        match self {
+            Self::Password { .. } => SlotKind::Argon2id,
+            Self::Prf(_) => SlotKind::Prf,
+            Self::Recovery(_) | Self::RecoveryCode(_) => SlotKind::Recovery,
+        }
+    }
+}
+
+impl core::fmt::Debug for SlotCredential<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Password { .. } => f.write_str("SlotCredential::Password([REDACTED])"),
+            Self::Prf(_) => f.write_str("SlotCredential::Prf([REDACTED])"),
+            Self::Recovery(_) => f.write_str("SlotCredential::Recovery([REDACTED])"),
+            Self::RecoveryCode(_) => f.write_str("SlotCredential::RecoveryCode([REDACTED])"),
+        }
+    }
+}
+
 impl VaultEngine {
     /// TLV の [`KekSlotEntry`] 一覧を検証し、施錠状態の新しい [`VaultEngine`] を生成する。
     #[must_use]
     pub fn from_slot_entries(entries: &[KekSlotEntry]) -> Self {
         Self::new(inspect_kek_slots(entries))
+    }
+
+    /// 指定スロットの FSM 遷移 (`Locked -> Unlocking -> Unlocked` / `Locked`) と復号を共通実行する内部ヘルパー。
+    fn unlock_with_slot_fn<F>(&mut self, slot_id: u8, unwrap_fn: F) -> Result<(), VaultError>
+    where
+        F: FnOnce() -> Result<SecretBytes<DEK_LEN>, VaultError>,
+    {
+        self.start_unlock(slot_id)?;
+
+        if !self.slots().is_slot_valid(slot_id) {
+            let _ = self.fail_unlock();
+            return Err(VaultError::AuthenticationFailed);
+        }
+
+        match unwrap_fn() {
+            Ok(dek) => {
+                if let Err(err) = self.complete_unlock(slot_id, dek) {
+                    let _ = self.fail_unlock();
+                    return Err(err);
+                }
+                Ok(())
+            }
+            Err(err) => {
+                let _ = self.fail_unlock();
+                Err(err)
+            }
+        }
     }
 
     /// Slot 0 (Argon2id マスターパスワード) エントリを用いて解錠パイプラインを実行する。
@@ -550,26 +1302,61 @@ impl VaultEngine {
         secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        self.start_unlock(SLOT_ID_ARGON2ID)?;
+        self.unlock_with_slot_fn(SLOT_ID_ARGON2ID, || {
+            unwrap_dek_slot0_with_secret(entry, password, secret, vault_aad)
+        })
+    }
 
-        if !self.slots().is_slot_valid(SLOT_ID_ARGON2ID) {
-            let _ = self.fail_unlock();
-            return Err(VaultError::AuthenticationFailed);
-        }
+    /// Slot 1 (WebAuthn PRF / HKDF-SHA256) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// # Errors
+    ///
+    /// - 現在の状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - Slot 1 が `Valid` でない場合は [`VaultError::AuthenticationFailed`] を返す。
+    /// - フォーマット検証, PRF 長検証, AEAD 復号のいずれかに失敗した場合は対応する [`VaultError`] を返す。
+    pub fn unlock_with_slot1(
+        &mut self,
+        entry: &KekSlotEntry,
+        prf_secret: &[u8],
+        vault_aad: &[u8],
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_PRF, || {
+            unwrap_dek_slot1(entry, prf_secret, vault_aad)
+        })
+    }
 
-        match unwrap_dek_slot0_with_secret(entry, password, secret, vault_aad) {
-            Ok(dek) => {
-                if let Err(err) = self.complete_unlock(SLOT_ID_ARGON2ID, dek) {
-                    let _ = self.fail_unlock();
-                    return Err(err);
-                }
-                Ok(())
-            }
-            Err(err) => {
-                let _ = self.fail_unlock();
-                Err(err)
-            }
-        }
+    /// Slot 2 (生リカバリーシークレット) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// # Errors
+    ///
+    /// - 現在の状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - Slot 2 が `Valid` でない場合は [`VaultError::AuthenticationFailed`] を返す。
+    /// - フォーマット検証, シークレット長検証, AEAD 復号のいずれかに失敗した場合は対応する [`VaultError`] を返す。
+    pub fn unlock_with_slot2(
+        &mut self,
+        entry: &KekSlotEntry,
+        recovery_secret: &[u8],
+        vault_aad: &[u8],
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, || {
+            unwrap_dek_slot2(entry, recovery_secret, vault_aad)
+        })
+    }
+
+    /// Slot 2 (整形済み英数字リカバリーコード) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// # Errors
+    ///
+    /// [`Self::unlock_with_slot2`] および [`normalize_recovery_code`] のエラー条件に従う。
+    pub fn unlock_with_slot2_code(
+        &mut self,
+        entry: &KekSlotEntry,
+        recovery_code: &[u8],
+        vault_aad: &[u8],
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, || {
+            unwrap_dek_slot2_code(entry, recovery_code, vault_aad)
+        })
     }
 
     /// [`Vault`] コンテナ全体から Slot 0 を検索し、Vault ヘッダー AAD をバインドして解錠する。
@@ -584,12 +1371,124 @@ impl VaultEngine {
         vault: &Vault,
         password: &[u8],
     ) -> Result<(), VaultError> {
+        self.unlock_vault_with_credential(vault, SlotCredential::password(password))
+    }
+
+    /// [`Vault`] コンテナ全体から Slot 1 (WebAuthn PRF) を検索し、Vault ヘッダー AAD をバインドして解錠する。
+    ///
+    /// # Errors
+    ///
+    /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - Slot 1 が存在しない場合は [`VaultError::SlotNotFound`]、重複時は [`VaultError::Parse`] を返す。
+    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    pub fn unlock_vault_with_prf(
+        &mut self,
+        vault: &Vault,
+        prf_secret: &[u8],
+    ) -> Result<(), VaultError> {
+        self.unlock_vault_with_credential(vault, SlotCredential::prf(prf_secret))
+    }
+
+    /// [`Vault`] コンテナ全体から Slot 2 (生リカバリーシークレット) を検索し、
+    /// Vault ヘッダー AAD をバインドして解錠する。
+    ///
+    /// # Errors
+    ///
+    /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - Slot 2 が存在しない場合は [`VaultError::SlotNotFound`]、重複時は [`VaultError::Parse`] を返す。
+    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    pub fn unlock_vault_with_recovery(
+        &mut self,
+        vault: &Vault,
+        recovery_secret: &[u8],
+    ) -> Result<(), VaultError> {
+        self.unlock_vault_with_credential(vault, SlotCredential::recovery(recovery_secret))
+    }
+
+    /// [`Vault`] コンテナ全体から Slot 2 (整形済みリカバリーコード) を検索し、
+    /// Vault ヘッダー AAD をバインドして解錠する。
+    ///
+    /// # Errors
+    ///
+    /// [`Self::unlock_vault_with_recovery`] および [`normalize_recovery_code`] のエラー条件に従う。
+    pub fn unlock_vault_with_recovery_code(
+        &mut self,
+        vault: &Vault,
+        recovery_code: &[u8],
+    ) -> Result<(), VaultError> {
+        self.unlock_vault_with_credential(vault, SlotCredential::recovery_code(recovery_code))
+    }
+
+    /// 指定された単一の [`SlotCredential`] に対応するスロットを [`Vault`] から検索して解錠する。
+    ///
+    /// # Errors
+    ///
+    /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - 対象スロットが不在または重複している場合は [`VaultError::SlotNotFound`] / [`VaultError::Parse`] を返す。
+    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    pub fn unlock_vault_with_credential(
+        &mut self,
+        vault: &Vault,
+        credential: SlotCredential<'_>,
+    ) -> Result<(), VaultError> {
         if !self.state().is_locked() {
             return Err(VaultError::InvalidState);
         }
-        let slot0 = find_slot_entry(&vault.slots, SLOT_ID_ARGON2ID)?;
         let header_aad = vault.header.associated_data();
-        self.unlock_with_slot0(slot0, password, &header_aad)
+        match credential {
+            SlotCredential::Password { password, secret } => {
+                let slot0 = find_slot_entry(&vault.slots, SLOT_ID_ARGON2ID)?;
+                self.unlock_with_slot0_with_secret(slot0, password, secret, &header_aad)
+            }
+            SlotCredential::Prf(prf_secret) => {
+                let slot1 = find_slot_entry(&vault.slots, SLOT_ID_PRF)?;
+                self.unlock_with_slot1(slot1, prf_secret, &header_aad)
+            }
+            SlotCredential::Recovery(recovery_secret) => {
+                let slot2 = find_slot_entry(&vault.slots, SLOT_ID_RECOVERY)?;
+                self.unlock_with_slot2(slot2, recovery_secret, &header_aad)
+            }
+            SlotCredential::RecoveryCode(recovery_code) => {
+                let slot2 = find_slot_entry(&vault.slots, SLOT_ID_RECOVERY)?;
+                self.unlock_with_slot2_code(slot2, recovery_code, &header_aad)
+            }
+        }
+    }
+
+    /// 提示された複数の [`SlotCredential`] を順次試行し、いずれか 1 スロットで解錠可能な多重化解錠を実行する。
+    ///
+    /// 先行スロットが 未設定, 破損, 重複, 認証失敗 のいずれであってもエンジンを安全な `Locked` 状態へ戻し、
+    /// 後続スロットの試行を継続して、1 つでも有効なスロットで復号に成功した時点で `Unlocked` 状態へ遷移する。
+    /// `EnvelopeFsm.v` の `slot_multiplexing_soundness` 定理に対応する実行時パイプライン。
+    ///
+    /// # Errors
+    ///
+    /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - `credentials` が空の場合は [`VaultError::AuthenticationFailed`] を返す。
+    /// - すべての資格情報で解錠に失敗した場合は最後に発生した [`VaultError`] を返す。
+    pub fn unlock_vault_with_any(
+        &mut self,
+        vault: &Vault,
+        credentials: &[SlotCredential<'_>],
+    ) -> Result<SlotKind, VaultError> {
+        if !self.state().is_locked() {
+            return Err(VaultError::InvalidState);
+        }
+        if credentials.is_empty() {
+            return Err(VaultError::AuthenticationFailed);
+        }
+
+        let mut last_err = VaultError::AuthenticationFailed;
+        for &credential in credentials {
+            match self.unlock_vault_with_credential(vault, credential) {
+                Ok(()) => return Ok(credential.slot_kind()),
+                Err(err) => {
+                    last_err = err;
+                }
+            }
+        }
+
+        Err(last_err)
     }
 
     /// 解錠状態の DEK を用いて新しい Slot 0 (Argon2id) エントリを生成する。
@@ -628,6 +1527,57 @@ impl VaultEngine {
         let dek = self.dek()?;
         wrap_dek_slot0_with_secret(dek, password, salt, nonce, params, secret, vault_aad)
     }
+
+    /// 解錠状態の DEK を用いて新しい Slot 1 (WebAuthn PRF / HKDF-SHA256) エントリを生成する。
+    ///
+    /// # Errors
+    ///
+    /// - 現在の状態が [`crate::envelope::VaultState::Unlocked`] でない場合は [`VaultError::InvalidState`] を返す。
+    /// - ラップ処理に失敗した場合は対応する [`VaultError`] を返す。
+    pub fn wrap_slot1(
+        &self,
+        prf_secret: &[u8],
+        salt: &[u8; SLOT1_SALT_LEN],
+        nonce: &[u8; SLOT1_NONCE_LEN],
+        vault_aad: &[u8],
+    ) -> Result<KekSlotEntry, VaultError> {
+        let dek = self.dek()?;
+        wrap_dek_slot1(dek, prf_secret, salt, nonce, vault_aad)
+    }
+
+    /// 解錠状態の DEK を用いて新しい Slot 2 (生リカバリーシークレット) エントリを生成する。
+    ///
+    /// # Errors
+    ///
+    /// - 現在の状態が [`crate::envelope::VaultState::Unlocked`] でない場合は [`VaultError::InvalidState`] を返す。
+    /// - ラップ処理に失敗した場合は対応する [`VaultError`] を返す。
+    pub fn wrap_slot2(
+        &self,
+        recovery_secret: &[u8],
+        salt: &[u8; SLOT2_SALT_LEN],
+        nonce: &[u8; SLOT2_NONCE_LEN],
+        vault_aad: &[u8],
+    ) -> Result<KekSlotEntry, VaultError> {
+        let dek = self.dek()?;
+        wrap_dek_slot2(dek, recovery_secret, salt, nonce, vault_aad)
+    }
+
+    /// 解錠状態の DEK を用いて新しい Slot 2 (整形済み英数字リカバリーコード) エントリを生成する。
+    ///
+    /// # Errors
+    ///
+    /// - 現在の状態が [`crate::envelope::VaultState::Unlocked`] でない場合は [`VaultError::InvalidState`] を返す。
+    /// - コード正準化またはラップ処理に失敗した場合は対応する [`VaultError`] を返す。
+    pub fn wrap_slot2_code(
+        &self,
+        recovery_code: &[u8],
+        salt: &[u8; SLOT2_SALT_LEN],
+        nonce: &[u8; SLOT2_NONCE_LEN],
+        vault_aad: &[u8],
+    ) -> Result<KekSlotEntry, VaultError> {
+        let dek = self.dek()?;
+        wrap_dek_slot2_code(dek, recovery_code, salt, nonce, vault_aad)
+    }
 }
 
 #[cfg(test)]
@@ -635,6 +1585,7 @@ mod tests {
     use super::*;
     use crate::envelope::{SLOT_ID_PRF, SLOT_ID_RECOVERY, VaultState};
     use crate::tlv::{EntryPayload, TlvRecord, VAULT_MAGIC, deserialize, serialize};
+    use alloc::{format, vec};
     use proptest::prelude::*;
 
     fn test_params() -> Argon2Params {
@@ -1065,6 +2016,427 @@ mod tests {
         );
     }
 
+    fn test_salt32() -> [u8; SLOT1_SALT_LEN] {
+        [0x1A; SLOT1_SALT_LEN]
+    }
+
+    fn test_prf_secret() -> [u8; SLOT1_MIN_PRF_LEN] {
+        [0x5A; SLOT1_MIN_PRF_LEN]
+    }
+
+    fn test_recovery_secret() -> [u8; SLOT2_MIN_SECRET_LEN] {
+        [0xA5; SLOT2_MIN_SECRET_LEN]
+    }
+
+    const TEST_RECOVERY_CODE: &[u8] = b"ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-1234";
+
+    #[test]
+    fn slot1_prf_wrap_and_unwrap_roundtrip() {
+        let dek = test_dek();
+        let prf = test_prf_secret();
+        let salt = test_salt32();
+        let nonce = test_nonce();
+        let header = test_header();
+
+        // VaultHeader バインドを付与した Slot 1 のラップと復号の一致を確認。
+        let entry = wrap_dek_slot1_for_header(&dek, &prf, &salt, &nonce, &header).unwrap();
+        assert_eq!(entry.slot_id(), SLOT_ID_PRF);
+        assert_eq!(entry.kdf_kind(), KDF_KIND_HKDF_SHA256);
+        assert_eq!(entry.wrapped_dek().len(), SLOT1_WRAPPED_DEK_LEN);
+        assert!(is_valid_slot1_entry(&entry));
+
+        let unwrapped = unwrap_dek_slot1_for_header(&entry, &prf, &header).unwrap();
+        assert_eq!(unwrapped.as_bytes(), dek.as_bytes());
+    }
+
+    #[test]
+    fn slot1_prf_binary_layout_and_short_secret_rejected() {
+        let dek = test_dek();
+        let prf = [0x3C; 64];
+        let salt = test_salt32();
+        let nonce = test_nonce();
+
+        // 32バイトを超える PRF 出力における正常なラップと復号の成立を確認。
+        let entry = wrap_dek_slot1(&dek, &prf, &salt, &nonce, b"aad").unwrap();
+        let payload = PrfSlotPayload::from_slot_entry(&entry).unwrap();
+        assert_eq!(payload.salt, salt);
+        assert_eq!(payload.nonce, nonce);
+        assert_eq!(payload.to_bytes(), entry.wrapped_dek());
+
+        let unwrapped = unwrap_dek_slot1(&entry, &prf, b"aad").unwrap();
+        assert_eq!(unwrapped.as_bytes(), dek.as_bytes());
+
+        // 低エントロピー防止のため 32バイト未満の PRF 入力の拒絶を確認。
+        let short_prf = [0x11; SLOT1_MIN_PRF_LEN - 1];
+        assert_eq!(
+            wrap_dek_slot1(&dek, &short_prf, &salt, &nonce, b"aad"),
+            Err(VaultError::Crypto(CryptoError::InvalidKeySize))
+        );
+        assert_eq!(
+            unwrap_dek_slot1(&entry, &short_prf, b"aad").err(),
+            Some(VaultError::Crypto(CryptoError::InvalidKeySize))
+        );
+    }
+
+    #[test]
+    fn slot1_prf_wrong_secret_aad_and_tamper_fail() {
+        let dek = test_dek();
+        let prf = test_prf_secret();
+        let header = test_header();
+        let entry =
+            wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
+
+        // 異なる PRF 出力における AEAD 復号の失敗を確認。
+        let mut wrong_prf = prf;
+        wrong_prf[0] ^= 0x01;
+        assert_eq!(
+            unwrap_dek_slot1_for_header(&entry, &wrong_prf, &header).err(),
+            Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+        );
+
+        // AAD バインドによる epoch_id 変更 (ロールバック攻撃相当) の検知を確認。
+        let mut rolled_back = header;
+        rolled_back.epoch_id += 1;
+        assert_eq!(
+            unwrap_dek_slot1_for_header(&entry, &prf, &rolled_back).err(),
+            Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+        );
+
+        // wrapped_dek 全104バイトにおける任意の 1ビット改ざん検知を確認。
+        for pos in 0..SLOT1_WRAPPED_DEK_LEN {
+            let mut tampered = entry.wrapped_dek().to_vec();
+            tampered[pos] ^= 0x01;
+            let tampered_entry =
+                KekSlotEntry::new(SLOT_ID_PRF, KDF_KIND_HKDF_SHA256, tampered).unwrap();
+            assert_eq!(
+                unwrap_dek_slot1_for_header(&tampered_entry, &prf, &header).err(),
+                Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+            );
+        }
+
+        // slot_id や kdf_kind の不一致、および長さ不正ペイロードの拒絶を確認。
+        let wrong_id = KekSlotEntry::new(
+            SLOT_ID_RECOVERY,
+            KDF_KIND_HKDF_SHA256,
+            entry.wrapped_dek().to_vec(),
+        )
+        .unwrap();
+        assert!(!is_valid_slot1_entry(&wrong_id));
+        assert_eq!(
+            unwrap_dek_slot1_for_header(&wrong_id, &prf, &header).err(),
+            Some(VaultError::Parse(TlvParseError::InvalidFormat))
+        );
+
+        let wrong_kdf =
+            KekSlotEntry::new(SLOT_ID_PRF, KDF_KIND_RECOVERY, entry.wrapped_dek().to_vec())
+                .unwrap();
+        assert!(!is_valid_slot1_entry(&wrong_kdf));
+        assert_eq!(
+            unwrap_dek_slot1_for_header(&wrong_kdf, &prf, &header).err(),
+            Some(VaultError::Parse(TlvParseError::InvalidFormat))
+        );
+        assert_eq!(
+            PrfSlotPayload::from_bytes(&entry.wrapped_dek()[..SLOT1_WRAPPED_DEK_LEN - 1]),
+            Err(VaultError::Parse(TlvParseError::InvalidLength))
+        );
+    }
+
+    #[test]
+    fn slot2_recovery_secret_and_code_roundtrip() {
+        let dek = test_dek();
+        let secret = test_recovery_secret();
+        let header = test_header();
+
+        // 生リカバリーシークレットによるラップと復号の成立を確認。
+        let raw_entry =
+            wrap_dek_slot2_for_header(&dek, &secret, &test_salt32(), &test_nonce(), &header)
+                .unwrap();
+        assert_eq!(raw_entry.slot_id(), SLOT_ID_RECOVERY);
+        assert_eq!(raw_entry.kdf_kind(), KDF_KIND_RECOVERY);
+        assert_eq!(raw_entry.wrapped_dek().len(), SLOT2_WRAPPED_DEK_LEN);
+        assert!(is_valid_slot2_entry(&raw_entry));
+        let unwrapped_raw = unwrap_dek_slot2_for_header(&raw_entry, &secret, &header).unwrap();
+        assert_eq!(unwrapped_raw.as_bytes(), dek.as_bytes());
+
+        // 整形済み英数字リカバリーコードにおいて 小文字, ハイフン, 空白 の差異を吸収して復号できることを確認。
+        let code_entry = wrap_dek_slot2_code_for_header(
+            &dek,
+            TEST_RECOVERY_CODE,
+            &test_salt32(),
+            &test_nonce(),
+            &header,
+        )
+        .unwrap();
+        let variant = b"  abcd efgh-jklm npqr stuv wxyz 1234  ";
+        let unwrapped_code =
+            unwrap_dek_slot2_code_for_header(&code_entry, variant, &header).unwrap();
+        assert_eq!(unwrapped_code.as_bytes(), dek.as_bytes());
+    }
+
+    #[test]
+    fn slot2_normalization_and_validation_rules() {
+        let normalized = normalize_recovery_code(b"ab cd-1234-efgh-5678-ijkl-mnop-qr").unwrap();
+        assert_eq!(normalized.as_slice(), b"ABCD1234EFGH5678IJKLMNOPQR");
+
+        // 24文字未満の短小コードの拒絶を確認。
+        assert_eq!(
+            normalize_recovery_code(b"ABCD-EFGH-IJKL-MNOP-QRST-123").err(),
+            Some(VaultError::Crypto(CryptoError::InvalidKeySize))
+        );
+
+        // 未許可記号を含むコードにおけるパラメータ不正の発生を確認。
+        assert_eq!(
+            normalize_recovery_code(b"ABCD-EFGH-IJKL-MNOP-QRST-UVW!").err(),
+            Some(VaultError::Crypto(CryptoError::InvalidParameter))
+        );
+
+        // 境界チェックによる過長入力 DoS の拒絶を確認。
+        let oversized = vec![b'A'; MAX_RECOVERY_CODE_INPUT_LEN + 1];
+        assert_eq!(
+            normalize_recovery_code(&oversized).err(),
+            Some(VaultError::Crypto(CryptoError::InvalidSliceLength))
+        );
+
+        // 16バイト未満の生シークレット拒絶を確認。
+        let dek = test_dek();
+        let short_secret = [0x99; SLOT2_MIN_SECRET_LEN - 1];
+        assert_eq!(
+            wrap_dek_slot2(&dek, &short_secret, &test_salt32(), &test_nonce(), b"aad"),
+            Err(VaultError::Crypto(CryptoError::InvalidKeySize))
+        );
+    }
+
+    #[test]
+    fn slot1_and_slot2_domain_separation_prevents_cross_slot_unwrap() {
+        let dek = test_dek();
+        let shared_secret = [0x77; 32];
+        let header = test_header();
+
+        // 同一の ソルト, ノンス, 鍵素材, ヘッダー であっても Slot 1 と Slot 2 が完全に分離されることを確認。
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &shared_secret, &test_salt32(), &test_nonce(), &header)
+                .unwrap();
+        let slot2 =
+            wrap_dek_slot2_for_header(&dek, &shared_secret, &test_salt32(), &test_nonce(), &header)
+                .unwrap();
+        assert_ne!(slot1.wrapped_dek(), slot2.wrapped_dek());
+
+        // AAD および HKDF-info の分離により、Slot 1 ペイロードの Slot 2 への偽装復号が失敗することを確認。
+        let forged_slot2 = KekSlotEntry::new(
+            SLOT_ID_RECOVERY,
+            KDF_KIND_RECOVERY,
+            slot1.wrapped_dek().to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            unwrap_dek_slot2_for_header(&forged_slot2, &shared_secret, &header).err(),
+            Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+        );
+
+        let forged_slot1 = KekSlotEntry::new(
+            SLOT_ID_PRF,
+            KDF_KIND_HKDF_SHA256,
+            slot2.wrapped_dek().to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            unwrap_dek_slot1_for_header(&forged_slot1, &shared_secret, &header).err(),
+            Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+        );
+    }
+
+    #[test]
+    fn inspect_kek_slots_validates_all_three_slots() {
+        let dek = test_dek();
+        let header = test_header();
+        let slot0 = wrap_dek_slot0_for_header(
+            &dek,
+            b"password",
+            &test_salt(),
+            &test_nonce(),
+            &test_params(),
+            &header,
+        )
+        .unwrap();
+        let slot1 = wrap_dek_slot1_for_header(
+            &dek,
+            &test_prf_secret(),
+            &test_salt32(),
+            &test_nonce(),
+            &header,
+        )
+        .unwrap();
+        let slot2 = wrap_dek_slot2_for_header(
+            &dek,
+            &test_recovery_secret(),
+            &test_salt32(),
+            &test_nonce(),
+            &header,
+        )
+        .unwrap();
+
+        let inspected = inspect_kek_slots(&[slot0.clone(), slot1.clone(), slot2.clone()]);
+        assert_eq!(inspected.status_of(SlotKind::Argon2id), SlotStatus::Valid);
+        assert_eq!(inspected.status_of(SlotKind::Prf), SlotStatus::Valid);
+        assert_eq!(inspected.status_of(SlotKind::Recovery), SlotStatus::Valid);
+
+        // Slot 1 の破損や Slot 2 の重複が存在しても、健全な Slot 0 が影響を受けないことを確認。
+        let bad_slot1 = KekSlotEntry::new(SLOT_ID_PRF, KDF_KIND_HKDF_SHA256, vec![0; 10]).unwrap();
+        let partial = inspect_kek_slots(&[slot0, bad_slot1, slot2.clone(), slot2]);
+        assert_eq!(partial.status_of(SlotKind::Argon2id), SlotStatus::Valid);
+        assert_eq!(partial.status_of(SlotKind::Prf), SlotStatus::Invalid);
+        assert_eq!(partial.status_of(SlotKind::Recovery), SlotStatus::Invalid);
+    }
+
+    #[test]
+    fn slot_multiplexing_soundness_any_single_valid_slot_unlocks() {
+        let dek = test_dek();
+        let header = test_header();
+        let header_aad = header.associated_data();
+        let password = b"master-password";
+        let prf = test_prf_secret();
+        let recovery_code = TEST_RECOVERY_CODE;
+
+        let slot0 = wrap_dek_slot0_for_header(
+            &dek,
+            password,
+            &test_salt(),
+            &test_nonce(),
+            &test_params(),
+            &header,
+        )
+        .unwrap();
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &prf, &[0x21; 32], &[0x31; 24], &header).unwrap();
+        let slot2 =
+            wrap_dek_slot2_code_for_header(&dek, recovery_code, &[0x22; 32], &[0x32; 24], &header)
+                .unwrap();
+
+        // 3スロット構成の Vault において Slot 0, Slot 1, Slot 2 のいずれでも単独解錠できることを確認。
+        let vault_all = Vault::new(
+            header,
+            vec![slot0.clone(), slot1.clone(), slot2.clone()],
+            vec![],
+        );
+        for cred in [
+            SlotCredential::password(password),
+            SlotCredential::prf(&prf),
+            SlotCredential::recovery_code(recovery_code),
+        ] {
+            let mut engine = VaultEngine::from_slot_entries(&vault_all.slots);
+            let used = engine.unlock_vault_with_any(&vault_all, &[cred]).unwrap();
+            assert_eq!(used, cred.slot_kind());
+            assert_eq!(engine.state(), VaultState::Unlocked);
+            assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+        }
+
+        // 先行スロットが 未設定, 破損, 誤認証 のいずれであっても後続の有効スロットで解錠でき、
+        // 全スロット失敗時は安全に Locked 状態へ復帰することを確認。
+        let corrupted_slot0 =
+            KekSlotEntry::new(SLOT_ID_ARGON2ID, KDF_KIND_ARGON2ID, vec![0xFF; 16]).unwrap();
+        let mut mixed_slots = vec![corrupted_slot0, slot2.clone()];
+        let vault_mixed = Vault::new(header, mixed_slots.clone(), vec![]);
+        let mut engine = VaultEngine::from_slot_entries(&vault_mixed.slots);
+        assert_eq!(
+            engine.slots().status_of(SlotKind::Argon2id),
+            SlotStatus::Invalid
+        );
+        assert_eq!(engine.slots().status_of(SlotKind::Prf), SlotStatus::Unset);
+        assert_eq!(
+            engine.slots().status_of(SlotKind::Recovery),
+            SlotStatus::Valid
+        );
+
+        let used = engine
+            .unlock_vault_with_any(
+                &vault_mixed,
+                &[
+                    SlotCredential::password(password),
+                    SlotCredential::prf(&prf),
+                    SlotCredential::recovery_code(b"WRONG-CODE-XXXX-YYYY-ZZZZ-1234"),
+                    SlotCredential::recovery_code(recovery_code),
+                ],
+            )
+            .unwrap();
+        assert_eq!(used, SlotKind::Recovery);
+        assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+
+        // 解錠状態からの追加スロット生成 (Slot 1, Slot 2) および施錠後の再解錠を確認。
+        let minted_slot1 = engine
+            .wrap_slot1(&[0xEE; 32], &[0x44; 32], &[0x55; 24], &header_aad)
+            .unwrap();
+        let minted_slot2 = engine
+            .wrap_slot2(&[0xDD; 32], &[0x46; 32], &[0x57; 24], &header_aad)
+            .unwrap();
+        let minted_slot2_code = engine
+            .wrap_slot2_code(recovery_code, &[0x48; 32], &[0x59; 24], &header_aad)
+            .unwrap();
+        engine.lock().unwrap();
+
+        mixed_slots.push(minted_slot1);
+        let vault_prf_added = Vault::new(header, mixed_slots, vec![]);
+        let mut engine2 = VaultEngine::from_slot_entries(&vault_prf_added.slots);
+        assert!(
+            engine2
+                .unlock_vault_with_prf(&vault_prf_added, &[0xEE; 32])
+                .is_ok()
+        );
+
+        let vault_raw_rec = Vault::new(header, vec![minted_slot2], vec![]);
+        let mut engine3 = VaultEngine::from_slot_entries(&vault_raw_rec.slots);
+        assert!(
+            engine3
+                .unlock_vault_with_recovery(&vault_raw_rec, &[0xDD; 32])
+                .is_ok()
+        );
+
+        let vault_code_rec = Vault::new(header, vec![minted_slot2_code], vec![]);
+        let mut engine4 = VaultEngine::from_slot_entries(&vault_code_rec.slots);
+        assert!(
+            engine4
+                .unlock_vault_with_recovery_code(&vault_code_rec, recovery_code)
+                .is_ok()
+        );
+
+        // 全候補失敗時のエラー返却、およびエンジンが安全に Locked を維持することを確認。
+        engine4.lock().unwrap();
+        assert!(
+            engine4
+                .unlock_vault_with_any(
+                    &vault_code_rec,
+                    &[
+                        SlotCredential::prf(&prf),
+                        SlotCredential::recovery(b"short")
+                    ],
+                )
+                .is_err()
+        );
+        assert_eq!(engine4.state(), VaultState::Locked);
+        assert!(engine4.dek().is_err());
+
+        // Slot 1 のみ設定された状態からの単一スロット解錠を確認。
+        let vault_slot1_only = Vault::new(header, vec![slot1], vec![]);
+        let mut engine5 = VaultEngine::from_slot_entries(&vault_slot1_only.slots);
+        assert!(
+            engine5
+                .unlock_vault_with_prf(&vault_slot1_only, &prf)
+                .is_ok()
+        );
+        assert_eq!(engine5.dek().unwrap().as_bytes(), dek.as_bytes());
+    }
+
+    #[test]
+    fn slot_credential_debug_redacts_secrets() {
+        let dbg_pwd = format!("{:?}", SlotCredential::password(b"top-secret"));
+        let dbg_prf = format!("{:?}", SlotCredential::prf(b"prf-secret"));
+        let dbg_rec = format!("{:?}", SlotCredential::recovery(b"rec-secret"));
+        let dbg_code = format!("{:?}", SlotCredential::recovery_code(b"code-secret"));
+        assert!(!dbg_pwd.contains("top-secret"));
+        assert!(!dbg_prf.contains("prf-secret"));
+        assert!(!dbg_rec.contains("rec-secret"));
+        assert!(!dbg_code.contains("code-secret"));
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
@@ -1086,14 +2458,49 @@ mod tests {
         }
 
         #[test]
+        fn prop_slot1_wrap_unwrap_roundtrip(
+            dek_bytes in any::<[u8; DEK_LEN]>(),
+            prf in prop::collection::vec(any::<u8>(), SLOT1_MIN_PRF_LEN..96),
+            salt in any::<[u8; SLOT1_SALT_LEN]>(),
+            nonce in any::<[u8; SLOT1_NONCE_LEN]>(),
+            vault_aad in prop::collection::vec(any::<u8>(), 0..64),
+        ) {
+            let dek = SecretBytes::new(dek_bytes);
+            // 任意長の有効な PRF 出力におけるラップ・復号の一致を確認。
+            let entry = wrap_dek_slot1(&dek, &prf, &salt, &nonce, &vault_aad).unwrap();
+            let unwrapped = unwrap_dek_slot1(&entry, &prf, &vault_aad).unwrap();
+            prop_assert_eq!(unwrapped.as_bytes(), dek.as_bytes());
+        }
+
+        #[test]
+        fn prop_slot2_wrap_unwrap_roundtrip(
+            dek_bytes in any::<[u8; DEK_LEN]>(),
+            secret in prop::collection::vec(any::<u8>(), SLOT2_MIN_SECRET_LEN..96),
+            salt in any::<[u8; SLOT2_SALT_LEN]>(),
+            nonce in any::<[u8; SLOT2_NONCE_LEN]>(),
+            vault_aad in prop::collection::vec(any::<u8>(), 0..64),
+        ) {
+            let dek = SecretBytes::new(dek_bytes);
+            // 任意長の高エントロピーシークレットにおけるラップ・復号の一致を確認。
+            let entry = wrap_dek_slot2(&dek, &secret, &salt, &nonce, &vault_aad).unwrap();
+            let unwrapped = unwrap_dek_slot2(&entry, &secret, &vault_aad).unwrap();
+            prop_assert_eq!(unwrapped.as_bytes(), dek.as_bytes());
+        }
+
+        #[test]
         fn prop_slot0_from_bytes_never_panics(
             raw in prop::collection::vec(any::<u8>(), 0..256),
             slot_id in any::<u8>(),
             kdf_kind in any::<u8>(),
         ) {
             let _ = Argon2idSlotPayload::from_bytes(&raw);
+            let _ = PrfSlotPayload::from_bytes(&raw);
+            let _ = RecoverySlotPayload::from_bytes(&raw);
+            let _ = normalize_recovery_code(&raw);
             if let Ok(entry) = KekSlotEntry::new(slot_id, kdf_kind, raw) {
                 let _ = unwrap_dek_slot0(&entry, b"password", b"aad");
+                let _ = unwrap_dek_slot1(&entry, &[0x42; SLOT1_MIN_PRF_LEN], b"aad");
+                let _ = unwrap_dek_slot2(&entry, &[0x42; SLOT2_MIN_SECRET_LEN], b"aad");
             }
         }
     }
