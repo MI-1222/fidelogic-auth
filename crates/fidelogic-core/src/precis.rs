@@ -203,22 +203,38 @@ pub fn precis_fold_string(cps: &[u32]) -> Vec<u32> {
     cps.iter().copied().map(precis_fold_cp).collect()
 }
 
-/// ハングル音節合成 (`Jamo L + V -> LV`) を計算する。
+/// ハングル音節合成 (`Jamo L + V -> LV`) を検証付きで計算する。
+///
+/// 初声 `l` (`U+1100..=U+1112`) と中声 `v` (`U+1161..=U+1175`) が妥当な範囲内にある場合、
+/// 合成されたハングル LV 音節コードポイント (`U+AC00..=U+D7A3` のうち LV 音節) を返す。
+/// いずれかのコードポイントが Jamo 範囲外の場合は `None` を返す。
 #[inline]
 #[must_use]
-pub const fn compose_hangul_syllable(l: u32, v: u32) -> u32 {
-    let l_idx = l.saturating_sub(HANGUL_L_BASE);
-    let v_idx = v.saturating_sub(HANGUL_V_BASE);
-    HANGUL_S_BASE
-        .saturating_add(l_idx.saturating_mul(HANGUL_N_COUNT))
-        .saturating_add(v_idx.saturating_mul(HANGUL_T_COUNT))
+pub const fn compose_hangul_syllable(l: u32, v: u32) -> Option<u32> {
+    if !in_range(HANGUL_L_BASE, HANGUL_L_END, l) || !in_range(HANGUL_V_BASE, HANGUL_V_END, v) {
+        return None;
+    }
+    let l_idx = l - HANGUL_L_BASE;
+    let v_idx = v - HANGUL_V_BASE;
+    Some(HANGUL_S_BASE + l_idx * HANGUL_N_COUNT + v_idx * HANGUL_T_COUNT)
 }
 
-/// ハングル音節終声合成 (`LV + T -> LVT`) を計算する。
+/// ハングル音節終声合成 (`LV + T -> LVT`) を検証付きで計算する。
+///
+/// 音節 `lv` が有効な LV 音節範囲内 (`U+AC00..=U+D788` かつ `(lv - SBase) % 28 == 0`) であり、
+/// 終声 `t` が終声 Jamo 範囲内 (`U+11A8..=U+11C2`) にある場合、
+/// 合成されたハングル LVT 音節コードポイントを返す。
+/// 入力が範囲外または無効な組み合わせの場合は `None` を返す。
 #[inline]
 #[must_use]
-pub const fn compose_hangul_trailing(lv: u32, t: u32) -> u32 {
-    lv.saturating_add(t.saturating_sub(HANGUL_T_BASE))
+pub const fn compose_hangul_trailing(lv: u32, t: u32) -> Option<u32> {
+    if !in_range(HANGUL_S_BASE, HANGUL_LV_END, lv)
+        || !((lv - HANGUL_S_BASE).is_multiple_of(HANGUL_T_COUNT))
+        || !in_range(HANGUL_T_START, HANGUL_T_END, t)
+    {
+        return None;
+    }
+    Some(lv + (t - HANGUL_T_BASE))
 }
 
 /// 単一ペアに対する Unicode 正準合成 (Canonical Composition) を適用する。
@@ -296,13 +312,13 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
         _ if in_range(HANGUL_L_BASE, HANGUL_L_END, c1)
             && in_range(HANGUL_V_BASE, HANGUL_V_END, c2) =>
         {
-            Some(compose_hangul_syllable(c1, c2))
+            compose_hangul_syllable(c1, c2)
         }
         _ if in_range(HANGUL_S_BASE, HANGUL_LV_END, c1)
             && (c1 - HANGUL_S_BASE).is_multiple_of(HANGUL_T_COUNT)
             && in_range(HANGUL_T_START, HANGUL_T_END, c2) =>
         {
-            Some(compose_hangul_trailing(c1, c2))
+            compose_hangul_trailing(c1, c2)
         }
         _ => None,
     }
@@ -677,6 +693,36 @@ mod tests {
             "先頭に現れる禁止コードポイントが返されることを確認。"
         );
         assert!(!all_allowed(&[b'a' as u32, 0xD800]));
+    }
+
+    #[test]
+    fn test_compose_hangul_syllable_and_trailing() {
+        // compose_hangul_syllable: 正常系(境界値および中間値)
+        assert_eq!(compose_hangul_syllable(4352, 4449), Some(44032));
+        assert_eq!(compose_hangul_syllable(4370, 4469), Some(55176));
+        assert_eq!(compose_hangul_syllable(4352, 4450), Some(44060));
+
+        // compose_hangul_syllable: 異常系(下限未満、上限超過、無効値)
+        assert_eq!(compose_hangul_syllable(0, 0), None);
+        assert_eq!(compose_hangul_syllable(4351, 4449), None);
+        assert_eq!(compose_hangul_syllable(4371, 4449), None);
+        assert_eq!(compose_hangul_syllable(4352, 4448), None);
+        assert_eq!(compose_hangul_syllable(4352, 4470), None);
+        assert_eq!(compose_hangul_syllable(u32::MAX, u32::MAX), None);
+
+        // compose_hangul_trailing: 正常系(境界値および中間値)
+        assert_eq!(compose_hangul_trailing(44032, 4520), Some(44033));
+        assert_eq!(compose_hangul_trailing(55176, 4546), Some(55203));
+
+        // compose_hangul_trailing: 異常系(非LV音節、終声範囲外、無効値)
+        assert_eq!(compose_hangul_trailing(0, 0), None);
+        assert_eq!(compose_hangul_trailing(44032, 4519), None);
+        assert_eq!(compose_hangul_trailing(44032, 4547), None);
+        // 44033 は既に終声を含むため LV 音節ではない。
+        assert_eq!(compose_hangul_trailing(44033, 4520), None);
+        // LV 音節の上限 55176 を超えるコードポイント。
+        assert_eq!(compose_hangul_trailing(55177, 4520), None);
+        assert_eq!(compose_hangul_trailing(u32::MAX, u32::MAX), None);
     }
 
     #[cfg(feature = "alloc")]
