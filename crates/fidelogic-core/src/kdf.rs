@@ -392,16 +392,11 @@ impl Argon2Params {
         salt: &[u8],
         secret: &[u8],
     ) -> Result<SecretVec, CryptoError> {
-        self.derive_key_vec_with_secret_fn(password, salt, secret, Self::hash_into_buffer)
+        self.derive_key_vec_with_secret_inner(password, salt, secret, Self::hash_into_buffer)
     }
 
-    /// テスト用フック: 出力用 [`SecretVec`] 確保後の鍵導出処理を差し替えて実行する。
-    ///
-    /// [`Self::derive_key_vec_with_secret`] と同一の事前検証、[`SecretVec::zeroed`] による
-    /// ヒープ確保、および失敗時 RAII ゼロ消去経路を通るため、鍵導出失敗時のヒープ残留検証に利用できる。
     #[cfg(feature = "alloc")]
-    #[doc(hidden)]
-    pub fn derive_key_vec_with_secret_fn<F>(
+    fn derive_key_vec_with_secret_inner<F>(
         &self,
         password: &[u8],
         salt: &[u8],
@@ -415,6 +410,25 @@ impl Argon2Params {
         let mut key_vec = SecretVec::zeroed(self.output_len);
         hash_fn(&argon2, password, salt, key_vec.as_mut_slice())?;
         Ok(key_vec)
+    }
+
+    /// テスト用フック: 出力用 [`SecretVec`] 確保後の鍵導出処理を差し替えて実行する。
+    ///
+    /// [`Self::derive_key_vec_with_secret`] と同一の事前検証、[`SecretVec::zeroed`] による
+    /// ヒープ確保、および失敗時 RAII ゼロ消去経路を通るため、鍵導出失敗時のヒープ残留検証に利用できる。
+    #[cfg(all(feature = "alloc", any(test, feature = "test-hooks")))]
+    #[doc(hidden)]
+    pub fn derive_key_vec_with_secret_fn<F>(
+        &self,
+        password: &[u8],
+        salt: &[u8],
+        secret: &[u8],
+        hash_fn: F,
+    ) -> Result<SecretVec, CryptoError>
+    where
+        F: FnOnce(&Argon2<'_>, &[u8], &[u8], &mut [u8]) -> Result<(), CryptoError>,
+    {
+        self.derive_key_vec_with_secret_inner(password, salt, secret, hash_fn)
     }
 }
 

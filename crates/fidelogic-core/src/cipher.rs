@@ -390,18 +390,13 @@ impl VaultCipher {
         plaintext: &[u8],
         aad: &[u8],
     ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
-        self.encrypt_with_detached(nonce, plaintext, aad, |cipher, n, a, buf| {
+        self.encrypt_with_detached_inner(nonce, plaintext, aad, |cipher, n, a, buf| {
             cipher.encrypt_in_place_detached(n, a, buf)
         })
     }
 
-    /// テスト用フック: バッファ確保後のインプレース暗号化処理を差し替えて実行する。
-    ///
-    /// [`Self::encrypt`] と同一の事前検証、ヒープ確保、および失敗時ゼロ消去経路を通るため、
-    /// 暗号化プリミティブ失敗時のヒープ残留検証に利用できる。
     #[cfg(feature = "alloc")]
-    #[doc(hidden)]
-    pub fn encrypt_with_detached<F>(
+    fn encrypt_with_detached_inner<F>(
         &self,
         nonce: &[u8],
         plaintext: &[u8],
@@ -433,6 +428,25 @@ impl VaultCipher {
 
         buffer.extend_from_slice(&tag);
         Ok(core::mem::take(&mut *buffer))
+    }
+
+    /// テスト用フック: バッファ確保後のインプレース暗号化処理を差し替えて実行する。
+    ///
+    /// [`Self::encrypt`] と同一の事前検証、ヒープ確保、および失敗時ゼロ消去経路を通るため、
+    /// 暗号化プリミティブ失敗時のヒープ残留検証に利用できる。
+    #[cfg(all(feature = "alloc", any(test, feature = "test-hooks")))]
+    #[doc(hidden)]
+    pub fn encrypt_with_detached<F>(
+        &self,
+        nonce: &[u8],
+        plaintext: &[u8],
+        aad: &[u8],
+        encrypt_detached: F,
+    ) -> Result<alloc::vec::Vec<u8>, CryptoError>
+    where
+        F: FnOnce(&Self, &[u8], &[u8], &mut [u8]) -> Result<[u8; TAG_LEN], CryptoError>,
+    {
+        self.encrypt_with_detached_inner(nonce, plaintext, aad, encrypt_detached)
     }
 
     /// 認証タグ付き暗号文(Ciphertext || Tag)を復号し、Drop時自動ゼロ消去が保証された [`SecretVec`] を返す。

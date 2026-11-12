@@ -25,6 +25,8 @@ profile-vault = [
 memlock = ["std", "dep:libc"]
 # parallel: ネイティブ環境向けにマルチコア並列化パラメータ(レーン並列度)を既定値として選択するプロファイル。
 parallel = ["std"]
+# test-hooks: 統合テスト向けに内部暗号化・KDF欠陥注入フックを公開するテスト専用フィーチャー。
+test-hooks = []
 
 [dependencies]
 aes = { workspace = true, features = ["zeroize"], optional = true }
@@ -39,4 +41,5 @@ subtle = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+fidelogic-core = { path = ".", features = ["test-hooks"] }
 proptest = "1"
