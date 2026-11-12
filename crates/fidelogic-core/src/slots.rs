@@ -569,6 +569,20 @@ pub fn validate_slot0_argon2_params(params: &Argon2Params) -> Result<(), CryptoE
     params.validate()
 }
 
+/// 固定長プレフィックス長と可変長 `vault_aad` の合計長を検証して返す。
+#[inline]
+// 32-bit環境ではMAX_AAD_LENがusize::MAXとなり比較が恒偽になるが、環境非依存の単一コードパス維持のため許可する。
+#[allow(clippy::absurd_extreme_comparisons)]
+fn checked_aad_len(fixed_len: usize, vault_aad: &[u8]) -> Result<usize, CryptoError> {
+    let total_len = fixed_len
+        .checked_add(vault_aad.len())
+        .ok_or(CryptoError::InvalidSliceLength)?;
+    if total_len > MAX_AAD_LEN {
+        return Err(CryptoError::InvalidSliceLength);
+    }
+    Ok(total_len)
+}
+
 /// Slot 0 の暗号化および復号に用いる AEAD 関連データ (AAD) を構築する。
 ///
 /// ドメイン分離プレフィックス, スロット識別子, KDF 種別, Argon2id パラメータ,
@@ -579,12 +593,7 @@ fn build_slot0_aad(
     salt: &[u8; SLOT0_SALT_LEN],
     vault_aad: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
-    let total_len = SLOT0_AAD_FIXED_LEN
-        .checked_add(vault_aad.len())
-        .ok_or(CryptoError::InvalidSliceLength)?;
-    if total_len > MAX_AAD_LEN {
-        return Err(CryptoError::InvalidSliceLength);
-    }
+    let total_len = checked_aad_len(SLOT0_AAD_FIXED_LEN, vault_aad)?;
 
     let mut aad = alloc::vec::Vec::with_capacity(total_len);
     aad.extend_from_slice(SLOT0_AAD_PREFIX);
@@ -796,12 +805,7 @@ fn build_hkdf_slot_aad(
     salt: &[u8; SLOT1_SALT_LEN],
     vault_aad: &[u8],
 ) -> Result<alloc::vec::Vec<u8>, CryptoError> {
-    let total_len = HKDF_SLOT_AAD_FIXED_LEN
-        .checked_add(vault_aad.len())
-        .ok_or(CryptoError::InvalidSliceLength)?;
-    if total_len > MAX_AAD_LEN {
-        return Err(CryptoError::InvalidSliceLength);
-    }
+    let total_len = checked_aad_len(HKDF_SLOT_AAD_FIXED_LEN, vault_aad)?;
 
     let mut aad = alloc::vec::Vec::with_capacity(total_len);
     aad.extend_from_slice(spec.aad_prefix);
@@ -3513,27 +3517,48 @@ mod tests {
             wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
         let vault = Vault::new(header, vec![slot0.clone(), slot1], vec![]);
 
-        // 基準として Slot 0 単体復号の実行時間を計測する。
-        let start_base = std::time::Instant::now();
-        let _ = unwrap_dek_slot0_for_header(&slot0, password, &header).unwrap();
-        let baseline_argon2_ns = start_base.elapsed().as_nanos();
+        // 並列テスト実行時のOSスケジューリング揺らぎを排除するため、複数回計測の最小値で比較する。
+        let mut baseline_argon2_ns = u128::MAX;
+        for _ in 0..3 {
+            let start_base = std::time::Instant::now();
+            let _ = unwrap_dek_slot0_for_header(&slot0, password, &header).unwrap();
+            baseline_argon2_ns = baseline_argon2_ns.min(start_base.elapsed().as_nanos());
+        }
 
         // 先頭 Slot 1 (PRF) が即座に成功する構成でも、後続 Slot 0 に対するダミー Argon2id が走る。
-        let mut engine = VaultEngine::from_slot_entries(&vault.slots);
-        let start_prf_first = std::time::Instant::now();
-        let used = engine
-            .unlock_vault_with_any(
-                &vault,
-                &[
-                    SlotCredential::prf(&prf),
-                    SlotCredential::password(b"wrong-password"),
-                ],
-            )
-            .unwrap();
-        let prf_first_ns = start_prf_first.elapsed().as_nanos();
+        let mut prf_first_ns = u128::MAX;
+        for _ in 0..3 {
+            let mut engine = VaultEngine::from_slot_entries(&vault.slots);
+            let start_prf_first = std::time::Instant::now();
+            let used = engine
+                .unlock_vault_with_any(
+                    &vault,
+                    &[
+                        SlotCredential::prf(&prf),
+                        SlotCredential::password(b"wrong-password"),
+                    ],
+                )
+                .unwrap();
+            let elapsed = start_prf_first.elapsed().as_nanos();
+            prf_first_ns = prf_first_ns.min(elapsed);
+            assert_eq!(used, SlotKind::Prf);
+            assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+        }
 
-        assert_eq!(used, SlotKind::Prf);
-        assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+        // 演算トレースでもダミー Argon2id が1回実行されていることを決定論的に確認する。
+        let mut traced_engine = VaultEngine::from_slot_entries(&vault.slots);
+        let (traced_res, trace) = traced_engine.unlock_vault_with_any_traced(
+            &vault,
+            &[
+                SlotCredential::prf(&prf),
+                SlotCredential::password(b"wrong-password"),
+            ],
+            false,
+        );
+        assert_eq!(traced_res, Ok(SlotKind::Prf));
+        assert_eq!(trace.argon2id_ops(), 1);
+        assert_eq!(trace.hkdf_ops(), 1);
+
         assert!(
             prf_first_ns * 2 >= baseline_argon2_ns,
             "先行PRF成功時でも残余Slot 0のダミーArgon2id演算が実行される必要がある (prf_first={prf_first_ns}ns, baseline={baseline_argon2_ns}ns)。"
