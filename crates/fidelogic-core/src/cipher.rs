@@ -111,12 +111,14 @@ impl CipherSuiteId {
 
     /// 暗号スイート識別子の数値(`u8`)を返す。
     #[inline]
+    #[must_use]
     pub const fn as_u8(self) -> u8 {
         self as u8
     }
 
     /// 本暗号スイートで要求されるノンス長(バイト数)を返す。
     #[inline]
+    #[must_use]
     pub const fn nonce_len(self) -> usize {
         match self {
             Self::XChaCha20Poly1305 => XCHACHA20_POLY1305_NONCE_LEN,
@@ -126,12 +128,14 @@ impl CipherSuiteId {
 
     /// 本暗号スイートで要求される認証タグ長(バイト数)を返す。
     #[inline]
+    #[must_use]
     pub const fn tag_len(self) -> usize {
         TAG_LEN
     }
 
     /// 本暗号スイートで要求される鍵長(バイト数)を返す。
     #[inline]
+    #[must_use]
     pub const fn key_len(self) -> usize {
         KEY_LEN
     }
@@ -206,6 +210,7 @@ const _: fn() = || {
 impl VaultCipher {
     /// 32バイト固定長秘密鍵配列および暗号スイート識別子から暗号インスタンスを生成する。
     #[inline]
+    #[must_use]
     pub fn new(suite_id: CipherSuiteId, key: &[u8; KEY_LEN]) -> Self {
         let key_arr = GenericArray::from_slice(key);
         let inner = match suite_id {
@@ -223,6 +228,7 @@ impl VaultCipher {
 
     /// [`SecretBytes<32>`] から暗号インスタンスを安全に生成する。
     #[inline]
+    #[must_use]
     pub fn new_from_secret(suite_id: CipherSuiteId, key: &SecretBytes<KEY_LEN>) -> Self {
         Self::new(suite_id, key.as_bytes())
     }
@@ -231,6 +237,7 @@ impl VaultCipher {
     ///
     /// 呼び出し側の鍵消費に伴うゼロ化漏れを構造的に防止する。
     #[inline]
+    #[must_use]
     pub fn from_consumed_secret(suite_id: CipherSuiteId, key: &mut SecretBytes<KEY_LEN>) -> Self {
         let cipher = Self::new_from_secret(suite_id, key);
         crate::zeroize::volatile_zeroize(key.as_mut_slice());
@@ -248,6 +255,7 @@ impl VaultCipher {
 
     /// 本暗号インスタンスの暗号スイート識別子を返す。
     #[inline]
+    #[must_use]
     pub const fn suite_id(&self) -> CipherSuiteId {
         // 安全性: self.inner は VaultCipher::new で有効な VaultCipherInner により初期化され、
         // Drop 実行前まで破棄されない。ManuallyDrop<T> は T と同一レイアウトを持つ。
@@ -260,12 +268,14 @@ impl VaultCipher {
 
     /// 本暗号インスタンスで要求されるノンス長(バイト数)を返す。
     #[inline]
+    #[must_use]
     pub const fn nonce_len(&self) -> usize {
         self.suite_id().nonce_len()
     }
 
     /// 本暗号インスタンスで要求される認証タグ長(バイト数)を返す。
     #[inline]
+    #[must_use]
     pub const fn tag_len(&self) -> usize {
         self.suite_id().tag_len()
     }
