@@ -74,11 +74,19 @@ pub struct Argon2Params {
 
 impl Default for Argon2Params {
     /// ターゲット環境およびフィーチャー設定に応じた既定パラメータを返す。
+    fn default() -> Self {
+        Self::default_for_target()
+    }
+}
+
+impl Argon2Params {
+    /// ターゲット環境およびフィーチャー設定に応じた既定パラメータを定数関数として返す。
     ///
     /// - `wasm32` ターゲット: シングルスレッド実行用の [`Argon2Params::for_wasm`] を自動選択。
     /// - 非 `wasm32` ターゲットかつ `parallel` フィーチャー有効: マルチコア並列化用の [`Argon2Params::for_native`] を自動選択。
     /// - 非 `wasm32` ターゲットかつ `parallel` フィーチャー無効: シングルスレッド用の [`Argon2Params::for_wasm`] を安全に選択。
-    fn default() -> Self {
+    #[must_use]
+    pub const fn default_for_target() -> Self {
         #[cfg(target_arch = "wasm32")]
         {
             Self::for_wasm()
@@ -95,9 +103,6 @@ impl Default for Argon2Params {
             }
         }
     }
-}
-
-impl Argon2Params {
     /// Native環境向けの推奨マルチコア並列化パラメータを構築する。
     ///
     /// メモリコスト 64 MiB(65536 KiB)、反復回数 3、並列度 4、鍵長 32 バイト(Argon2id v0x13)

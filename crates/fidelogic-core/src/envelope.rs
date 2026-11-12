@@ -14,6 +14,7 @@
 
 use crate::cipher::KEY_LEN;
 use crate::error::VaultError;
+use crate::kdf::Argon2Params;
 use crate::zeroize::{SecretBytes, volatile_zeroize};
 
 /// DEK (データ暗号化鍵) のバイト長 (256ビット = 32バイト)。
@@ -299,6 +300,7 @@ pub struct VaultEngine {
     state: VaultState,
     dek: Option<SecretBytes<DEK_LEN>>,
     slots: KekSlots,
+    dummy_argon2_params: Argon2Params,
 }
 
 impl VaultEngine {
@@ -313,6 +315,7 @@ impl VaultEngine {
             state: VaultState::Locked,
             dek: None,
             slots,
+            dummy_argon2_params: Argon2Params::default_for_target(),
         }
     }
 
@@ -321,6 +324,27 @@ impl VaultEngine {
     #[must_use]
     pub const fn locked() -> Self {
         Self::new(KekSlots::unset_all())
+    }
+
+    /// スロット0不在または破損時のダミー暗号演算に用いる [`Argon2Params`] を上書きする。
+    #[inline]
+    #[must_use]
+    pub const fn with_dummy_argon2_params(mut self, params: Argon2Params) -> Self {
+        self.dummy_argon2_params = params;
+        self
+    }
+
+    /// スロット0不在または破損時のダミー暗号演算に用いる [`Argon2Params`] を取得する。
+    #[inline]
+    #[must_use]
+    pub const fn dummy_argon2_params(&self) -> &Argon2Params {
+        &self.dummy_argon2_params
+    }
+
+    /// スロット0不在または破損時のダミー暗号演算に用いる [`Argon2Params`] を更新する。
+    #[inline]
+    pub fn set_dummy_argon2_params(&mut self, params: Argon2Params) {
+        self.dummy_argon2_params = params;
     }
 
     /// 現在のライフサイクル状態 ([`VaultState`]) を返す。

@@ -128,6 +128,33 @@ pub const SLOT2_MIN_CODE_LEN: usize = 24;
 /// 整形済みリカバリーコード入力の許容最大バイト長 (512バイト)。
 const MAX_RECOVERY_CODE_INPUT_LEN: usize = 512;
 
+/// タイミング平滑化用ダミー演算で使用する固定ダミーパスワード (Slot 0)。
+const DUMMY_SLOT0_PASSWORD: &[u8; 27] = b"fidelogic-dummy-password-v1";
+
+/// タイミング平滑化用ダミー演算で使用する固定ダミーソルト (Slot 0)。
+const DUMMY_SLOT0_SALT: [u8; SLOT0_SALT_LEN] = [0xA5; SLOT0_SALT_LEN];
+
+/// タイミング平滑化用ダミー演算で使用する固定ダミーソルト (Slot 1 / Slot 2)。
+const DUMMY_HKDF_SALT: [u8; SLOT1_SALT_LEN] = [0x55; SLOT1_SALT_LEN];
+
+/// タイミング平滑化用ダミー演算で使用する固定ダミー入力鍵素材 (Slot 1 / Slot 2)。
+const DUMMY_HKDF_IKM: [u8; SLOT1_MIN_PRF_LEN] = [0x66; SLOT1_MIN_PRF_LEN];
+
+/// タイミング平滑化用ダミー演算で使用する固定ダミーリカバリーコード (Slot 2)。
+const DUMMY_RECOVERY_CODE: &[u8; 34] = b"DUMM-YREC-OVER-YCOD-E000-0000-0000";
+
+/// タイミング平滑化用ダミー AEAD 復号で使用する固定ダミーノンス。
+const DUMMY_NONCE: [u8; XCHACHA20_POLY1305_NONCE_LEN] = [0x5A; XCHACHA20_POLY1305_NONCE_LEN];
+
+/// タイミング平滑化用ダミー AEAD 復号で使用する固定ダミー暗号文。
+const DUMMY_CIPHERTEXT: [u8; DEK_LEN] = [0x3C; DEK_LEN];
+
+/// タイミング平滑化用ダミー AEAD 復号で使用する固定ダミー認証タグ。
+const DUMMY_TAG: [u8; TAG_LEN] = [0xC3; TAG_LEN];
+
+/// タイミング平滑化用ダミー AEAD 復号フォールバックで使用するダミー KEK シード。
+const DUMMY_KEK_SEED: [u8; DEK_LEN] = [0x7E; DEK_LEN];
+
 /// Slot 1 の AEAD 関連データ (AAD) に付与するドメイン分離プレフィックス。
 const SLOT1_AAD_PREFIX: &[u8; 18] = b"fidelogic-slot1-v1";
 
@@ -1232,6 +1259,306 @@ impl core::fmt::Debug for SlotCredential<'_> {
     }
 }
 
+/// 解錠パイプライン内で実行された実暗号演算およびダミー暗号演算の実行回数記録。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SlotEvalTrace {
+    real_argon2id_ops: usize,
+    dummy_argon2id_ops: usize,
+    real_hkdf_ops: usize,
+    dummy_hkdf_ops: usize,
+    real_aead_ops: usize,
+    dummy_aead_ops: usize,
+}
+
+#[cfg(test)]
+impl SlotEvalTrace {
+    const fn argon2id_ops(self) -> usize {
+        self.real_argon2id_ops + self.dummy_argon2id_ops
+    }
+
+    const fn hkdf_ops(self) -> usize {
+        self.real_hkdf_ops + self.dummy_hkdf_ops
+    }
+
+    const fn total_kdf_ops(self) -> usize {
+        self.argon2id_ops() + self.hkdf_ops()
+    }
+
+    const fn total_aead_ops(self) -> usize {
+        self.real_aead_ops + self.dummy_aead_ops
+    }
+}
+
+/// コンパイラ最適化によるダミー暗号演算の除去 (DCE) を防ぎつつ、
+/// KEK とダミー復号結果のメモリを即座に揮発性ゼロ消去する。
+fn consume_dummy_aead_unwrap(
+    kek: &mut SecretBytes<DEK_LEN>,
+    aad: &[u8],
+    trace: &mut SlotEvalTrace,
+) {
+    trace.dummy_aead_ops += 1;
+    let res = unwrap_dek_with_kek(kek, &DUMMY_NONCE, aad, &DUMMY_CIPHERTEXT, &DUMMY_TAG);
+    match res {
+        Ok(mut unexpected_dek) => {
+            // 万一タグ照合が偶然通過した場合も結果を観測不能化し即座に破棄する。
+            let _ = core::hint::black_box(unexpected_dek.as_bytes()[0]);
+            volatile_zeroize(unexpected_dek.as_mut_slice());
+        }
+        Err(err) => {
+            let _ = core::hint::black_box(err);
+        }
+    }
+}
+
+/// ダミー KEK シードを用いて XChaCha20-Poly1305 AEAD 復号のみを実行するフォールバック。
+fn dummy_aead_unwrap_traced(aad: &[u8], trace: &mut SlotEvalTrace) {
+    let mut dummy_kek = SecretBytes::new(DUMMY_KEK_SEED);
+    consume_dummy_aead_unwrap(&mut dummy_kek, aad, trace);
+}
+
+/// ダミー Slot 0 演算に使用可能な妥当な [`Argon2Params`] を解決する。
+fn resolve_valid_argon2_params(params: &Argon2Params) -> Argon2Params {
+    if validate_slot0_argon2_params(params).is_ok() && params.output_len() == DEK_LEN {
+        *params
+    } else {
+        Argon2Params::default_for_target()
+    }
+}
+
+/// AAD 長上限超過時にも確実に AAD バイト列を構築する Slot 0 ダミー用ヘルパー。
+fn resolve_safe_slot0_aad(
+    params: &Argon2Params,
+    salt: &[u8; SLOT0_SALT_LEN],
+    vault_aad: &[u8],
+) -> alloc::vec::Vec<u8> {
+    match build_slot0_aad(params, salt, vault_aad) {
+        Ok(aad) => aad,
+        Err(_) => build_slot0_aad(params, salt, &[]).unwrap_or_default(),
+    }
+}
+
+/// AAD 長上限超過時にも確実に AAD バイト列を構築する HKDF スロットダミー用ヘルパー。
+fn resolve_safe_hkdf_aad(
+    spec: &HkdfSlotSpec,
+    salt: &[u8; SLOT1_SALT_LEN],
+    vault_aad: &[u8],
+) -> alloc::vec::Vec<u8> {
+    match build_hkdf_slot_aad(spec, salt, vault_aad) {
+        Ok(aad) => aad,
+        Err(_) => build_hkdf_slot_aad(spec, salt, &[]).unwrap_or_default(),
+    }
+}
+
+/// Slot 0 (Argon2id + XChaCha20-Poly1305) と同等コストのダミー暗号演算を 1 回実行する。
+fn dummy_unwrap_slot0_traced(params: &Argon2Params, vault_aad: &[u8], trace: &mut SlotEvalTrace) {
+    let effective_params = resolve_valid_argon2_params(params);
+    let aad = resolve_safe_slot0_aad(&effective_params, &DUMMY_SLOT0_SALT, vault_aad);
+    trace.dummy_argon2id_ops += 1;
+
+    match effective_params.derive_key_32_with_secret(DUMMY_SLOT0_PASSWORD, &DUMMY_SLOT0_SALT, &[]) {
+        Ok(mut kek) => consume_dummy_aead_unwrap(&mut kek, &aad, trace),
+        Err(err) => {
+            let _ = core::hint::black_box(err);
+            dummy_aead_unwrap_traced(&aad, trace);
+        }
+    }
+}
+
+/// Slot 1 / Slot 2 (HKDF-SHA256 + XChaCha20-Poly1305) と同等コストのダミー暗号演算を 1 回実行する。
+fn dummy_unwrap_hkdf_slot_traced(spec: &HkdfSlotSpec, vault_aad: &[u8], trace: &mut SlotEvalTrace) {
+    let aad = resolve_safe_hkdf_aad(spec, &DUMMY_HKDF_SALT, vault_aad);
+    trace.dummy_hkdf_ops += 1;
+
+    match hkdf_sha256_derive_32(&DUMMY_HKDF_SALT, &DUMMY_HKDF_IKM, spec.hkdf_info) {
+        Ok(mut kek) => consume_dummy_aead_unwrap(&mut kek, &aad, trace),
+        Err(err) => {
+            let _ = core::hint::black_box(err);
+            dummy_aead_unwrap_traced(&aad, trace);
+        }
+    }
+}
+
+/// Slot 2 (リカバリーコード正準化 + HKDF-SHA256 + AEAD 復号) のダミー暗号演算を 1 回実行する。
+fn dummy_unwrap_slot2_code_traced(vault_aad: &[u8], trace: &mut SlotEvalTrace) {
+    if let Ok(mut normalized) = normalize_recovery_code(DUMMY_RECOVERY_CODE) {
+        let _ = core::hint::black_box(normalized.len());
+        volatile_zeroize(normalized.as_mut_slice());
+    }
+    dummy_unwrap_hkdf_slot_traced(&SLOT2_SPEC, vault_aad, trace);
+}
+
+/// Slot 0 エントリの復号を試行し、不在・無効・フォーマット不正・エラー時はダミー暗号演算で補完する。
+fn eval_slot0_or_dummy(
+    entry: Option<&KekSlotEntry>,
+    is_slot_valid: bool,
+    password: &[u8],
+    secret: &[u8],
+    vault_aad: &[u8],
+    fallback_params: &Argon2Params,
+    trace: &mut SlotEvalTrace,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    let Some(slot_entry) = entry else {
+        dummy_unwrap_slot0_traced(fallback_params, vault_aad, trace);
+        return Err(if is_slot_valid {
+            VaultError::SlotNotFound
+        } else {
+            VaultError::AuthenticationFailed
+        });
+    };
+
+    let payload = match Argon2idSlotPayload::from_slot_entry(slot_entry) {
+        Ok(parsed) => parsed,
+        Err(parse_err) => {
+            dummy_unwrap_slot0_traced(fallback_params, vault_aad, trace);
+            return Err(if is_slot_valid {
+                parse_err
+            } else {
+                VaultError::AuthenticationFailed
+            });
+        }
+    };
+
+    if !is_slot_valid {
+        dummy_unwrap_slot0_traced(&payload.params, vault_aad, trace);
+        return Err(VaultError::AuthenticationFailed);
+    }
+
+    let aad = match build_slot0_aad(&payload.params, &payload.salt, vault_aad) {
+        Ok(aad) => aad,
+        Err(err) => {
+            dummy_unwrap_slot0_traced(&payload.params, vault_aad, trace);
+            return Err(VaultError::Crypto(err));
+        }
+    };
+
+    let mut kek = match payload
+        .params
+        .derive_key_32_with_secret(password, &payload.salt, secret)
+    {
+        Ok(kek) => {
+            trace.real_argon2id_ops += 1;
+            kek
+        }
+        Err(err) => {
+            dummy_unwrap_slot0_traced(&payload.params, vault_aad, trace);
+            return Err(VaultError::Crypto(err));
+        }
+    };
+
+    trace.real_aead_ops += 1;
+    unwrap_dek_with_kek(
+        &mut kek,
+        &payload.nonce,
+        &aad,
+        &payload.ciphertext,
+        &payload.auth_tag,
+    )
+}
+
+/// Slot 1 / Slot 2 エントリの復号を試行し、不在・無効・フォーマット不正・入力長不足時はダミー暗号演算で補完する。
+fn eval_hkdf_slot_or_dummy(
+    spec: &HkdfSlotSpec,
+    entry: Option<&KekSlotEntry>,
+    is_slot_valid: bool,
+    ikm: &[u8],
+    vault_aad: &[u8],
+    trace: &mut SlotEvalTrace,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    if !is_slot_valid {
+        dummy_unwrap_hkdf_slot_traced(spec, vault_aad, trace);
+        return Err(VaultError::AuthenticationFailed);
+    }
+
+    let Some(slot_entry) = entry else {
+        dummy_unwrap_hkdf_slot_traced(spec, vault_aad, trace);
+        return Err(VaultError::SlotNotFound);
+    };
+
+    let fields = match HkdfSlotFields::from_slot_entry(slot_entry, spec) {
+        Ok(fields) => fields,
+        Err(err) => {
+            dummy_unwrap_hkdf_slot_traced(spec, vault_aad, trace);
+            return Err(err);
+        }
+    };
+
+    if ikm.len() < spec.min_secret_len {
+        dummy_unwrap_hkdf_slot_traced(spec, vault_aad, trace);
+        return Err(VaultError::Crypto(CryptoError::InvalidKeySize));
+    }
+
+    let aad = match build_hkdf_slot_aad(spec, &fields.salt, vault_aad) {
+        Ok(aad) => aad,
+        Err(err) => {
+            dummy_unwrap_hkdf_slot_traced(spec, vault_aad, trace);
+            return Err(VaultError::Crypto(err));
+        }
+    };
+
+    let mut kek = match hkdf_sha256_derive_32(&fields.salt, ikm, spec.hkdf_info) {
+        Ok(kek) => {
+            trace.real_hkdf_ops += 1;
+            kek
+        }
+        Err(err) => {
+            dummy_unwrap_hkdf_slot_traced(spec, vault_aad, trace);
+            return Err(VaultError::Crypto(err));
+        }
+    };
+
+    trace.real_aead_ops += 1;
+    unwrap_dek_with_kek(
+        &mut kek,
+        &fields.nonce,
+        &aad,
+        &fields.ciphertext,
+        &fields.auth_tag,
+    )
+}
+
+/// Slot 2 (整形済みリカバリーコード) の正準化と復号を試行し、失敗時もダミー暗号演算で補完する。
+fn eval_slot2_code_or_dummy(
+    entry: Option<&KekSlotEntry>,
+    is_slot_valid: bool,
+    recovery_code: &[u8],
+    vault_aad: &[u8],
+    trace: &mut SlotEvalTrace,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    if !is_slot_valid {
+        dummy_unwrap_slot2_code_traced(vault_aad, trace);
+        return Err(VaultError::AuthenticationFailed);
+    }
+
+    let mut normalized = match normalize_recovery_code(recovery_code) {
+        Ok(norm) => norm,
+        Err(err) => {
+            dummy_unwrap_slot2_code_traced(vault_aad, trace);
+            return Err(err);
+        }
+    };
+
+    let res = eval_hkdf_slot_or_dummy(
+        &SLOT2_SPEC,
+        entry,
+        is_slot_valid,
+        normalized.as_slice(),
+        vault_aad,
+        trace,
+    );
+    volatile_zeroize(normalized.as_mut_slice());
+    res
+}
+
+/// Vault 内から Slot 0 の有効な [`Argon2Params`] を抽出し、取得不能時はフォールバックを返す。
+fn resolve_vault_slot0_argon2_params(vault: &Vault, fallback: &Argon2Params) -> Argon2Params {
+    if let Ok(entry) = find_slot_entry(&vault.slots, SLOT_ID_ARGON2ID)
+        && let Ok(payload) = Argon2idSlotPayload::from_slot_entry(entry)
+    {
+        return payload.params;
+    }
+    resolve_valid_argon2_params(fallback)
+}
+
 impl VaultEngine {
     /// TLV の [`KekSlotEntry`] 一覧を検証し、施錠状態の新しい [`VaultEngine`] を生成する。
     #[must_use]
@@ -1242,16 +1569,14 @@ impl VaultEngine {
     /// 指定スロットの FSM 遷移 (`Locked -> Unlocking -> Unlocked` / `Locked`) と復号を共通実行する内部ヘルパー。
     fn unlock_with_slot_fn<F>(&mut self, slot_id: u8, unwrap_fn: F) -> Result<(), VaultError>
     where
-        F: FnOnce() -> Result<SecretBytes<DEK_LEN>, VaultError>,
+        F: FnOnce(&Argon2Params, bool) -> Result<SecretBytes<DEK_LEN>, VaultError>,
     {
         self.start_unlock(slot_id)?;
 
-        if !self.slots().is_slot_valid(slot_id) {
-            let _ = self.fail_unlock();
-            return Err(VaultError::AuthenticationFailed);
-        }
+        let slot_valid = self.slots().is_slot_valid(slot_id);
+        let fallback_params = *self.dummy_argon2_params();
 
-        match unwrap_fn() {
+        match unwrap_fn(&fallback_params, slot_valid) {
             Ok(dek) => {
                 if let Err(err) = self.complete_unlock(slot_id, dek) {
                     let _ = self.fail_unlock();
@@ -1269,7 +1594,8 @@ impl VaultEngine {
     /// Slot 0 (Argon2id マスターパスワード) エントリを用いて解錠パイプラインを実行する。
     ///
     /// `Locked -> Unlocking -> Unlocked` の状態遷移を厳密に制御し、
-    /// 復号失敗時は即座に [`VaultEngine::fail_unlock`] で `Locked` へ復帰し、安全状態の不変条件を保つ。
+    /// スロット無効時やフォーマット不正時も含めてダミー暗号演算を実行した上で、
+    /// [`VaultEngine::fail_unlock`] により `Locked` へ復帰する。
     ///
     /// # 前提条件
     ///
@@ -1302,12 +1628,34 @@ impl VaultEngine {
         secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_ARGON2ID, || {
-            unwrap_dek_slot0_with_secret(entry, password, secret, vault_aad)
+        let mut trace = SlotEvalTrace::default();
+        self.unlock_with_slot0_with_secret_traced(entry, password, secret, vault_aad, &mut trace)
+    }
+
+    fn unlock_with_slot0_with_secret_traced(
+        &mut self,
+        entry: &KekSlotEntry,
+        password: &[u8],
+        secret: &[u8],
+        vault_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_ARGON2ID, |fallback_params, slot_valid| {
+            eval_slot0_or_dummy(
+                Some(entry),
+                slot_valid,
+                password,
+                secret,
+                vault_aad,
+                fallback_params,
+                trace,
+            )
         })
     }
 
     /// Slot 1 (WebAuthn PRF / HKDF-SHA256) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// スロット無効時やフォーマット不正・PRF 長不足時にもダミー HKDF-SHA256 および AEAD 復号を実行する。
     ///
     /// # Errors
     ///
@@ -1320,12 +1668,32 @@ impl VaultEngine {
         prf_secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_PRF, || {
-            unwrap_dek_slot1(entry, prf_secret, vault_aad)
+        let mut trace = SlotEvalTrace::default();
+        self.unlock_with_slot1_traced(entry, prf_secret, vault_aad, &mut trace)
+    }
+
+    fn unlock_with_slot1_traced(
+        &mut self,
+        entry: &KekSlotEntry,
+        prf_secret: &[u8],
+        vault_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_PRF, |_, slot_valid| {
+            eval_hkdf_slot_or_dummy(
+                &SLOT1_SPEC,
+                Some(entry),
+                slot_valid,
+                prf_secret,
+                vault_aad,
+                trace,
+            )
         })
     }
 
     /// Slot 2 (生リカバリーシークレット) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// スロット無効時やフォーマット不正・シークレット長不足時にもダミー HKDF-SHA256 および AEAD 復号を実行する。
     ///
     /// # Errors
     ///
@@ -1338,12 +1706,32 @@ impl VaultEngine {
         recovery_secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, || {
-            unwrap_dek_slot2(entry, recovery_secret, vault_aad)
+        let mut trace = SlotEvalTrace::default();
+        self.unlock_with_slot2_traced(entry, recovery_secret, vault_aad, &mut trace)
+    }
+
+    fn unlock_with_slot2_traced(
+        &mut self,
+        entry: &KekSlotEntry,
+        recovery_secret: &[u8],
+        vault_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, |_, slot_valid| {
+            eval_hkdf_slot_or_dummy(
+                &SLOT2_SPEC,
+                Some(entry),
+                slot_valid,
+                recovery_secret,
+                vault_aad,
+                trace,
+            )
         })
     }
 
     /// Slot 2 (整形済み英数字リカバリーコード) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// コード正準化エラーやスロット無効時にもダミー HKDF-SHA256 および AEAD 復号を実行する。
     ///
     /// # Errors
     ///
@@ -1354,8 +1742,19 @@ impl VaultEngine {
         recovery_code: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, || {
-            unwrap_dek_slot2_code(entry, recovery_code, vault_aad)
+        let mut trace = SlotEvalTrace::default();
+        self.unlock_with_slot2_code_traced(entry, recovery_code, vault_aad, &mut trace)
+    }
+
+    fn unlock_with_slot2_code_traced(
+        &mut self,
+        entry: &KekSlotEntry,
+        recovery_code: &[u8],
+        vault_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) -> Result<(), VaultError> {
+        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, |_, slot_valid| {
+            eval_slot2_code_or_dummy(Some(entry), slot_valid, recovery_code, vault_aad, trace)
         })
     }
 
@@ -1419,7 +1818,102 @@ impl VaultEngine {
         self.unlock_vault_with_credential(vault, SlotCredential::recovery_code(recovery_code))
     }
 
+    /// 残余スロット向け: 指定された [`SlotKind`] に対応するダミー暗号演算を 1 回実行する。
+    fn run_dummy_for_slot_kind_traced(
+        &self,
+        vault: &Vault,
+        kind: SlotKind,
+        header_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) {
+        match kind {
+            SlotKind::Argon2id => {
+                let params = resolve_vault_slot0_argon2_params(vault, self.dummy_argon2_params());
+                dummy_unwrap_slot0_traced(&params, header_aad, trace);
+            }
+            SlotKind::Prf => dummy_unwrap_hkdf_slot_traced(&SLOT1_SPEC, header_aad, trace),
+            SlotKind::Recovery => dummy_unwrap_hkdf_slot_traced(&SLOT2_SPEC, header_aad, trace),
+        }
+    }
+
+    /// 先行スロット成功後の残余資格情報に対してダミー暗号演算を 1 回実行する。
+    fn run_dummy_for_credential_traced(
+        &self,
+        vault: &Vault,
+        credential: SlotCredential<'_>,
+        header_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) {
+        match credential {
+            SlotCredential::Password { .. } => {
+                self.run_dummy_for_slot_kind_traced(vault, SlotKind::Argon2id, header_aad, trace);
+            }
+            SlotCredential::Prf(_) => {
+                dummy_unwrap_hkdf_slot_traced(&SLOT1_SPEC, header_aad, trace);
+            }
+            SlotCredential::Recovery(_) => {
+                dummy_unwrap_hkdf_slot_traced(&SLOT2_SPEC, header_aad, trace);
+            }
+            SlotCredential::RecoveryCode(_) => {
+                dummy_unwrap_slot2_code_traced(header_aad, trace);
+            }
+        }
+    }
+
+    /// [`Vault`] 内の指定資格情報スロットを評価して DEK 復号を試行し、不在・重複・無効時もダミー暗号演算を保証する。
+    fn eval_vault_credential_traced(
+        &self,
+        vault: &Vault,
+        credential: SlotCredential<'_>,
+        header_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+        let slot_id = credential.slot_kind().as_slot_id();
+        let slot_valid = self.slots().is_slot_valid(slot_id);
+        let entry = match find_slot_entry(&vault.slots, slot_id) {
+            Ok(found) => found,
+            Err(find_err) => {
+                self.run_dummy_for_credential_traced(vault, credential, header_aad, trace);
+                return Err(find_err);
+            }
+        };
+
+        match credential {
+            SlotCredential::Password { password, secret } => eval_slot0_or_dummy(
+                Some(entry),
+                slot_valid,
+                password,
+                secret,
+                header_aad,
+                self.dummy_argon2_params(),
+                trace,
+            ),
+            SlotCredential::Prf(prf_secret) => eval_hkdf_slot_or_dummy(
+                &SLOT1_SPEC,
+                Some(entry),
+                slot_valid,
+                prf_secret,
+                header_aad,
+                trace,
+            ),
+            SlotCredential::Recovery(recovery_secret) => eval_hkdf_slot_or_dummy(
+                &SLOT2_SPEC,
+                Some(entry),
+                slot_valid,
+                recovery_secret,
+                header_aad,
+                trace,
+            ),
+            SlotCredential::RecoveryCode(recovery_code) => {
+                eval_slot2_code_or_dummy(Some(entry), slot_valid, recovery_code, header_aad, trace)
+            }
+        }
+    }
+
     /// 指定された単一の [`SlotCredential`] に対応するスロットを [`Vault`] から検索して解錠する。
+    ///
+    /// 対象スロットの不在, 重複, 破損, 入力長不正のいずれで失敗する場合でも、
+    /// 当該スロット種別と同等コストのダミー暗号演算を実行し、特定スロットの有無に伴うタイミング漏洩を抑制する。
     ///
     /// # Errors
     ///
@@ -1431,34 +1925,111 @@ impl VaultEngine {
         vault: &Vault,
         credential: SlotCredential<'_>,
     ) -> Result<(), VaultError> {
-        if !self.state().is_locked() {
-            return Err(VaultError::InvalidState);
-        }
+        let mut trace = SlotEvalTrace::default();
+        self.unlock_vault_with_credential_traced(vault, credential, &mut trace)
+    }
+
+    /// [`SlotEvalTrace`] 付きで単一資格情報解錠を実行する内部実装。
+    fn unlock_vault_with_credential_traced(
+        &mut self,
+        vault: &Vault,
+        credential: SlotCredential<'_>,
+        trace: &mut SlotEvalTrace,
+    ) -> Result<(), VaultError> {
+        let slot_id = credential.slot_kind().as_slot_id();
+        self.start_unlock(slot_id)?;
+
         let header_aad = vault.header.associated_data();
-        match credential {
-            SlotCredential::Password { password, secret } => {
-                let slot0 = find_slot_entry(&vault.slots, SLOT_ID_ARGON2ID)?;
-                self.unlock_with_slot0_with_secret(slot0, password, secret, &header_aad)
+        match self.eval_vault_credential_traced(vault, credential, &header_aad, trace) {
+            Ok(dek) => {
+                if let Err(err) = self.complete_unlock(slot_id, dek) {
+                    let _ = self.fail_unlock();
+                    return Err(err);
+                }
+                Ok(())
             }
-            SlotCredential::Prf(prf_secret) => {
-                let slot1 = find_slot_entry(&vault.slots, SLOT_ID_PRF)?;
-                self.unlock_with_slot1(slot1, prf_secret, &header_aad)
-            }
-            SlotCredential::Recovery(recovery_secret) => {
-                let slot2 = find_slot_entry(&vault.slots, SLOT_ID_RECOVERY)?;
-                self.unlock_with_slot2(slot2, recovery_secret, &header_aad)
-            }
-            SlotCredential::RecoveryCode(recovery_code) => {
-                let slot2 = find_slot_entry(&vault.slots, SLOT_ID_RECOVERY)?;
-                self.unlock_with_slot2_code(slot2, recovery_code, &header_aad)
+            Err(err) => {
+                let _ = self.fail_unlock();
+                Err(err)
             }
         }
     }
 
-    /// 提示された複数の [`SlotCredential`] を順次試行し、いずれか 1 スロットで解錠可能な多重化解錠を実行する。
+    /// 多重化解錠および残余ダミー演算を実行し、処理結果と [`SlotEvalTrace`] を返す内部コア。
+    fn unlock_vault_with_any_traced(
+        &mut self,
+        vault: &Vault,
+        credentials: &[SlotCredential<'_>],
+        include_missing_slot_kinds: bool,
+    ) -> (Result<SlotKind, VaultError>, SlotEvalTrace) {
+        let mut trace = SlotEvalTrace::default();
+        if !self.state().is_locked() {
+            return (Err(VaultError::InvalidState), trace);
+        }
+        if credentials.is_empty() && !include_missing_slot_kinds {
+            return (Err(VaultError::AuthenticationFailed), trace);
+        }
+
+        let start_slot_id = credentials
+            .first()
+            .map_or(SLOT_ID_ARGON2ID, |cred| cred.slot_kind().as_slot_id());
+        if let Err(err) = self.start_unlock(start_slot_id) {
+            return (Err(err), trace);
+        }
+
+        let header_aad = vault.header.associated_data();
+        let mut matched: Option<(SlotKind, SecretBytes<DEK_LEN>)> = None;
+        let mut last_err = VaultError::AuthenticationFailed;
+        let mut seen_kinds = [false; 3];
+
+        // 先行スロットの成否や対象スロットの有無に関わらず、全候補に対して実演算またはダミー演算を1回実行する。
+        for &credential in credentials {
+            seen_kinds[credential.slot_kind().as_slot_id() as usize] = true;
+            if matched.is_some() {
+                self.run_dummy_for_credential_traced(vault, credential, &header_aad, &mut trace);
+            } else {
+                match self.eval_vault_credential_traced(vault, credential, &header_aad, &mut trace)
+                {
+                    Ok(dek) => {
+                        matched = Some((credential.slot_kind(), dek));
+                    }
+                    Err(err) => {
+                        last_err = err;
+                    }
+                }
+            }
+        }
+
+        // 全スロット平滑化モードでは、未提示のスロット種別にもダミー暗号演算を補完する。
+        if include_missing_slot_kinds {
+            for kind in [SlotKind::Argon2id, SlotKind::Prf, SlotKind::Recovery] {
+                if !seen_kinds[kind.as_slot_id() as usize] {
+                    self.run_dummy_for_slot_kind_traced(vault, kind, &header_aad, &mut trace);
+                }
+            }
+        }
+
+        match matched {
+            Some((kind, dek)) => match self.complete_unlock(kind.as_slot_id(), dek) {
+                Ok(()) => (Ok(kind), trace),
+                Err(err) => {
+                    let _ = self.fail_unlock();
+                    (Err(err), trace)
+                }
+            },
+            None => {
+                let _ = self.fail_unlock();
+                (Err(last_err), trace)
+            }
+        }
+    }
+
+    /// 提示された複数の [`SlotCredential`] を順次評価し、いずれか 1 スロットで解錠可能な多重化解錠を実行する。
     ///
-    /// 先行スロットが 未設定, 破損, 重複, 認証失敗 のいずれであってもエンジンを安全な `Locked` 状態へ戻し、
-    /// 後続スロットの試行を継続して、1 つでも有効なスロットで復号に成功した時点で `Unlocked` 状態へ遷移する。
+    /// 先行スロットが認証成功した場合であっても早期リターンせず、
+    /// 残余の資格情報に対応するスロットへダミー暗号演算 (KDF + AEAD 復号) を実行して実行時間を平滑化する。
+    /// また、先行スロットが未設定, 破損, 重複, 認証失敗のいずれであっても同種別のダミー演算を挟みつつ、
+    /// 後続スロットの試行を継続し、全候補完了後に最初に成功した DEK で `Unlocked` へ遷移する。
     /// `EnvelopeFsm.v` の `slot_multiplexing_soundness` 定理に対応する実行時パイプライン。
     ///
     /// # Errors
@@ -1471,24 +2042,27 @@ impl VaultEngine {
         vault: &Vault,
         credentials: &[SlotCredential<'_>],
     ) -> Result<SlotKind, VaultError> {
-        if !self.state().is_locked() {
-            return Err(VaultError::InvalidState);
-        }
-        if credentials.is_empty() {
-            return Err(VaultError::AuthenticationFailed);
-        }
+        let (result, _) = self.unlock_vault_with_any_traced(vault, credentials, false);
+        result
+    }
 
-        let mut last_err = VaultError::AuthenticationFailed;
-        for &credential in credentials {
-            match self.unlock_vault_with_credential(vault, credential) {
-                Ok(()) => return Ok(credential.slot_kind()),
-                Err(err) => {
-                    last_err = err;
-                }
-            }
-        }
-
-        Err(last_err)
+    /// 提示された資格情報リストに加え、未提示のスロット種別 (Slot 0 / 1 / 2) にもダミー暗号演算を実行し、
+    /// 常に全 3 スロット種別分の演算コストで解錠を評価する完全平滑化解錠を実行する。
+    ///
+    /// 提示された `credentials` が特定スロットのみを含む場合でも、
+    /// Vault 内の他スロット構成や認証成功スロットの種別に伴う実行時間差を隠蔽したい場合に使用する。
+    ///
+    /// # Errors
+    ///
+    /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - すべての資格情報で解錠に失敗した場合は最後に発生した [`VaultError`] を返す (`credentials` が空の場合は [`VaultError::AuthenticationFailed`])。
+    pub fn unlock_vault_with_all_slots(
+        &mut self,
+        vault: &Vault,
+        credentials: &[SlotCredential<'_>],
+    ) -> Result<SlotKind, VaultError> {
+        let (result, _) = self.unlock_vault_with_any_traced(vault, credentials, true);
+        result
     }
 
     /// 解錠状態の DEK を用いて新しい Slot 0 (Argon2id) エントリを生成する。
@@ -2437,6 +3011,310 @@ mod tests {
         assert!(!dbg_code.contains("code-secret"));
     }
 
+    #[test]
+    fn test_unlock_vault_with_any_runs_dummy_ops_for_remaining_slots() {
+        let dek = test_dek();
+        let header = test_header();
+        let password = b"master-password";
+        let prf = test_prf_secret();
+        let recovery_code = TEST_RECOVERY_CODE;
+
+        let slot0 = wrap_dek_slot0_for_header(
+            &dek,
+            password,
+            &test_salt(),
+            &test_nonce(),
+            &test_params(),
+            &header,
+        )
+        .unwrap();
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &prf, &[0x21; 32], &[0x31; 24], &header).unwrap();
+        let slot2 =
+            wrap_dek_slot2_code_for_header(&dek, recovery_code, &[0x22; 32], &[0x32; 24], &header)
+                .unwrap();
+        let vault = Vault::new(header, vec![slot0, slot1, slot2], vec![]);
+
+        // 先頭 Slot 0 が成功しても、後続の Slot 1 / Slot 2 に対してダミー暗号演算が実行される。
+        let mut engine =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let (res, trace) = engine.unlock_vault_with_any_traced(
+            &vault,
+            &[
+                SlotCredential::password(password),
+                SlotCredential::prf(&[0x99; 32]),
+                SlotCredential::recovery_code(b"WRONG-CODE-XXXX-YYYY-ZZZZ-1234"),
+            ],
+            false,
+        );
+        assert_eq!(res, Ok(SlotKind::Argon2id));
+        assert_eq!(trace.real_argon2id_ops, 1);
+        assert_eq!(trace.dummy_argon2id_ops, 0);
+        assert_eq!(trace.real_hkdf_ops, 0);
+        assert_eq!(trace.dummy_hkdf_ops, 2);
+        assert_eq!(trace.real_aead_ops, 1);
+        assert_eq!(trace.dummy_aead_ops, 2);
+        assert_eq!(trace.total_kdf_ops(), 3);
+        assert_eq!(trace.total_aead_ops(), 3);
+        assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+
+        // 先頭 Slot 1 (PRF) が成功しても、残余の Slot 0 (Argon2id) と Slot 2 にダミー演算が実行される。
+        let mut engine_prf =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let (res, trace) = engine_prf.unlock_vault_with_any_traced(
+            &vault,
+            &[
+                SlotCredential::prf(&prf),
+                SlotCredential::password(b"wrong-pw"),
+                SlotCredential::recovery_code(b"WRONG-CODE-XXXX-YYYY-ZZZZ-1234"),
+            ],
+            false,
+        );
+        assert_eq!(res, Ok(SlotKind::Prf));
+        assert_eq!(trace.real_argon2id_ops, 0);
+        assert_eq!(trace.dummy_argon2id_ops, 1);
+        assert_eq!(trace.real_hkdf_ops, 1);
+        assert_eq!(trace.dummy_hkdf_ops, 1);
+        assert_eq!(trace.real_aead_ops, 1);
+        assert_eq!(trace.dummy_aead_ops, 2);
+        assert_eq!(engine_prf.dek().unwrap().as_bytes(), dek.as_bytes());
+
+        // 全候補が有効な場合でも最初の成功スロットが採用され、残余は実復号ではなくダミー演算のみ実行する。
+        let mut engine_all_valid =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let (res, trace) = engine_all_valid.unlock_vault_with_any_traced(
+            &vault,
+            &[
+                SlotCredential::recovery_code(recovery_code),
+                SlotCredential::password(password),
+                SlotCredential::prf(&prf),
+            ],
+            false,
+        );
+        assert_eq!(res, Ok(SlotKind::Recovery));
+        assert_eq!(trace.real_argon2id_ops, 0);
+        assert_eq!(trace.dummy_argon2id_ops, 1);
+        assert_eq!(trace.real_hkdf_ops, 1);
+        assert_eq!(trace.dummy_hkdf_ops, 1);
+        assert_eq!(trace.real_aead_ops, 1);
+        assert_eq!(trace.dummy_aead_ops, 2);
+        assert_eq!(engine_all_valid.dek().unwrap().as_bytes(), dek.as_bytes());
+    }
+
+    #[test]
+    fn test_missing_corrupted_duplicate_and_invalid_inputs_run_dummy_ops() {
+        let dek = test_dek();
+        let header = test_header();
+        let header_aad = header.associated_data();
+        let prf = test_prf_secret();
+
+        // 空の Vault に対する各スロット解錠では SlotNotFound を返しつつダミー暗号演算を実行する。
+        let empty_vault = Vault::new(header, vec![], vec![]);
+        let mut empty_engine = VaultEngine::from_slot_entries(&empty_vault.slots)
+            .with_dummy_argon2_params(test_params());
+
+        let mut trace_pw = SlotEvalTrace::default();
+        assert_eq!(
+            empty_engine.unlock_vault_with_credential_traced(
+                &empty_vault,
+                SlotCredential::password(b"pw"),
+                &mut trace_pw,
+            ),
+            Err(VaultError::SlotNotFound)
+        );
+        assert_eq!(trace_pw.dummy_argon2id_ops, 1);
+        assert_eq!(trace_pw.dummy_aead_ops, 1);
+
+        let mut trace_prf = SlotEvalTrace::default();
+        assert_eq!(
+            empty_engine.unlock_vault_with_credential_traced(
+                &empty_vault,
+                SlotCredential::prf(&prf),
+                &mut trace_prf,
+            ),
+            Err(VaultError::SlotNotFound)
+        );
+        assert_eq!(trace_prf.dummy_hkdf_ops, 1);
+        assert_eq!(trace_prf.dummy_aead_ops, 1);
+
+        let mut trace_rec = SlotEvalTrace::default();
+        assert_eq!(
+            empty_engine.unlock_vault_with_credential_traced(
+                &empty_vault,
+                SlotCredential::recovery_code(b"invalid!"),
+                &mut trace_rec,
+            ),
+            Err(VaultError::SlotNotFound)
+        );
+        assert_eq!(trace_rec.dummy_hkdf_ops, 1);
+        assert_eq!(trace_rec.dummy_aead_ops, 1);
+        assert_eq!(empty_engine.state(), VaultState::Locked);
+
+        // 重複スロットおよび短小入力, 破損フォーマットでもダミー演算がちょうど 1 回実行される。
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
+        let dup_vault = Vault::new(header, vec![slot1.clone(), slot1.clone()], vec![]);
+        let mut dup_engine = VaultEngine::from_slot_entries(&dup_vault.slots)
+            .with_dummy_argon2_params(test_params());
+        let mut trace_dup = SlotEvalTrace::default();
+        assert_eq!(
+            dup_engine.unlock_vault_with_credential_traced(
+                &dup_vault,
+                SlotCredential::prf(&prf),
+                &mut trace_dup,
+            ),
+            Err(VaultError::Parse(TlvParseError::InvalidFormat))
+        );
+        assert_eq!(trace_dup.dummy_hkdf_ops, 1);
+        assert_eq!(trace_dup.dummy_aead_ops, 1);
+
+        // 単一スロットメソッドの Unset/Invalid/入力不正に対するダミー演算保証を確認。
+        let mut unset_engine = VaultEngine::locked().with_dummy_argon2_params(test_params());
+        let valid_slot0 = wrap_dek_slot0_for_header(
+            &dek,
+            b"pw",
+            &test_salt(),
+            &test_nonce(),
+            &test_params(),
+            &header,
+        )
+        .unwrap();
+        let mut trace_s0 = SlotEvalTrace::default();
+        assert_eq!(
+            unset_engine.unlock_with_slot0_with_secret_traced(
+                &valid_slot0,
+                b"pw",
+                &[],
+                &header_aad,
+                &mut trace_s0,
+            ),
+            Err(VaultError::AuthenticationFailed)
+        );
+        assert_eq!(trace_s0.dummy_argon2id_ops, 1);
+        assert_eq!(trace_s0.dummy_aead_ops, 1);
+
+        let mut trace_s1 = SlotEvalTrace::default();
+        assert_eq!(
+            unset_engine.unlock_with_slot1_traced(&slot1, &prf, &header_aad, &mut trace_s1),
+            Err(VaultError::AuthenticationFailed)
+        );
+        assert_eq!(trace_s1.dummy_hkdf_ops, 1);
+        assert_eq!(trace_s1.dummy_aead_ops, 1);
+
+        let slot2_code = wrap_dek_slot2_code_for_header(
+            &dek,
+            TEST_RECOVERY_CODE,
+            &test_salt32(),
+            &test_nonce(),
+            &header,
+        )
+        .unwrap();
+        let mut valid_s2_engine =
+            VaultEngine::from_slot_entries(core::slice::from_ref(&slot2_code));
+        let mut trace_bad_code = SlotEvalTrace::default();
+        assert_eq!(
+            valid_s2_engine.unlock_with_slot2_code_traced(
+                &slot2_code,
+                b"SHORT!",
+                &header_aad,
+                &mut trace_bad_code,
+            ),
+            Err(VaultError::Crypto(CryptoError::InvalidParameter))
+        );
+        assert_eq!(trace_bad_code.dummy_hkdf_ops, 1);
+        assert_eq!(trace_bad_code.dummy_aead_ops, 1);
+    }
+
+    #[test]
+    fn test_unlock_vault_with_all_slots_covers_all_three_slot_kinds() {
+        let dek = test_dek();
+        let header = test_header();
+        let prf = test_prf_secret();
+        let slot0 = wrap_dek_slot0_for_header(
+            &dek,
+            b"pw",
+            &test_salt(),
+            &test_nonce(),
+            &test_params(),
+            &header,
+        )
+        .unwrap();
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
+        let vault = Vault::new(header, vec![slot0, slot1], vec![]);
+
+        // PRF のみ提示した場合でも Slot 0 (Argon2id) と Slot 2 (Recovery) のダミー演算が補完される。
+        let mut engine =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let (res, trace) =
+            engine.unlock_vault_with_any_traced(&vault, &[SlotCredential::prf(&prf)], true);
+        assert_eq!(res, Ok(SlotKind::Prf));
+        assert_eq!(trace.argon2id_ops(), 1);
+        assert_eq!(trace.hkdf_ops(), 2);
+        assert_eq!(trace.total_kdf_ops(), 3);
+        assert_eq!(trace.total_aead_ops(), 3);
+
+        // 公開ラッパー unlock_vault_with_all_slots でも空リスト含め安全に動作する。
+        let mut engine_empty =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine_empty.unlock_vault_with_all_slots(&vault, &[]),
+            Err(VaultError::AuthenticationFailed)
+        );
+        assert_eq!(engine_empty.state(), VaultState::Locked);
+        assert!(engine_empty.is_safe_state());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_timing_smoothing_prevents_early_return_short_circuit() {
+        // Argon2id 1 回あたりの実行時間がミリ秒単位になるパラメータを設定する。
+        let heavy_params = Argon2Params::custom(2048, 4, 1, Some(DEK_LEN)).unwrap();
+        let dek = test_dek();
+        let header = test_header();
+        let password = b"heavy-slot0-password";
+        let prf = test_prf_secret();
+
+        let slot0 = wrap_dek_slot0_for_header(
+            &dek,
+            password,
+            &test_salt(),
+            &test_nonce(),
+            &heavy_params,
+            &header,
+        )
+        .unwrap();
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
+        let vault = Vault::new(header, vec![slot0.clone(), slot1], vec![]);
+
+        // 基準として Slot 0 単体復号の実行時間を計測する。
+        let start_base = std::time::Instant::now();
+        let _ = unwrap_dek_slot0_for_header(&slot0, password, &header).unwrap();
+        let baseline_argon2_ns = start_base.elapsed().as_nanos();
+
+        // 先頭 Slot 1 (PRF) が即座に成功する構成でも、後続 Slot 0 に対するダミー Argon2id が走る。
+        let mut engine = VaultEngine::from_slot_entries(&vault.slots);
+        let start_prf_first = std::time::Instant::now();
+        let used = engine
+            .unlock_vault_with_any(
+                &vault,
+                &[
+                    SlotCredential::prf(&prf),
+                    SlotCredential::password(b"wrong-password"),
+                ],
+            )
+            .unwrap();
+        let prf_first_ns = start_prf_first.elapsed().as_nanos();
+
+        assert_eq!(used, SlotKind::Prf);
+        assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+        assert!(
+            prf_first_ns * 2 >= baseline_argon2_ns,
+            "先行PRF成功時でも残余Slot 0のダミーArgon2id演算が実行される必要がある (prf_first={prf_first_ns}ns, baseline={baseline_argon2_ns}ns)。"
+        );
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
@@ -2501,6 +3379,109 @@ mod tests {
                 let _ = unwrap_dek_slot0(&entry, b"password", b"aad");
                 let _ = unwrap_dek_slot1(&entry, &[0x42; SLOT1_MIN_PRF_LEN], b"aad");
                 let _ = unwrap_dek_slot2(&entry, &[0x42; SLOT2_MIN_SECRET_LEN], b"aad");
+            }
+        }
+
+        #[test]
+        fn prop_smoothed_unlock_preserves_invariant_and_constant_op_counts(
+            slot_modes in [0u8..4, 0u8..4, 0u8..4],
+            cred_specs in prop::collection::vec((0u8..4, any::<bool>()), 1..=6),
+            include_all in any::<bool>(),
+        ) {
+            // slot_modes[i]: 0=不在, 1=有効, 2=破損, 3=重複。
+            let dek = test_dek();
+            let header = test_header();
+            let password = b"prop-master-pw";
+            let prf = test_prf_secret();
+            let recovery = test_recovery_secret();
+
+            let valid_entries = [
+                wrap_dek_slot0_for_header(&dek, password, &test_salt(), &test_nonce(), &test_params(), &header).unwrap(),
+                wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap(),
+                wrap_dek_slot2_for_header(&dek, &recovery, &test_salt32(), &test_nonce(), &header).unwrap(),
+            ];
+            let kdf_kinds = [KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY];
+
+            let mut entries = alloc::vec::Vec::new();
+            for idx in 0..3 {
+                match slot_modes[idx] {
+                    1 => entries.push(valid_entries[idx].clone()),
+                    2 => entries.push(KekSlotEntry::new(idx as u8, kdf_kinds[idx], vec![0xAA; 12]).unwrap()),
+                    3 => {
+                        entries.push(valid_entries[idx].clone());
+                        entries.push(valid_entries[idx].clone());
+                    }
+                    _ => {}
+                }
+            }
+
+            let vault = Vault::new(header, entries, vec![]);
+            let mut engine = VaultEngine::from_slot_entries(&vault.slots)
+                .with_dummy_argon2_params(test_params());
+
+            let wrong_pw = b"wrong-pw";
+            let wrong_prf = [0x01u8; SLOT1_MIN_PRF_LEN];
+            let wrong_rec = [0x02u8; SLOT2_MIN_SECRET_LEN];
+            let mut expected_argon2_ops = 0usize;
+            let mut expected_hkdf_ops = 0usize;
+            let mut seen = [false; 3];
+            let mut creds = alloc::vec::Vec::with_capacity(cred_specs.len());
+
+            for &(kind_sel, use_valid_secret) in &cred_specs {
+                match kind_sel {
+                    0 => {
+                        expected_argon2_ops += 1;
+                        seen[0] = true;
+                        creds.push(SlotCredential::password(if use_valid_secret { password } else { wrong_pw }));
+                    }
+                    1 => {
+                        expected_hkdf_ops += 1;
+                        seen[1] = true;
+                        creds.push(SlotCredential::prf(if use_valid_secret { &prf } else { &wrong_prf }));
+                    }
+                    2 => {
+                        expected_hkdf_ops += 1;
+                        seen[2] = true;
+                        creds.push(SlotCredential::recovery(if use_valid_secret { &recovery } else { &wrong_rec }));
+                    }
+                    _ => {
+                        expected_hkdf_ops += 1;
+                        seen[2] = true;
+                        creds.push(SlotCredential::recovery_code(b"INVALID"));
+                    }
+                }
+            }
+
+            if include_all {
+                if !seen[0] {
+                    expected_argon2_ops += 1;
+                }
+                if !seen[1] {
+                    expected_hkdf_ops += 1;
+                }
+                if !seen[2] {
+                    expected_hkdf_ops += 1;
+                }
+            }
+
+            let (res, trace) = engine.unlock_vault_with_any_traced(&vault, &creds, include_all);
+
+            prop_assert_eq!(trace.argon2id_ops(), expected_argon2_ops);
+            prop_assert_eq!(trace.hkdf_ops(), expected_hkdf_ops);
+            prop_assert_eq!(trace.total_kdf_ops(), expected_argon2_ops + expected_hkdf_ops);
+            prop_assert_eq!(trace.total_aead_ops(), expected_argon2_ops + expected_hkdf_ops);
+            prop_assert!(engine.is_safe_state());
+
+            match res {
+                Ok(kind) => {
+                    prop_assert_eq!(engine.state(), VaultState::Unlocked);
+                    prop_assert_eq!(slot_modes[kind.as_slot_id() as usize], 1);
+                    prop_assert_eq!(engine.dek().unwrap().as_bytes(), dek.as_bytes());
+                }
+                Err(_) => {
+                    prop_assert_eq!(engine.state(), VaultState::Locked);
+                    prop_assert!(engine.observe_dek().is_none());
+                }
             }
         }
     }
