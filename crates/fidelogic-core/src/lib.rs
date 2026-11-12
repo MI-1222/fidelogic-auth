@@ -42,10 +42,17 @@ pub mod tlv;
 pub mod zeroize;
 
 #[cfg(feature = "profile-vault")]
-pub use cipher::{
-    AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, MAX_AAD_LEN, MAX_PAYLOAD_LEN, TAG_LEN,
-    VaultCipher, XCHACHA20_POLY1305_NONCE_LEN,
-};
+pub use profile_vault::*;
+
+#[cfg(all(feature = "profile-lite", not(feature = "profile-vault")))]
+pub use profile_lite::*;
+
+#[cfg(not(feature = "profile-vault"))]
+pub use error::{CryptoError, PrecisError, SystemError, TlvParseError, VaultError};
+
+#[cfg(all(not(feature = "profile-lite"), not(feature = "profile-vault")))]
+pub use precis::*;
+
 pub use constant_time::{
     ct_assign_slice, ct_eq_32, ct_eq_array, ct_eq_bytes, ct_eq_bytes_bool, ct_select,
     ct_select_slice,
@@ -54,47 +61,6 @@ pub use constant_time::{
 pub use curve25519::{
     X25519PublicKey, X25519SharedSecret, edwards_basepoint_mul, ristretto_basepoint_mul,
     x25519_basepoint_mul, x25519_diffie_hellman,
-};
-#[cfg(feature = "profile-vault")]
-pub use envelope::{
-    DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SLOT_ID_PRF, SLOT_ID_RECOVERY, SlotKind, SlotStatus,
-    VaultEngine, VaultEvent, VaultState,
-};
-pub use error::{CryptoError, PrecisError, SystemError, TlvParseError, VaultError};
-#[cfg(feature = "profile-vault")]
-pub use kdf::{
-    Argon2Params, DEFAULT_KEY_LEN, DEFAULT_NATIVE_M_COST, DEFAULT_NATIVE_P_COST,
-    DEFAULT_NATIVE_T_COST, DEFAULT_WASM_M_COST, DEFAULT_WASM_P_COST, DEFAULT_WASM_T_COST,
-    FAST_TEST_M_COST, FAST_TEST_P_COST, FAST_TEST_T_COST, HKDF_SHA256_HASH_LEN,
-    HKDF_SHA256_MAX_OUTPUT_LEN, hkdf_sha256_derive, hkdf_sha256_derive_32, hkdf_sha256_derive_vec,
-};
-pub use precis::{
-    UNICODE_MAX_CODE_POINT, all_allowed, all_opaque_allowed, compose_hangul_syllable,
-    compose_hangul_trailing, compose_pair, find_disallowed_cp, find_opaque_disallowed_cp, in_range,
-    is_ascii_control, is_disallowed_cp, is_non_ascii_control, is_noncharacter,
-    is_opaque_disallowed_cp, is_out_of_bounds, is_private_use, is_space, is_surrogate,
-    precis_fold_char, precis_fold_cp,
-};
-#[cfg(feature = "alloc")]
-pub use precis::{
-    enforce_opaque_string_cps, enforce_username_case_mapped_cps, opaque_string, precis_fold_string,
-    precis_nfc_normalize, precis_opaque_string, precis_username_case_mapped, username_case_mapped,
-};
-#[cfg(feature = "profile-vault")]
-pub use slots::{
-    Argon2idSlotPayload, KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY, KdfKind,
-    MAX_SLOT0_M_COST, MAX_SLOT0_P_COST, MAX_SLOT0_T_COST, PrfSlotPayload, RecoverySlotPayload,
-    SLOT_CIPHER_SUITE, SLOT0_CIPHERTEXT_LEN, SLOT0_NONCE_LEN, SLOT0_PARAMS_LEN, SLOT0_SALT_LEN,
-    SLOT0_TAG_LEN, SLOT0_WRAPPED_DEK_LEN, SLOT1_CIPHERTEXT_LEN, SLOT1_MIN_PRF_LEN, SLOT1_NONCE_LEN,
-    SLOT1_SALT_LEN, SLOT1_TAG_LEN, SLOT1_WRAPPED_DEK_LEN, SLOT2_CIPHERTEXT_LEN, SLOT2_MIN_CODE_LEN,
-    SLOT2_MIN_SECRET_LEN, SLOT2_NONCE_LEN, SLOT2_SALT_LEN, SLOT2_TAG_LEN, SLOT2_WRAPPED_DEK_LEN,
-    SlotCredential, find_slot_entry, inspect_kek_slots, is_valid_slot0_entry, is_valid_slot1_entry,
-    is_valid_slot2_entry, normalize_recovery_code, unwrap_dek_slot0, unwrap_dek_slot0_for_header,
-    unwrap_dek_slot0_with_secret, unwrap_dek_slot1, unwrap_dek_slot1_for_header, unwrap_dek_slot2,
-    unwrap_dek_slot2_code, unwrap_dek_slot2_code_for_header, unwrap_dek_slot2_for_header,
-    validate_slot0_argon2_params, wrap_dek_slot0, wrap_dek_slot0_for_header,
-    wrap_dek_slot0_with_secret, wrap_dek_slot1, wrap_dek_slot1_for_header, wrap_dek_slot2,
-    wrap_dek_slot2_code, wrap_dek_slot2_code_for_header, wrap_dek_slot2_for_header,
 };
 pub use zeroize::{SecretBytes, volatile_zeroize};
 
