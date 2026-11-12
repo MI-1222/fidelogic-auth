@@ -209,12 +209,22 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
         .validated()
     {
         Ok(p) => p,
-        Err(_) => return WasmStatusCode::InvalidParameter.as_u32(),
+        Err(_) => {
+            if out_len > 0 {
+                fidelogic_core::zeroize::volatile_zeroize(out);
+            }
+            return WasmStatusCode::InvalidParameter.as_u32();
+        }
     };
 
     match params.derive_key(password, salt, out) {
         Ok(()) => WasmStatusCode::Success.as_u32(),
-        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
+        Err(_) => {
+            if out_len > 0 {
+                fidelogic_core::zeroize::volatile_zeroize(out);
+            }
+            WasmStatusCode::ExecutionFailed.as_u32()
+        }
     }
 }
 
@@ -620,6 +630,26 @@ mod tests {
                 0,
             );
             assert_eq!(invalid_res, 2, "不正な出力長に対してエラーコード2を返却。");
+
+            // 不正な出力長(out_len = 3: RFC 9106最小出力長4バイト未満)での事前検証失敗時に、
+            // 出力バッファの既存データがゼロ消去されることを検証。
+            let mut dirty_buf = [0xBBu8; 3];
+            let invalid_len_res = fidelogic_wasm_kdf_derive_key(
+                password.as_ptr(),
+                password.len(),
+                salt.as_ptr(),
+                salt.len(),
+                dirty_buf.as_mut_ptr(),
+                dirty_buf.len(),
+            );
+            assert_eq!(
+                invalid_len_res, 2,
+                "不正な出力長に対してエラーコード2を返却。"
+            );
+            assert_eq!(
+                dirty_buf, [0u8; 3],
+                "KDF事前検証失敗時に出力バッファがゼロ消去されたことを確認。"
+            );
         }
     }
 
