@@ -141,13 +141,14 @@ impl From<SlotKind> for u8 {
 /// 単一KEKスロットの健全性状態を表す列挙型。
 ///
 /// `EnvelopeFsm.v` の `SlotStatus` に対応する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SlotStatus {
     /// ラップ済みDEKが復号可能で健全な状態。
     Valid,
     /// データ破損やフォーマット不正により復号不能な状態。
     Invalid,
     /// 未設定または未登録の状態。
+    #[default]
     Unset,
 }
 
@@ -166,7 +167,7 @@ impl SlotStatus {
 ///
 /// `EnvelopeFsm.v` のレコード型 `KekSlots` に対応し、
 /// スロット0 (Argon2id), スロット1 (WebAuthn PRF), スロット2 (リカバリーコード) の健全性を管理する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KekSlots {
     /// スロット0 (Argon2id: マスターパスワード) の健全性状態。
     pub argon2id: SlotStatus,
@@ -258,13 +259,6 @@ impl KekSlots {
             SlotKind::Prf => self.prf = status,
             SlotKind::Recovery => self.recovery = status,
         }
-    }
-}
-
-impl Default for KekSlots {
-    #[inline]
-    fn default() -> Self {
-        Self::unset_all()
     }
 }
 
@@ -568,7 +562,7 @@ impl VaultEngine {
 
     /// 現在の状態に関わらず、保持中の平文DEKを無条件に即時ゼロ消去して [`VaultState::Zeroized`] へ隔離する。
     ///
-    /// エラーから復帰できない場合の緊急鍵破棄や、[`Drop`] 時のフェイルセーフ消去として使用する。
+    /// エラーから復帰できない場合の緊急鍵破棄や、ゼロ化隔離として使用する。
     #[inline]
     pub fn emergency_zeroize(&mut self) {
         self.scrub_dek_in_place();
@@ -622,7 +616,7 @@ impl zeroize::ZeroizeOnDrop for VaultEngine {}
 impl Drop for VaultEngine {
     #[inline]
     fn drop(&mut self) {
-        self.emergency_zeroize();
+        self.scrub_dek_in_place();
     }
 }
 
@@ -681,6 +675,9 @@ mod tests {
         assert!(SlotKind::is_valid_slot_id(1));
         assert!(SlotKind::is_valid_slot_id(2));
         assert!(!SlotKind::is_valid_slot_id(3));
+
+        assert_eq!(SlotStatus::default(), SlotStatus::Unset);
+        assert_eq!(KekSlots::default(), KekSlots::unset_all());
 
         let mut slots = KekSlots::new(SlotStatus::Invalid, SlotStatus::Unset, SlotStatus::Valid);
         assert_eq!(slots.status(0), SlotStatus::Invalid);
