@@ -2102,7 +2102,13 @@ impl VaultEngine {
 
         // 先行スロットの成否や対象スロットの有無に関わらず、全候補に対して実演算またはダミー演算を1回実行する。
         for &credential in credentials {
-            seen_kinds[credential.slot_kind().as_slot_id() as usize] = true;
+            let kind_idx = credential.slot_kind().as_slot_id() as usize;
+            if include_missing_slot_kinds && seen_kinds[kind_idx] {
+                // 全スロット平滑化モードでは各 SlotKind につき最大1回のみ評価し、
+                // 同一 SlotKind の重複提示による演算回数超過 (4回以上の演算実行) を防止する。
+                continue;
+            }
+            seen_kinds[kind_idx] = true;
             if matched.is_some() {
                 self.run_dummy_for_credential_traced(vault, credential, &header_aad, &mut trace);
             } else if let Ok(dek) =
@@ -2163,6 +2169,8 @@ impl VaultEngine {
     ///
     /// 提示された `credentials` が特定スロットのみを含む場合でも、
     /// Vault 内の他スロット構成や認証成功スロットの種別に伴う実行時間差を隠蔽したい場合に使用する。
+    /// 同一 [`SlotKind`] の資格情報が複数提示された場合は、演算回数平滑化の不変条件(全 3 スロット種別分)を維持するため、
+    /// 各 [`SlotKind`] につき先頭の 1 件のみを評価し、後続の同一種別資格情報はスキップされる。
     ///
     /// # Errors
     ///
@@ -3621,6 +3629,33 @@ mod tests {
         );
         assert_eq!(engine_empty.state(), VaultState::Locked);
         assert!(engine_empty.is_safe_state());
+
+        // 重複 SlotKind を渡した場合でも各 SlotKind は最大1回のみ評価され、
+        // 常に全3スロット種別分の演算コスト(Argon2id 1回、HKDF 2回、AEAD 3回)に維持される。
+        let wrong_pw1 = b"wrong-pw-1";
+        let wrong_pw2 = b"wrong-pw-2";
+        let wrong_prf = [0x55u8; SLOT1_MIN_PRF_LEN];
+        let wrong_rec = [0x66u8; SLOT2_MIN_SECRET_LEN];
+        let mut engine_dup =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let (dup_res, dup_trace) = engine_dup.unlock_vault_with_any_traced(
+            &vault,
+            &[
+                SlotCredential::password(wrong_pw1),
+                SlotCredential::password(wrong_pw2),
+                SlotCredential::prf(&wrong_prf),
+                SlotCredential::recovery(&wrong_rec),
+                SlotCredential::recovery_code(b"WR0N-GC0D-E000-0000-0000-0000-0000"),
+            ],
+            true,
+        );
+        assert_eq!(dup_res, Err(VaultError::AuthenticationFailed));
+        assert_eq!(dup_trace.argon2id_ops(), 1);
+        assert_eq!(dup_trace.hkdf_ops(), 2);
+        assert_eq!(dup_trace.total_kdf_ops(), 3);
+        assert_eq!(dup_trace.total_aead_ops(), 3);
+        assert_eq!(engine_dup.state(), VaultState::Locked);
+        assert!(engine_dup.is_safe_state());
     }
 
     #[cfg(feature = "std")]
@@ -4041,22 +4076,30 @@ mod tests {
             for &(kind_sel, use_valid_secret) in &cred_specs {
                 match kind_sel {
                     0 => {
-                        expected_argon2_ops += 1;
+                        if !include_all || !seen[0] {
+                            expected_argon2_ops += 1;
+                        }
                         seen[0] = true;
                         creds.push(SlotCredential::password(if use_valid_secret { password } else { wrong_pw }));
                     }
                     1 => {
-                        expected_hkdf_ops += 1;
+                        if !include_all || !seen[1] {
+                            expected_hkdf_ops += 1;
+                        }
                         seen[1] = true;
                         creds.push(SlotCredential::prf(if use_valid_secret { &prf } else { &wrong_prf }));
                     }
                     2 => {
-                        expected_hkdf_ops += 1;
+                        if !include_all || !seen[2] {
+                            expected_hkdf_ops += 1;
+                        }
                         seen[2] = true;
                         creds.push(SlotCredential::recovery(if use_valid_secret { &recovery } else { &wrong_rec }));
                     }
                     _ => {
-                        expected_hkdf_ops += 1;
+                        if !include_all || !seen[2] {
+                            expected_hkdf_ops += 1;
+                        }
                         seen[2] = true;
                         creds.push(SlotCredential::recovery_code(b"INVALID"));
                     }
