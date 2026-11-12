@@ -228,5 +228,11 @@ mod tests {
             Ok(alloc::string::String::from("Pass Word Ä")),
             "profile_vault経由のopaque_string呼び出しに成功。"
         );
+        assert_eq!(
+            opaque_string_secret("Pass Word\u{0020}A\u{0308}")
+                .expect("profile_vault経由のopaque_string_secret呼び出しに成功。")
+                .as_slice(),
+            "Pass Word Ä".as_bytes()
+        );
     }
 }

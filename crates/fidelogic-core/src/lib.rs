@@ -62,7 +62,7 @@ pub use curve25519::{
     X25519PublicKey, X25519SharedSecret, edwards_basepoint_mul, ristretto_basepoint_mul,
     x25519_basepoint_mul, x25519_diffie_hellman,
 };
-pub use zeroize::{SecretBytes, volatile_zeroize};
+pub use zeroize::{SecretBytes, volatile_zeroize, volatile_zeroize_words};
 
 #[cfg(feature = "alloc")]
 pub use zeroize::SecretVec;

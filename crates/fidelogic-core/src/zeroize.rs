@@ -16,6 +16,17 @@ pub fn volatile_zeroize(buffer: &mut [u8]) {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
+/// 指定された 32-bit ワード列スライス (Unicode コードポイント等) を即時ゼロクリアする局所プリミティブ。
+///
+/// コンパイラ最適化による Dead Store Elimination (DSE) を抑止するため、
+/// [`zeroize::Zeroize::zeroize`] を呼び出した上でコンパイラフェンス([`core::sync::atomic::compiler_fence`])を実行し、
+/// メモリ消去命令の並べ替えや除去を確実に防止する。
+#[inline(never)]
+pub fn volatile_zeroize_words(buffer: &mut [u32]) {
+    buffer.zeroize();
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+}
+
 /// 指定ポインタ先頭から `len` バイトの領域(未初期化パディング領域を含む)を揮発性ゼロ書込みで消去する。
 ///
 /// 列挙型やアラインメントパディング等の未初期化バイトを含みうる領域に対し、
@@ -361,6 +372,13 @@ mod tests {
         let mut secret = [0x42u8; 32];
         volatile_zeroize(&mut secret);
         assert_eq!(secret, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_volatile_zeroize_words() {
+        let mut words = [0x1234_5678u32; 16];
+        volatile_zeroize_words(&mut words);
+        assert_eq!(words, [0u32; 16]);
     }
 
     #[test]

@@ -329,6 +329,87 @@ fn test_secret_vec_hygiene_on_clear_and_drop() {
     });
 }
 
+#[cfg(feature = "alloc")]
+#[test]
+fn test_opaque_string_memory_hygiene_success_and_error() {
+    use fidelogic_core::{
+        PrecisError, PrecisProfile, enforce_opaque_string_cps, opaque_string, opaque_string_secret,
+    };
+
+    // テスト用パスワード平文 (ASCII + 非 ASCII 空白 U+00A0 + 結合文字 A + U+0308)。
+    let password_raw = "S3cr3tP@ss\u{00A0}W0rd\u{0020}A\u{0308}#2026";
+    let password_canonical = "S3cr3tP@ss W0rd Ä#2026";
+    let bad_password = "S3cr3tP@ss\u{00A0}\0Bad#2026";
+
+    // 監視対象パターン:
+    // 1. 平文パスワードの UTF-8 部分文字列
+    // 2. 正準化後のパスワード UTF-8 部分文字列
+    // 3. コードポイント列の 32-bit ワード列 (リトルエンディアンバイト列)
+    let pattern_pw_raw = b"S3cr3tP@ss";
+    let pattern_pw_canonical = b"S3cr3tP@ss W0rd";
+    let pattern_bad = b"Bad#2026";
+
+    // "S3cr" のコードポイント列バイトパターン ([83, 51, 99, 114])。
+    let cps_slice = [83u32, 51u32, 99u32, 114u32];
+    let cps_bytes = unsafe { core::slice::from_raw_parts(cps_slice.as_ptr().cast::<u8>(), 16) };
+
+    // 1. opaque_string_secret 正常終了後:
+    // 中間 Vec<u32> (cps, mapped, normalized) および戻り値 SecretVec の Drop 後に
+    // 平文およびコードポイント列がヒープ上に残留しないことを検証。
+    run_with_heap_leak_check(
+        &[pattern_pw_raw, pattern_pw_canonical, cps_bytes],
+        3,
+        || {
+            let secret =
+                opaque_string_secret(password_raw).expect("opaque_string_secret 正常系に成功。");
+            assert_eq!(secret.as_slice(), password_canonical.as_bytes());
+            drop(secret);
+        },
+    );
+
+    // 2. opaque_string_secret エラー返却後:
+    // 禁止文字混入による失敗時、中間バッファが確実にゼロ消去されて解放されることを検証。
+    run_with_heap_leak_check(&[pattern_pw_raw, pattern_bad, cps_bytes], 1, || {
+        let err = opaque_string_secret(bad_password)
+            .expect_err("禁止コードポイントにより失敗することを検証。");
+        assert_eq!(err, PrecisError::DisallowedCodePoint(0x0000));
+    });
+
+    // 3. opaque_string (String 返却 API) の中間バッファ衛生:
+    // 中間 Vec<u32> (cps, mapped, normalized) が確実にゼロ消去されて解放されることを検証。
+    run_with_heap_leak_check(&[cps_bytes], 2, || {
+        let s = opaque_string(password_raw).expect("opaque_string 正常系に成功。");
+        assert_eq!(s, password_canonical);
+        // 注: s (String) 自体は標準型のため Drop でゼロ消去されないが、
+        // 中間コードポイント Vec<u32> は完全にゼロ消去されることを cps_bytes で検証。
+        drop(s);
+    });
+
+    // 4. enforce_opaque_string_cps エラー返却時のメモリ衛生:
+    // 禁止文字が含まれるコードポイント列の正規化途中で失敗した場合でも、
+    // 中間 Vec<u32> がゼロクリアされて解放されることを検証。
+    let bad_cps: Vec<u32> = bad_password.chars().map(|c| c as u32).collect();
+    run_with_heap_leak_check(&[cps_bytes], 1, || {
+        let err = enforce_opaque_string_cps(&bad_cps)
+            .expect_err("enforce_opaque_string_cps 失敗を検証。");
+        assert_eq!(err, PrecisError::DisallowedCodePoint(0x0000));
+    });
+
+    // 5. PrecisProfile::OpaqueString.enforce_str_secret のメモリ衛生。
+    run_with_heap_leak_check(
+        &[pattern_pw_raw, pattern_pw_canonical, cps_bytes],
+        3,
+        || {
+            let prof = PrecisProfile::OpaqueString;
+            let secret = prof
+                .enforce_str_secret(password_raw)
+                .expect("enforce_str_secret 正常系に成功。");
+            assert_eq!(secret.as_slice(), password_canonical.as_bytes());
+            drop(secret);
+        },
+    );
+}
+
 #[cfg(feature = "profile-lite")]
 #[test]
 fn test_x25519_dh_memory_hygiene_success_and_error() {

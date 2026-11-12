@@ -49,5 +49,11 @@ mod tests {
             Err(PrecisError::DisallowedCodePoint(0x0000)),
             "profile_lite経由のopaque_string禁止文字拒絶確認に成功。"
         );
+        assert_eq!(
+            opaque_string_secret("Pass Word")
+                .expect("profile_lite経由のopaque_string_secret呼び出しに成功。")
+                .as_slice(),
+            b"Pass Word"
+        );
     }
 }

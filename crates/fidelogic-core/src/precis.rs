@@ -9,6 +9,10 @@ use alloc::{string::String, vec::Vec};
 
 #[cfg(feature = "alloc")]
 use crate::error::PrecisError;
+#[cfg(feature = "alloc")]
+use crate::zeroize::{SecretVec, volatile_zeroize};
+#[cfg(feature = "alloc")]
+use zeroize::Zeroizing;
 
 /// Unicode コードポイントの最大有効値 (`U+10FFFF`)。
 pub const UNICODE_MAX_CODE_POINT: u32 = 0x10_FFFF;
@@ -437,16 +441,19 @@ where
         return Err(PrecisError::EmptyInput);
     }
 
-    let cps: Vec<u32> = input.chars().map(|ch| ch as u32).collect();
-    let normalized = enforce_cps(&cps)?;
+    let char_count = input.chars().count();
+    let mut cps_vec = Vec::with_capacity(char_count);
+    cps_vec.extend(input.chars().map(|ch| ch as u32));
+    let cps = Zeroizing::new(cps_vec);
+    let normalized = Zeroizing::new(enforce_cps(&cps)?);
 
-    let mut out = String::with_capacity(input.len());
-    for cp in normalized {
+    let mut out = Zeroizing::new(String::with_capacity(input.len()));
+    for &cp in normalized.iter() {
         let ch = char::from_u32(cp).ok_or(PrecisError::DisallowedCodePoint(cp))?;
         out.push(ch);
     }
 
-    Ok(out)
+    Ok(core::mem::take(&mut *out))
 }
 
 /// UTF-8 文字列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用する。
@@ -481,18 +488,20 @@ pub fn enforce_opaque_string_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
     // RFC 8265 Section 4.2.2: 非 ASCII 空白文字 (Unicode Zs カテゴリ) が含まれる場合のみ
     // マッピング済みバッファを生成し、通常時は不要なアロケーションを回避する。
     let has_non_ascii_zs = cps.iter().any(|&cp| cp != 0x0020 && is_zs_space(cp));
-    let normalized = if has_non_ascii_zs {
-        let mapped: Vec<u32> = cps.iter().copied().map(map_zs_to_space).collect();
+    let mut normalized = Zeroizing::new(if has_non_ascii_zs {
+        let mut mapped_vec = Vec::with_capacity(cps.len());
+        mapped_vec.extend(cps.iter().copied().map(map_zs_to_space));
+        let mapped = Zeroizing::new(mapped_vec);
         precis_nfc_normalize(&mapped)
     } else {
         precis_nfc_normalize(cps)
-    };
+    });
 
     if let Some(disallowed) = find_opaque_disallowed_cp(&normalized) {
         return Err(PrecisError::DisallowedCodePoint(disallowed));
     }
 
-    Ok(normalized)
+    Ok(core::mem::take(&mut *normalized))
 }
 
 /// `PrecisProfile.v` (`precis_opaque_string`) に対応する `Option` 返却ラッパー。
@@ -513,6 +522,42 @@ pub fn precis_opaque_string(cps: &[u32]) -> Option<Vec<u32>> {
 #[cfg(feature = "alloc")]
 pub fn opaque_string(input: &str) -> Result<String, PrecisError> {
     apply_str_profile(input, enforce_opaque_string_cps)
+}
+
+/// UTF-8 文字列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2) を適用し、
+/// メモリ残留を防ぐセキュアバッファ [`SecretVec`] として正準化済み UTF-8 バイト列を返却する。
+///
+/// 中間コードポイントバッファ (`Vec<u32>`) および戻り値バッファは、
+/// 正常終了・エラー返却時を問わず確実にゼロ消去され、平文のヒープ残留を防止する。
+///
+/// # Errors
+///
+/// 入力が空文字列であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+#[cfg(feature = "alloc")]
+pub fn opaque_string_secret(input: &str) -> Result<SecretVec, PrecisError> {
+    if input.is_empty() {
+        return Err(PrecisError::EmptyInput);
+    }
+
+    let char_count = input.chars().count();
+    let mut cps_vec = Vec::with_capacity(char_count);
+    cps_vec.extend(input.chars().map(|ch| ch as u32));
+    let cps = Zeroizing::new(cps_vec);
+    let normalized = Zeroizing::new(enforce_opaque_string_cps(&cps)?);
+
+    let mut secret_out = SecretVec::with_capacity(input.len());
+    let mut utf8_buf = [0u8; 4];
+    for &cp in normalized.iter() {
+        let ch = char::from_u32(cp).ok_or_else(|| {
+            secret_out.clear();
+            PrecisError::DisallowedCodePoint(cp)
+        })?;
+        let encoded = ch.encode_utf8(&mut utf8_buf);
+        secret_out.extend_from_slice(encoded.as_bytes());
+    }
+    volatile_zeroize(&mut utf8_buf);
+
+    Ok(secret_out)
 }
 
 /// PRECIS プロファイル正準化の種別を表す列挙型。
@@ -596,6 +641,23 @@ impl PrecisProfile {
         match self {
             Self::UsernameCaseMapped => username_case_mapped(input),
             Self::OpaqueString => opaque_string(input),
+        }
+    }
+
+    /// UTF-8 文字列に対して対象プロファイルの正準化を適用し、秘密情報保護型 [`SecretVec`] として返却する。
+    ///
+    /// # Errors
+    ///
+    /// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+    #[cfg(feature = "alloc")]
+    #[inline]
+    pub fn enforce_str_secret(self, input: &str) -> Result<SecretVec, PrecisError> {
+        match self {
+            Self::UsernameCaseMapped => {
+                let s = username_case_mapped(input)?;
+                Ok(SecretVec::from_slice(s.as_bytes()))
+            }
+            Self::OpaqueString => opaque_string_secret(input),
         }
     }
 }
@@ -1075,6 +1137,22 @@ mod tests {
         assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
     }
 
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_opaque_string_secret_api() {
+        let sec = opaque_string_secret("Pass\u{00A0}Word\u{0020}A\u{0308}").unwrap();
+        assert_eq!(sec.as_slice(), "Pass Word Ä".as_bytes());
+
+        assert_eq!(
+            opaque_string_secret("").unwrap_err(),
+            PrecisError::EmptyInput
+        );
+        assert_eq!(
+            opaque_string_secret("bad\0pw").unwrap_err(),
+            PrecisError::DisallowedCodePoint(0x0000)
+        );
+    }
+
     #[test]
     fn test_zs_space_mapping() {
         // Unicode Zs (Space_Separator) 全 17 文字の判定を検証。
@@ -1202,6 +1280,26 @@ mod tests {
             assert_eq!(
                 opaque_prof.enforce_str("user name"),
                 Ok(alloc::string::String::from("user name"))
+            );
+
+            assert_eq!(
+                user_prof.enforce_str_secret("User").unwrap().as_slice(),
+                b"user"
+            );
+            assert_eq!(
+                opaque_prof.enforce_str_secret("User").unwrap().as_slice(),
+                b"User"
+            );
+            assert_eq!(
+                user_prof.enforce_str_secret("user name").unwrap_err(),
+                PrecisError::DisallowedCodePoint(0x0020)
+            );
+            assert_eq!(
+                opaque_prof
+                    .enforce_str_secret("user name")
+                    .unwrap()
+                    .as_slice(),
+                b"user name"
             );
         }
     }
