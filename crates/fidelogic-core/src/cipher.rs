@@ -170,9 +170,11 @@ enum VaultCipherInner {
 /// 暗号化コンテナで使用されるAEAD暗号スイートの安全破棄ラッパー。
 ///
 /// 内部の `XChaCha20Poly1305` および `Aes256GcmSiv` による鍵消去に加え、
-/// Drop 時に列挙型パディング領域を含む構造体全体(`size_of::<Self>()`)を揮発性ゼロ書込みで消去する。
+/// Drop 時に列挙型パディング領域を含む内部領域(`size_of::<VaultCipherInner>()`)を揮発性ゼロ書込みで消去する。
+/// `#[repr(transparent)]` により [`core::mem::ManuallyDrop<VaultCipherInner>`] のみを保持するため、
+/// `CipherSuiteId` 等の判別値に依存する validity invariant 違反を起こさずに構造体全体を安全にゼロ化できる。
+#[repr(transparent)]
 pub struct VaultCipher {
-    suite_id: CipherSuiteId,
     inner: core::mem::ManuallyDrop<VaultCipherInner>,
 }
 
@@ -180,12 +182,13 @@ impl Drop for VaultCipher {
     #[inline]
     fn drop(&mut self) {
         // 先に各プリミティブの Drop を実行して内部鍵・拡張ラウンド鍵を消去した後、
-        // バリアント差パディングやタグ領域を含めた構造体メモリ全体を揮発性ゼロ書込みで消去する。
+        // バリアント差パディングやタグ領域を含む self.inner 領域のみを揮発性ゼロ書込みで消去する。
+        // ManuallyDrop<T> は内部バイト列の validity invariant を要求しないため安全にゼロ化できる。
         unsafe {
             core::mem::ManuallyDrop::drop(&mut self.inner);
             crate::zeroize::volatile_zeroize_raw(
-                (self as *mut Self).cast::<u8>(),
-                core::mem::size_of::<Self>(),
+                core::ptr::addr_of_mut!(self.inner).cast::<u8>(),
+                core::mem::size_of::<VaultCipherInner>(),
             );
         }
     }
@@ -214,7 +217,6 @@ impl VaultCipher {
             }
         };
         Self {
-            suite_id,
             inner: core::mem::ManuallyDrop::new(inner),
         }
     }
@@ -237,7 +239,13 @@ impl VaultCipher {
     /// 本暗号インスタンスの暗号スイート識別子を返す。
     #[inline]
     pub const fn suite_id(&self) -> CipherSuiteId {
-        self.suite_id
+        // 安全性: self.inner は VaultCipher::new で有効な VaultCipherInner により初期化され、
+        // Drop 実行前まで破棄されない。ManuallyDrop<T> は T と同一レイアウトを持つ。
+        let inner = unsafe { &*core::ptr::addr_of!(self.inner).cast::<VaultCipherInner>() };
+        match inner {
+            VaultCipherInner::XChaCha20Poly1305(_) => CipherSuiteId::XChaCha20Poly1305,
+            VaultCipherInner::Aes256GcmSiv(_) => CipherSuiteId::Aes256GcmSiv,
+        }
     }
 
     /// 本暗号インスタンスで要求されるノンス長(バイト数)を返す。
