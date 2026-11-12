@@ -35,6 +35,7 @@ pub mod envelope;
 pub mod error;
 #[cfg(feature = "profile-vault")]
 pub mod kdf;
+pub mod precis;
 #[cfg(feature = "profile-vault")]
 pub mod slots;
 pub mod tlv;
@@ -59,13 +60,24 @@ pub use envelope::{
     DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SLOT_ID_PRF, SLOT_ID_RECOVERY, SlotKind, SlotStatus,
     VaultEngine, VaultEvent, VaultState,
 };
-pub use error::{CryptoError, SystemError, TlvParseError, VaultError};
+pub use error::{CryptoError, PrecisError, SystemError, TlvParseError, VaultError};
 #[cfg(feature = "profile-vault")]
 pub use kdf::{
     Argon2Params, DEFAULT_KEY_LEN, DEFAULT_NATIVE_M_COST, DEFAULT_NATIVE_P_COST,
     DEFAULT_NATIVE_T_COST, DEFAULT_WASM_M_COST, DEFAULT_WASM_P_COST, DEFAULT_WASM_T_COST,
     FAST_TEST_M_COST, FAST_TEST_P_COST, FAST_TEST_T_COST, HKDF_SHA256_HASH_LEN,
     HKDF_SHA256_MAX_OUTPUT_LEN, hkdf_sha256_derive, hkdf_sha256_derive_32, hkdf_sha256_derive_vec,
+};
+pub use precis::{
+    UNICODE_MAX_CODE_POINT, all_allowed, compose_hangul_syllable, compose_hangul_trailing,
+    compose_pair, find_disallowed_cp, in_range, is_ascii_control, is_disallowed_cp,
+    is_non_ascii_control, is_noncharacter, is_out_of_bounds, is_private_use, is_space,
+    is_surrogate, precis_fold_char, precis_fold_cp,
+};
+#[cfg(feature = "alloc")]
+pub use precis::{
+    enforce_username_case_mapped_cps, precis_fold_string, precis_nfc_normalize,
+    precis_username_case_mapped, username_case_mapped,
 };
 #[cfg(feature = "profile-vault")]
 pub use slots::{

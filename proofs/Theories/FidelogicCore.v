@@ -317,7 +317,7 @@ Axiom core_slice_Slice_copy_from_slice :
 .
 
 (** [fidelogic_core::error::TlvParseError]
-    Source: 'crates/fidelogic-core/src/error.rs', lines 13:0-26:1
+    Source: 'crates/fidelogic-core/src/error.rs', lines 14:0-27:1
     Visibility: public *)
 Inductive error_TlvParseError_t :=
 | Error_TlvParseError_UnexpectedEof : error_TlvParseError_t

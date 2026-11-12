@@ -3,6 +3,7 @@
 //! Fidelogicにおける階層的エラーハンドリング体系を提供する。
 //! 形式検証と結合した [`TlvParseError`] を完全温存し、
 //! 暗号処理例外 [`CryptoError`]、システム例外 [`SystemError`]、
+//! PRECIS正準化例外 [`PrecisError`]、
 //! およびそれらを統合する包括的ドメインエラー [`VaultError`] を定義する。
 
 /// TLVおよびVaultパース処理で発生するフォーマット例外を表す列挙型。
@@ -55,9 +56,18 @@ pub enum SystemError {
     EntropySourceFailed,
 }
 
+/// PRECIS文字列正準化(RFC 7564 / RFC 8265)で発生する例外を表す列挙型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrecisError {
+    /// 入力文字列またはコードポイント列が空である。
+    EmptyInput,
+    /// 対象プロファイルで禁止されたコードポイントが含まれている。
+    DisallowedCodePoint(u32),
+}
+
 /// Fidelogic Vaultにおける統括ドメインエラーを表す列挙型。
 ///
-/// TLVパース例外、暗号処理例外、システム例外を階層的に内包し、
+/// TLVパース例外、暗号処理例外、システム例外、PRECIS例外を階層的に内包し、
 /// 外部境界向けの一様マスキングバリアントを提供する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultError {
@@ -67,6 +77,8 @@ pub enum VaultError {
     Crypto(CryptoError),
     /// OSシステムコールおよび環境に起因する例外。
     System(SystemError),
+    /// PRECIS文字列正準化に起因する例外。
+    Precis(PrecisError),
     /// 指定された識別子のKEKスロットが存在しない。
     SlotNotFound,
     /// 現在のVault状態に対して不正な状態遷移または操作が要求された。
@@ -84,7 +96,8 @@ impl VaultError {
     /// FSM の公開状態契約違反を表す [`VaultError::InvalidState`] および、
     /// 世代巻き戻し検証結果を表す [`VaultError::RollbackDetected`] を除き、
     /// スロット不在 ([`VaultError::SlotNotFound`])、MAC 不一致や鍵長不正 ([`VaultError::Crypto`])、
-    /// スロット形式・重複・長さ異常 ([`VaultError::Parse`])、システム例外 ([`VaultError::System`]) 等の
+    /// スロット形式・重複・長さ異常 ([`VaultError::Parse`])、システム例外 ([`VaultError::System`])、
+    /// PRECIS正準化例外 ([`VaultError::Precis`]) 等の
     /// 内部詳細エラーをすべて [`VaultError::AuthenticationFailed`] へ畳み込む。
     #[inline]
     #[must_use]
@@ -95,6 +108,7 @@ impl VaultError {
             Self::Parse(_)
             | Self::Crypto(_)
             | Self::System(_)
+            | Self::Precis(_)
             | Self::SlotNotFound
             | Self::AuthenticationFailed => Self::AuthenticationFailed,
         }
@@ -119,6 +133,13 @@ impl From<SystemError> for VaultError {
     #[inline]
     fn from(err: SystemError) -> Self {
         Self::System(err)
+    }
+}
+
+impl From<PrecisError> for VaultError {
+    #[inline]
+    fn from(err: PrecisError) -> Self {
+        Self::Precis(err)
     }
 }
 
@@ -161,12 +182,24 @@ impl core::fmt::Display for SystemError {
     }
 }
 
+impl core::fmt::Display for PrecisError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EmptyInput => write!(f, "入力文字列が空です。"),
+            Self::DisallowedCodePoint(cp) => {
+                write!(f, "禁止されたコードポイント(U+{cp:04X})が含まれています。")
+            }
+        }
+    }
+}
+
 impl core::fmt::Display for VaultError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Parse(err) => write!(f, "パースエラー: {err}"),
             Self::Crypto(err) => write!(f, "暗号エラー: {err}"),
             Self::System(err) => write!(f, "システムエラー: {err}"),
+            Self::Precis(err) => write!(f, "PRECISエラー: {err}"),
             Self::SlotNotFound => write!(f, "指定されたスロットが存在しません。"),
             Self::InvalidState => write!(f, "現在の状態では実行できない不正な状態遷移です。"),
             Self::AuthenticationFailed => write!(f, "認証に失敗しました。"),
@@ -180,6 +213,7 @@ impl core::fmt::Display for VaultError {
 impl core::error::Error for TlvParseError {}
 impl core::error::Error for CryptoError {}
 impl core::error::Error for SystemError {}
+impl core::error::Error for PrecisError {}
 
 impl core::error::Error for VaultError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
@@ -187,6 +221,7 @@ impl core::error::Error for VaultError {
             Self::Parse(err) => Some(err),
             Self::Crypto(err) => Some(err),
             Self::System(err) => Some(err),
+            Self::Precis(err) => Some(err),
             _ => None,
         }
     }
@@ -228,6 +263,20 @@ mod tests {
     }
 
     #[test]
+    fn test_precis_error_equality() {
+        let err1 = PrecisError::EmptyInput;
+        let err2 = PrecisError::EmptyInput;
+        let err3 = PrecisError::DisallowedCodePoint(0x0020);
+        let err4 = PrecisError::DisallowedCodePoint(0xD800);
+        assert_eq!(err1, err2, "同一のPrecisErrorバリアント比較に成功。");
+        assert_ne!(err1, err3, "異なるPrecisErrorバリアント比較に成功。");
+        assert_ne!(
+            err3, err4,
+            "コードポイントが異なるDisallowedCodePoint比較に成功。"
+        );
+    }
+
+    #[test]
     fn test_vault_error_from_conversions() {
         let parse_err = TlvParseError::InvalidLength;
         let vault_err_parse: VaultError = parse_err.into();
@@ -251,6 +300,14 @@ mod tests {
             vault_err_system,
             VaultError::System(SystemError::MemoryLockFailed),
             "SystemErrorからVaultErrorへのFrom変換に成功。"
+        );
+
+        let precis_err = PrecisError::DisallowedCodePoint(0x0020);
+        let vault_err_precis: VaultError = precis_err.into();
+        assert_eq!(
+            vault_err_precis,
+            VaultError::Precis(PrecisError::DisallowedCodePoint(0x0020)),
+            "PrecisErrorからVaultErrorへのFrom変換に成功。"
         );
     }
 
@@ -288,6 +345,21 @@ mod tests {
             "VaultError::SystemのDisplay出力に成功。"
         );
 
+        let precis_empty_msg = format!("{}", VaultError::Precis(PrecisError::EmptyInput));
+        assert!(
+            precis_empty_msg.contains("入力文字列が空です。"),
+            "VaultError::Precis(EmptyInput)のDisplay出力に成功。"
+        );
+
+        let precis_cp_msg = format!(
+            "{}",
+            VaultError::Precis(PrecisError::DisallowedCodePoint(0x0020))
+        );
+        assert!(
+            precis_cp_msg.contains("U+0020"),
+            "VaultError::Precis(DisallowedCodePoint)のDisplay出力に成功。"
+        );
+
         let slot_msg = format!("{}", VaultError::SlotNotFound);
         assert_eq!(
             slot_msg, "指定されたスロットが存在しません。",
@@ -323,6 +395,12 @@ mod tests {
             "VaultError::Parseのsource取得に成功。"
         );
 
+        let vault_precis = VaultError::Precis(PrecisError::EmptyInput);
+        assert!(
+            vault_precis.source().is_some(),
+            "VaultError::Precisのsource取得に成功。"
+        );
+
         let vault_auth = VaultError::AuthenticationFailed;
         assert!(
             vault_auth.source().is_none(),
@@ -346,6 +424,8 @@ mod tests {
             VaultError::Crypto(CryptoError::InvalidSliceLength),
             VaultError::System(SystemError::MemoryLockFailed),
             VaultError::System(SystemError::EntropySourceFailed),
+            VaultError::Precis(PrecisError::EmptyInput),
+            VaultError::Precis(PrecisError::DisallowedCodePoint(0x0020)),
         ];
 
         for err in masked_variants {

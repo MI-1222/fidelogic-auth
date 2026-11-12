@@ -11,10 +11,21 @@ pub use crate::envelope::{
     DEK_LEN, KekSlots, SLOT_ID_ARGON2ID, SLOT_ID_PRF, SLOT_ID_RECOVERY, SlotKind, SlotStatus,
     VaultEngine, VaultEvent, VaultState,
 };
-pub use crate::error::{CryptoError, SystemError, TlvParseError, VaultError};
+pub use crate::error::{CryptoError, PrecisError, SystemError, TlvParseError, VaultError};
 pub use crate::kdf::{
     HKDF_SHA256_HASH_LEN, HKDF_SHA256_MAX_OUTPUT_LEN, hkdf_sha256_derive, hkdf_sha256_derive_32,
     hkdf_sha256_derive_vec,
+};
+pub use crate::precis::{
+    UNICODE_MAX_CODE_POINT, all_allowed, compose_hangul_syllable, compose_hangul_trailing,
+    compose_pair, find_disallowed_cp, in_range, is_ascii_control, is_disallowed_cp,
+    is_non_ascii_control, is_noncharacter, is_out_of_bounds, is_private_use, is_space,
+    is_surrogate, precis_fold_char, precis_fold_cp,
+};
+#[cfg(feature = "alloc")]
+pub use crate::precis::{
+    enforce_username_case_mapped_cps, precis_fold_string, precis_nfc_normalize,
+    precis_username_case_mapped, username_case_mapped,
 };
 pub use crate::slots::{
     Argon2idSlotPayload, KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY, KdfKind,
@@ -238,6 +249,21 @@ mod tests {
             cipher.nonce_len(),
             XCHACHA20_POLY1305_NONCE_LEN,
             "profile_vault経由のノンス長取得に成功。"
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_precis_reexport() {
+        assert_eq!(
+            username_case_mapped("User"),
+            Ok(alloc::string::String::from("user")),
+            "profile_vault経由のusername_case_mapped呼び出しに成功。"
+        );
+        assert_eq!(
+            username_case_mapped(""),
+            Err(PrecisError::EmptyInput),
+            "profile_vault経由のPrecisError返却確認に成功。"
         );
     }
 }
