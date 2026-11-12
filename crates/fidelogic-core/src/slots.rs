@@ -630,15 +630,15 @@ pub fn wrap_dek_slot0(
 
 /// 導出済み KEK を用いて 256-bit DEK を XChaCha20-Poly1305 で暗号化ラップする共通コア。
 ///
-/// KEK および作業バッファは、正常終了時とエラー終了時を問わず直ちに [`volatile_zeroize`] で消去する。
+/// KEK は [`VaultCipher::from_consumed_secret`] により直ちにゼロ消去され、
+/// 作業バッファも正常終了時とエラー終了時を問わず確実に [`volatile_zeroize`] で消去する。
 fn wrap_dek_with_kek(
     dek: &SecretBytes<DEK_LEN>,
     kek: &mut SecretBytes<DEK_LEN>,
     nonce: &[u8; XCHACHA20_POLY1305_NONCE_LEN],
     aad: &[u8],
 ) -> Result<([u8; DEK_LEN], [u8; TAG_LEN]), VaultError> {
-    let cipher = VaultCipher::new_from_secret(SLOT_CIPHER_SUITE, kek);
-    volatile_zeroize(kek.as_mut_slice());
+    let cipher = VaultCipher::from_consumed_secret(SLOT_CIPHER_SUITE, kek);
 
     let mut work_buf = SecretBytes::new(*dek.as_bytes());
     let encrypt_res = cipher.encrypt_in_place_detached(nonce, aad, work_buf.as_mut_slice());
@@ -657,7 +657,8 @@ fn wrap_dek_with_kek(
 
 /// 導出済み KEK を用いて暗号化済み DEK を XChaCha20-Poly1305 で認証復号する共通コア。
 ///
-/// KEK および失敗時の DEK 作業バッファは直ちに [`volatile_zeroize`] で消去する。
+/// KEK は [`VaultCipher::from_consumed_secret`] により直ちにゼロ消去され、
+/// 失敗時の DEK 作業バッファも直ちに [`volatile_zeroize`] で消去する。
 fn unwrap_dek_with_kek(
     kek: &mut SecretBytes<DEK_LEN>,
     nonce: &[u8; XCHACHA20_POLY1305_NONCE_LEN],
@@ -665,8 +666,7 @@ fn unwrap_dek_with_kek(
     ciphertext: &[u8; DEK_LEN],
     auth_tag: &[u8; TAG_LEN],
 ) -> Result<SecretBytes<DEK_LEN>, VaultError> {
-    let cipher = VaultCipher::new_from_secret(SLOT_CIPHER_SUITE, kek);
-    volatile_zeroize(kek.as_mut_slice());
+    let cipher = VaultCipher::from_consumed_secret(SLOT_CIPHER_SUITE, kek);
 
     let mut dek = SecretBytes::new(*ciphertext);
     if let Err(err) = cipher.decrypt_in_place_detached_tag(nonce, aad, dek.as_mut_slice(), auth_tag)

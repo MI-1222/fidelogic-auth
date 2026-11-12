@@ -227,6 +227,16 @@ impl VaultCipher {
         Self::new(suite_id, key.as_bytes())
     }
 
+    /// [`SecretBytes<32>`] から暗号インスタンスを生成し、渡された秘密鍵バッファを即座にゼロ消去する。
+    ///
+    /// 呼び出し側の鍵消費に伴うゼロ化漏れを構造的に防止する。
+    #[inline]
+    pub fn from_consumed_secret(suite_id: CipherSuiteId, key: &mut SecretBytes<KEY_LEN>) -> Self {
+        let cipher = Self::new_from_secret(suite_id, key);
+        crate::zeroize::volatile_zeroize(key.as_mut_slice());
+        cipher
+    }
+
     /// 任意長スライスから鍵長(32バイト)を事前検証して暗号インスタンスを生成する。
     ///
     /// 鍵長が 32 バイトでない場合はパニックさせず、直ちに [`CryptoError::InvalidKeySize`] を返却する。
@@ -593,6 +603,20 @@ mod tests {
             cipher_secret.suite_id(),
             CipherSuiteId::XChaCha20Poly1305,
             "SecretBytes経由の生成に成功。"
+        );
+
+        let mut consumed_secret = SecretBytes::new(key);
+        let cipher_consumed =
+            VaultCipher::from_consumed_secret(CipherSuiteId::Aes256GcmSiv, &mut consumed_secret);
+        assert_eq!(
+            cipher_consumed.suite_id(),
+            CipherSuiteId::Aes256GcmSiv,
+            "from_consumed_secret経由の生成に成功。"
+        );
+        assert_eq!(
+            consumed_secret.as_bytes(),
+            &[0u8; KEY_LEN],
+            "from_consumed_secret呼び出し後の鍵バッファゼロ化に成功。"
         );
 
         let slice_ok = VaultCipher::new_from_slice(CipherSuiteId::Aes256GcmSiv, &key[..]);
