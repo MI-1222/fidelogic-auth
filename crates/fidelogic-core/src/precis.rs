@@ -74,6 +74,34 @@ pub const fn is_space(cp: u32) -> bool {
     cp == 0x20
 }
 
+/// Unicode `Zs` (Space_Separator) カテゴリの文字であるかを判定する (RFC 8265 Section 4.2.2)。
+///
+/// 対象コードポイント:
+/// - `0x0020` (SPACE)
+/// - `0x00A0` (NO-BREAK SPACE)
+/// - `0x1680` (OGHAM SPACE MARK)
+/// - `0x2000..=0x200A` (EN QUAD .. HAIR SPACE)
+/// - `0x202F` (NARROW NO-BREAK SPACE)
+/// - `0x205F` (MEDIUM MATHEMATICAL SPACE)
+/// - `0x3000` (IDEOGRAPHIC SPACE)
+#[inline]
+#[must_use]
+pub const fn is_zs_space(cp: u32) -> bool {
+    matches!(
+        cp,
+        0x0020 | 0x00A0 | 0x1680 | 0x2000..=0x200A | 0x202F | 0x205F | 0x3000
+    )
+}
+
+/// Unicode `Zs` (Space_Separator) カテゴリの文字を ASCII 空白 (`0x0020`) にマッピングする (RFC 8265 Section 4.2.2)。
+///
+/// 対象外のコードポイントは変更せずそのまま返す。
+#[inline]
+#[must_use]
+pub const fn map_zs_to_space(cp: u32) -> u32 {
+    if is_zs_space(cp) { 0x0020 } else { cp }
+}
+
 /// Unicode サロゲートコードポイント (`0xD800..=0xDFFF`) であるかを判定する。
 #[inline]
 #[must_use]
@@ -431,15 +459,13 @@ pub fn username_case_mapped(input: &str) -> Result<String, PrecisError> {
     apply_str_profile(input, enforce_username_case_mapped_cps)
 }
 
-/// コードポイント列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2 形式モデル) を適用する。
-///
-/// `proofs/Theories/PrecisProfile.v` の仕様に一致する範囲を実装する
-/// (RFC 8265 Section 4.2.2 の非 ASCII 空白 `Zs` -> `U+0020` マッピングおよび全 Unicode NFC テーブルは含まない)。
+/// コードポイント列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2) を適用する。
 ///
 /// 処理手順を以下に示す。
 /// 1. 空入力を拒絶 ([`PrecisError::EmptyInput`])。
-/// 2. Case Folding を行わずに Unicode NFC 正規化 (`precis_nfc_normalize`) を適用。
-/// 3. `FreeformClass` 禁止コードポイント検査 (`find_opaque_disallowed_cp`) を実施し、
+/// 2. RFC 8265 Section 4.2.2 に従い、Unicode `Zs` カテゴリ文字を ASCII 空白 (`0x0020`) にマッピング。
+/// 3. Case Folding を行わずに Unicode NFC 正規化 (`precis_nfc_normalize`) を適用。
+/// 4. `FreeformClass` 禁止コードポイント検査 (`find_opaque_disallowed_cp`) を実施し、
 ///    ASCII 空白 (`0x20`) を許可しつつ制御文字・サロゲート・私用領域・非文字等を
 ///    [`PrecisError::DisallowedCodePoint`] として拒絶する。
 ///
@@ -452,7 +478,16 @@ pub fn enforce_opaque_string_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
         return Err(PrecisError::EmptyInput);
     }
 
-    let normalized = precis_nfc_normalize(cps);
+    // RFC 8265 Section 4.2.2: 非 ASCII 空白文字 (Unicode Zs カテゴリ) が含まれる場合のみ
+    // マッピング済みバッファを生成し、通常時は不要なアロケーションを回避する。
+    let has_non_ascii_zs = cps.iter().any(|&cp| cp != 0x0020 && is_zs_space(cp));
+    let normalized = if has_non_ascii_zs {
+        let mapped: Vec<u32> = cps.iter().copied().map(map_zs_to_space).collect();
+        precis_nfc_normalize(&mapped)
+    } else {
+        precis_nfc_normalize(cps)
+    };
+
     if let Some(disallowed) = find_opaque_disallowed_cp(&normalized) {
         return Err(PrecisError::DisallowedCodePoint(disallowed));
     }
@@ -469,8 +504,8 @@ pub fn precis_opaque_string(cps: &[u32]) -> Option<Vec<u32>> {
 
 /// UTF-8 文字列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2) を適用する。
 ///
-/// 大文字・小文字の区別と ASCII 空白 (`0x20`) を保持したまま Unicode NFC 正規化を適用し、
-/// 制御文字・サロゲート・私用領域・非文字等の禁止コードポイントを拒絶する。
+/// 大文字・小文字の区別を保持し、非 ASCII 空白 (Unicode `Zs` カテゴリ) を ASCII 空白 (`0x20`) へマッピングしたうえで
+/// Unicode NFC 正規化を適用し、制御文字・サロゲート・私用領域・非文字等の禁止コードポイントを拒絶する。
 ///
 /// # Errors
 ///
@@ -1038,6 +1073,81 @@ mod tests {
         assert_eq!(opaque_string("user name"), Ok(String::from("user name")));
         assert_eq!(username_case_mapped("A\u{0308}"), Ok(String::from("ä")));
         assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
+    }
+
+    #[test]
+    fn test_zs_space_mapping() {
+        // Unicode Zs (Space_Separator) 全 17 文字の判定を検証。
+        let zs_cps = [
+            0x0020, 0x00A0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+            0x2008, 0x2009, 0x200A, 0x202F, 0x205F, 0x3000,
+        ];
+        for &cp in &zs_cps {
+            assert!(
+                is_zs_space(cp),
+                "U+{cp:04X} は Unicode Zs 空白として判定される必要があります。"
+            );
+            assert_eq!(
+                map_zs_to_space(cp),
+                0x0020,
+                "U+{cp:04X} は ASCII 空白 (0x0020) へマッピングされる必要があります。"
+            );
+        }
+
+        // 境界値および非 Zs 空白文字 (Cf 等) が Zs 判定されないことを検証。
+        let non_zs_cps = [
+            0x001F, 0x0021, 0x009F, 0x00A1, 0x167F, 0x1681, 0x1FFF,
+            0x200B, // ZERO WIDTH SPACE (Cf)
+            0x202E, 0x2030, 0x205E, 0x2060, // WORD JOINER (Cf)
+            0x2FFF, 0x3001, 0xFEFF, // ZERO WIDTH NO-BREAK SPACE (Cf)
+        ];
+        for &cp in &non_zs_cps {
+            assert!(
+                !is_zs_space(cp),
+                "U+{cp:04X} は Unicode Zs 空白ではありません。"
+            );
+            assert_eq!(
+                map_zs_to_space(cp),
+                cp,
+                "非 Zs コードポイント U+{cp:04X} はマッピングで変更されてはなりません。"
+            );
+        }
+
+        // OpaqueString における非 ASCII 空白の ASCII 空白 (0x20) への正規化検証 (RFC 8265 Section 4.2.2)。
+        #[cfg(feature = "alloc")]
+        {
+            // ノーブレークスペース (U+00A0)。
+            assert_eq!(
+                opaque_string("pass\u{00A0}word"),
+                Ok(String::from("pass word"))
+            );
+            // 全角スペース (U+3000)。
+            assert_eq!(
+                opaque_string("パスワード\u{3000}秘密"),
+                Ok(String::from("パスワード 秘密"))
+            );
+            // 複数種 Zs スペースの混在。
+            assert_eq!(
+                opaque_string("a\u{1680}b\u{2000}c\u{200A}d\u{202F}e\u{205F}f"),
+                Ok(String::from("a b c d e f"))
+            );
+
+            // RFC 8265 Section 4.2.2 参照ベクタ (rfc8265_sec4_2_non_ascii_space_nbsp)。
+            let nbsp_input = [112, 97, 115, 115, 160, 119, 111, 114, 100];
+            let expected_opaque = [112, 97, 115, 115, 32, 119, 111, 114, 100];
+            assert_eq!(
+                precis_opaque_string(&nbsp_input).as_deref(),
+                Some(&expected_opaque[..])
+            );
+            assert_eq!(
+                enforce_opaque_string_cps(&nbsp_input).unwrap(),
+                expected_opaque
+            );
+
+            // 冪等性: マッピング結果への再適用が同一結果を返すことを検証。
+            let normalized = opaque_string("pass\u{00A0}word\u{3000}secret").unwrap();
+            assert_eq!(opaque_string(&normalized).unwrap(), normalized);
+        }
     }
 
     #[test]
