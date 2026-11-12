@@ -1583,6 +1583,42 @@ fn eval_slot2_code_or_dummy(
     res
 }
 
+/// 単一エントリと提示された資格情報を評価して DEK 復号を試行し、無効時やエラー時もダミー暗号演算を保証する。
+fn eval_entry_credential_traced(
+    entry: Option<&KekSlotEntry>,
+    slot_valid: bool,
+    credential: SlotCredential<'_>,
+    vault_aad: &[u8],
+    fallback_params: &Argon2Params,
+    trace: &mut SlotEvalTrace,
+) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    match credential {
+        SlotCredential::Password { password, secret } => eval_slot0_or_dummy(
+            entry,
+            slot_valid,
+            password,
+            secret,
+            vault_aad,
+            fallback_params,
+            trace,
+        ),
+        SlotCredential::Prf(prf_secret) => {
+            eval_hkdf_slot_or_dummy(&SLOT1_SPEC, entry, slot_valid, prf_secret, vault_aad, trace)
+        }
+        SlotCredential::Recovery(recovery_secret) => eval_hkdf_slot_or_dummy(
+            &SLOT2_SPEC,
+            entry,
+            slot_valid,
+            recovery_secret,
+            vault_aad,
+            trace,
+        ),
+        SlotCredential::RecoveryCode(recovery_code) => {
+            eval_slot2_code_or_dummy(entry, slot_valid, recovery_code, vault_aad, trace)
+        }
+    }
+}
+
 /// Vault 内から Slot 0 の有効な [`Argon2Params`] を抽出し、取得不能時はフォールバックを返す。
 fn resolve_vault_slot0_argon2_params(vault: &Vault, fallback: &Argon2Params) -> Argon2Params {
     if let Ok(entry) = find_slot_entry(&vault.slots, SLOT_ID_ARGON2ID)
@@ -1629,11 +1665,51 @@ impl VaultEngine {
         }
     }
 
-    /// Slot 0 (Argon2id マスターパスワード) エントリを用いて解錠パイプラインを実行する。
+    /// 単一の [`KekSlotEntry`] と [`SlotCredential`] を用いて解錠パイプラインを実行する中核メソッド。
     ///
     /// `Locked -> Unlocking -> Unlocked` の状態遷移を厳密に制御し、
-    /// スロット無効時やフォーマット不正時も含めてダミー暗号演算を実行した上で、
-    /// [`VaultEngine::fail_unlock`] により `Locked` へ復帰する。
+    /// スロット無効時やフォーマット不正時も含めて資格情報に応じたダミー暗号演算を実行した上で、
+    /// オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングする。
+    ///
+    /// # Errors
+    ///
+    /// - 現在の状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
+    /// - スロット無効, フォーマット不正, パラメータ不正, MAC 不一致などの認証失敗時は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
+    pub fn unlock_with_entry(
+        &mut self,
+        entry: &KekSlotEntry,
+        credential: SlotCredential<'_>,
+        vault_aad: &[u8],
+    ) -> Result<(), VaultError> {
+        let mut trace = SlotEvalTrace::default();
+        self.unlock_with_entry_traced(entry, credential, vault_aad, &mut trace)
+    }
+
+    /// [`SlotEvalTrace`] 付きで単一エントリ解錠を実行する内部実装。
+    fn unlock_with_entry_traced(
+        &mut self,
+        entry: &KekSlotEntry,
+        credential: SlotCredential<'_>,
+        vault_aad: &[u8],
+        trace: &mut SlotEvalTrace,
+    ) -> Result<(), VaultError> {
+        let kind = credential.slot_kind();
+        self.unlock_with_slot_fn(kind, |fallback_params, slot_valid| {
+            eval_entry_credential_traced(
+                Some(entry),
+                slot_valid,
+                credential,
+                vault_aad,
+                fallback_params,
+                trace,
+            )
+        })
+    }
+
+    /// Slot 0 (Argon2id マスターパスワード) エントリを用いて解錠パイプラインを実行する。
+    ///
+    /// 内部で [`Self::unlock_with_entry`] に処理を委譲する。
     ///
     /// # 前提条件
     ///
@@ -1651,10 +1727,12 @@ impl VaultEngine {
         password: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot0_with_secret(entry, password, &[], vault_aad)
+        self.unlock_with_entry(entry, SlotCredential::password(password), vault_aad)
     }
 
     /// ペッパー (`secret`) を併用し、Slot 0 エントリによる解錠パイプラインを実行する。
+    ///
+    /// 内部で [`Self::unlock_with_entry`] に処理を委譲する。
     ///
     /// # Errors
     ///
@@ -1666,10 +1744,14 @@ impl VaultEngine {
         secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        let mut trace = SlotEvalTrace::default();
-        self.unlock_with_slot0_with_secret_traced(entry, password, secret, vault_aad, &mut trace)
+        self.unlock_with_entry(
+            entry,
+            SlotCredential::password_with_secret(password, secret),
+            vault_aad,
+        )
     }
 
+    #[cfg(test)]
     fn unlock_with_slot0_with_secret_traced(
         &mut self,
         entry: &KekSlotEntry,
@@ -1678,22 +1760,17 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SlotKind::Argon2id, |fallback_params, slot_valid| {
-            eval_slot0_or_dummy(
-                Some(entry),
-                slot_valid,
-                password,
-                secret,
-                vault_aad,
-                fallback_params,
-                trace,
-            )
-        })
+        self.unlock_with_entry_traced(
+            entry,
+            SlotCredential::password_with_secret(password, secret),
+            vault_aad,
+            trace,
+        )
     }
 
     /// Slot 1 (WebAuthn PRF / HKDF-SHA256) エントリを用いて解錠パイプラインを実行する。
     ///
-    /// スロット無効時やフォーマット不正・PRF 長不足時にもダミー HKDF-SHA256 および AEAD 復号を実行する。
+    /// 内部で [`Self::unlock_with_entry`] に処理を委譲する。
     ///
     /// # Errors
     ///
@@ -1706,10 +1783,10 @@ impl VaultEngine {
         prf_secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        let mut trace = SlotEvalTrace::default();
-        self.unlock_with_slot1_traced(entry, prf_secret, vault_aad, &mut trace)
+        self.unlock_with_entry(entry, SlotCredential::prf(prf_secret), vault_aad)
     }
 
+    #[cfg(test)]
     fn unlock_with_slot1_traced(
         &mut self,
         entry: &KekSlotEntry,
@@ -1717,21 +1794,12 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SlotKind::Prf, |_, slot_valid| {
-            eval_hkdf_slot_or_dummy(
-                &SLOT1_SPEC,
-                Some(entry),
-                slot_valid,
-                prf_secret,
-                vault_aad,
-                trace,
-            )
-        })
+        self.unlock_with_entry_traced(entry, SlotCredential::prf(prf_secret), vault_aad, trace)
     }
 
     /// Slot 2 (生リカバリーシークレット) エントリを用いて解錠パイプラインを実行する。
     ///
-    /// スロット無効時やフォーマット不正・シークレット長不足時にもダミー HKDF-SHA256 および AEAD 復号を実行する。
+    /// 内部で [`Self::unlock_with_entry`] に処理を委譲する。
     ///
     /// # Errors
     ///
@@ -1744,10 +1812,11 @@ impl VaultEngine {
         recovery_secret: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        let mut trace = SlotEvalTrace::default();
-        self.unlock_with_slot2_traced(entry, recovery_secret, vault_aad, &mut trace)
+        self.unlock_with_entry(entry, SlotCredential::recovery(recovery_secret), vault_aad)
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn unlock_with_slot2_traced(
         &mut self,
         entry: &KekSlotEntry,
@@ -1755,21 +1824,17 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SlotKind::Recovery, |_, slot_valid| {
-            eval_hkdf_slot_or_dummy(
-                &SLOT2_SPEC,
-                Some(entry),
-                slot_valid,
-                recovery_secret,
-                vault_aad,
-                trace,
-            )
-        })
+        self.unlock_with_entry_traced(
+            entry,
+            SlotCredential::recovery(recovery_secret),
+            vault_aad,
+            trace,
+        )
     }
 
     /// Slot 2 (整形済み英数字リカバリーコード) エントリを用いて解錠パイプラインを実行する。
     ///
-    /// コード正準化エラーやスロット無効時にもダミー HKDF-SHA256 および AEAD 復号を実行する。
+    /// 内部で [`Self::unlock_with_entry`] に処理を委譲する。
     ///
     /// # Errors
     ///
@@ -1781,10 +1846,14 @@ impl VaultEngine {
         recovery_code: &[u8],
         vault_aad: &[u8],
     ) -> Result<(), VaultError> {
-        let mut trace = SlotEvalTrace::default();
-        self.unlock_with_slot2_code_traced(entry, recovery_code, vault_aad, &mut trace)
+        self.unlock_with_entry(
+            entry,
+            SlotCredential::recovery_code(recovery_code),
+            vault_aad,
+        )
     }
 
+    #[cfg(test)]
     fn unlock_with_slot2_code_traced(
         &mut self,
         entry: &KekSlotEntry,
@@ -1792,9 +1861,12 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SlotKind::Recovery, |_, slot_valid| {
-            eval_slot2_code_or_dummy(Some(entry), slot_valid, recovery_code, vault_aad, trace)
-        })
+        self.unlock_with_entry_traced(
+            entry,
+            SlotCredential::recovery_code(recovery_code),
+            vault_aad,
+            trace,
+        )
     }
 
     /// [`Vault`] コンテナ全体から Slot 0 を検索し、Vault ヘッダー AAD をバインドして解錠する。
@@ -1918,36 +1990,14 @@ impl VaultEngine {
             }
         };
 
-        match credential {
-            SlotCredential::Password { password, secret } => eval_slot0_or_dummy(
-                Some(entry),
-                slot_valid,
-                password,
-                secret,
-                header_aad,
-                self.dummy_argon2_params(),
-                trace,
-            ),
-            SlotCredential::Prf(prf_secret) => eval_hkdf_slot_or_dummy(
-                &SLOT1_SPEC,
-                Some(entry),
-                slot_valid,
-                prf_secret,
-                header_aad,
-                trace,
-            ),
-            SlotCredential::Recovery(recovery_secret) => eval_hkdf_slot_or_dummy(
-                &SLOT2_SPEC,
-                Some(entry),
-                slot_valid,
-                recovery_secret,
-                header_aad,
-                trace,
-            ),
-            SlotCredential::RecoveryCode(recovery_code) => {
-                eval_slot2_code_or_dummy(Some(entry), slot_valid, recovery_code, header_aad, trace)
-            }
-        }
+        eval_entry_credential_traced(
+            Some(entry),
+            slot_valid,
+            credential,
+            header_aad,
+            self.dummy_argon2_params(),
+            trace,
+        )
     }
 
     /// 指定された単一の [`SlotCredential`] に対応するスロットを [`Vault`] から検索して解錠する。
@@ -3614,6 +3664,114 @@ mod tests {
             prf_first_ns * 2 >= baseline_argon2_ns,
             "先行PRF成功時でも残余Slot 0のダミーArgon2id演算が実行される必要がある (prf_first={prf_first_ns}ns, baseline={baseline_argon2_ns}ns)。"
         );
+    }
+
+    #[test]
+    fn test_unlock_with_entry_all_credentials_and_error_handling() {
+        let dek = test_dek();
+        let header = test_header();
+        let header_aad = header.associated_data();
+        let params = test_params();
+        let salt = test_salt();
+        let salt32 = test_salt32();
+        let nonce = test_nonce();
+
+        let password = b"master-password";
+        let pepper = b"pepper-secret";
+        let prf = test_prf_secret();
+        let recovery = test_recovery_secret();
+
+        let slot0 =
+            wrap_dek_slot0_with_secret(&dek, password, &salt, &nonce, &params, pepper, &header_aad)
+                .expect("Slot 0 エントリの生成に成功。");
+        let slot1 = wrap_dek_slot1(&dek, &prf, &salt32, &nonce, &header_aad)
+            .expect("Slot 1 エントリの生成に成功。");
+        let slot2_raw = wrap_dek_slot2(&dek, &recovery, &salt32, &nonce, &header_aad)
+            .expect("Slot 2 生エントリの生成に成功。");
+        let slot2_code =
+            wrap_dek_slot2_code(&dek, TEST_RECOVERY_CODE, &salt32, &nonce, &header_aad)
+                .expect("Slot 2 コードエントリの生成に成功。");
+
+        // 1. Slot 0: ペッパー付き資格情報での解錠成功。
+        let mut engine0 = VaultEngine::from_slot_entries(core::slice::from_ref(&slot0))
+            .with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine0.unlock_with_entry(
+                &slot0,
+                SlotCredential::password_with_secret(password, pepper),
+                &header_aad
+            ),
+            Ok(())
+        );
+        assert_eq!(engine0.state(), VaultState::Unlocked);
+        assert_eq!(engine0.dek().unwrap().as_bytes(), dek.as_bytes());
+
+        // 2. 解錠済み状態での二重解錠試行は InvalidState となる。
+        assert_eq!(
+            engine0.unlock_with_entry(
+                &slot0,
+                SlotCredential::password_with_secret(password, pepper),
+                &header_aad
+            ),
+            Err(VaultError::InvalidState)
+        );
+
+        // 3. Slot 0: 不正パスワード時は AuthenticationFailed でマスキングされ Locked を維持する。
+        let mut engine0_fail = VaultEngine::from_slot_entries(core::slice::from_ref(&slot0))
+            .with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine0_fail.unlock_with_entry(
+                &slot0,
+                SlotCredential::password_with_secret(b"wrong-password", pepper),
+                &header_aad
+            ),
+            Err(VaultError::AuthenticationFailed)
+        );
+        assert_eq!(engine0_fail.state(), VaultState::Locked);
+
+        // 4. Slot 1: PRF 資格情報での解錠成功。
+        let mut engine1 = VaultEngine::from_slot_entries(core::slice::from_ref(&slot1))
+            .with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine1.unlock_with_entry(&slot1, SlotCredential::prf(&prf), &header_aad),
+            Ok(())
+        );
+        assert_eq!(engine1.state(), VaultState::Unlocked);
+
+        // 5. Slot 2: 生リカバリーシークレットでの解錠成功。
+        let mut engine2_raw = VaultEngine::from_slot_entries(core::slice::from_ref(&slot2_raw))
+            .with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine2_raw.unlock_with_entry(
+                &slot2_raw,
+                SlotCredential::recovery(&recovery),
+                &header_aad
+            ),
+            Ok(())
+        );
+        assert_eq!(engine2_raw.state(), VaultState::Unlocked);
+
+        // 6. Slot 2: 整形済みリカバリーコードでの解錠成功。
+        let mut engine2_code = VaultEngine::from_slot_entries(core::slice::from_ref(&slot2_code))
+            .with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine2_code.unlock_with_entry(
+                &slot2_code,
+                SlotCredential::recovery_code(TEST_RECOVERY_CODE),
+                &header_aad
+            ),
+            Ok(())
+        );
+        assert_eq!(engine2_code.state(), VaultState::Unlocked);
+
+        // 7. エントリ種別と資格情報種別の不一致(Slot 0 エントリに PRF 資格情報)
+        let mut engine_mismatch = VaultEngine::from_slot_entries(core::slice::from_ref(&slot0))
+            .with_dummy_argon2_params(test_params());
+        assert_eq!(
+            engine_mismatch.unlock_with_entry(&slot0, SlotCredential::prf(&prf), &header_aad),
+            Err(VaultError::AuthenticationFailed)
+        );
+        assert_eq!(engine_mismatch.state(), VaultState::Locked);
     }
 
     proptest! {
