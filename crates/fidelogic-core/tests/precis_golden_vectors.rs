@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 
 use fidelogic_core::{
-    PrecisError, VaultError, all_allowed, all_opaque_allowed, enforce_opaque_string_cps,
+    PrecisError, PrecisProfile, VaultError, all_opaque_allowed, enforce_opaque_string_cps,
     enforce_username_case_mapped_cps, opaque_string, precis_opaque_string,
     precis_username_case_mapped, username_case_mapped,
 };
@@ -368,54 +368,8 @@ mod json_parser {
 
 use json_parser::{JsonValue, parse_json};
 
-/// PRECIS 対象プロファイルの種別を表す列挙型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProfileKind {
-    UsernameCaseMapped,
-    OpaqueString,
-}
-
-impl ProfileKind {
-    /// デバッグ・アサーション表示用のプロファイル名。
-    const fn label(self) -> &'static str {
-        match self {
-            Self::UsernameCaseMapped => "UsernameCaseMapped",
-            Self::OpaqueString => "OpaqueString",
-        }
-    }
-
-    /// コードポイント列に対する検証付き正規化 API を実行する。
-    fn enforce_cps(self, cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
-        match self {
-            Self::UsernameCaseMapped => enforce_username_case_mapped_cps(cps),
-            Self::OpaqueString => enforce_opaque_string_cps(cps),
-        }
-    }
-
-    /// Rocq モデルと同型の `Option` 返却正規化 API を実行する。
-    fn precis_cps(self, cps: &[u32]) -> Option<Vec<u32>> {
-        match self {
-            Self::UsernameCaseMapped => precis_username_case_mapped(cps),
-            Self::OpaqueString => precis_opaque_string(cps),
-        }
-    }
-
-    /// UTF-8 文字列入力に対する正規化 API を実行する。
-    fn enforce_str(self, input: &str) -> Result<String, PrecisError> {
-        match self {
-            Self::UsernameCaseMapped => username_case_mapped(input),
-            Self::OpaqueString => opaque_string(input),
-        }
-    }
-
-    /// 正規化後のコードポイント列が対象プロファイルの許可条件を満たすか判定する。
-    fn all_allowed(self, cps: &[u32]) -> bool {
-        match self {
-            Self::UsernameCaseMapped => all_allowed(cps),
-            Self::OpaqueString => all_opaque_allowed(cps),
-        }
-    }
-}
+/// PRECIS 対象プロファイルの種別(コアの `PrecisProfile` を利用)
+type ProfileKind = PrecisProfile;
 
 /// JSON 内の期待エラー詳細。
 #[derive(Debug, Clone, PartialEq, Eq)]

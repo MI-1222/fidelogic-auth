@@ -480,6 +480,97 @@ pub fn opaque_string(input: &str) -> Result<String, PrecisError> {
     apply_str_profile(input, enforce_opaque_string_cps)
 }
 
+/// PRECIS プロファイル正準化の種別を表す列挙型。
+///
+/// RFC 8265 で規定される `UsernameCaseMapped` (Section 3.3) および
+/// `OpaqueString` (Section 4.2) の正準化戦略を表現する。
+/// 列挙型のメソッドを経由してゼロコスト静的ディスパッチによる一貫した正準化インターフェースを提供する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrecisProfile {
+    /// ユーザー名用プロファイル (`IdentifierClass` + Case Folding + NFC)。
+    UsernameCaseMapped,
+    /// パスワード・暗号シークレット用プロファイル (`FreeformClass` + 大小文字維持 + NFC)。
+    OpaqueString,
+}
+
+impl PrecisProfile {
+    /// プロファイルの識別名文字列を返す。
+    #[inline]
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::UsernameCaseMapped => "UsernameCaseMapped",
+            Self::OpaqueString => "OpaqueString",
+        }
+    }
+
+    /// 対象プロファイルにおいて指定コードポイントが禁止文字であるかを判定する。
+    #[inline]
+    #[must_use]
+    pub const fn is_disallowed_cp(self, cp: u32) -> bool {
+        match self {
+            Self::UsernameCaseMapped => is_disallowed_cp(cp),
+            Self::OpaqueString => is_opaque_disallowed_cp(cp),
+        }
+    }
+
+    /// コードポイント列のすべての要素が対象プロファイルで許可されているかを判定する。
+    #[inline]
+    #[must_use]
+    pub fn all_allowed(self, cps: &[u32]) -> bool {
+        match self {
+            Self::UsernameCaseMapped => all_allowed(cps),
+            Self::OpaqueString => all_opaque_allowed(cps),
+        }
+    }
+
+    /// コードポイント列を走査し、対象プロファイルで最初に検出された禁止コードポイントを返す。
+    #[inline]
+    #[must_use]
+    pub fn find_disallowed_cp(self, cps: &[u32]) -> Option<u32> {
+        match self {
+            Self::UsernameCaseMapped => find_disallowed_cp(cps),
+            Self::OpaqueString => find_opaque_disallowed_cp(cps),
+        }
+    }
+
+    /// コードポイント列に対して対象プロファイルの正準化を適用する。
+    ///
+    /// # Errors
+    ///
+    /// 入力が空であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+    #[cfg(feature = "alloc")]
+    #[inline]
+    pub fn enforce_cps(self, cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
+        match self {
+            Self::UsernameCaseMapped => enforce_username_case_mapped_cps(cps),
+            Self::OpaqueString => enforce_opaque_string_cps(cps),
+        }
+    }
+
+    /// `proofs/Theories/PrecisProfile.v` の仕様に対応する `Option` 返却ラッパー。
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub fn precis_cps(self, cps: &[u32]) -> Option<Vec<u32>> {
+        self.enforce_cps(cps).ok()
+    }
+
+    /// UTF-8 文字列に対して対象プロファイルの正準化を適用する。
+    ///
+    /// # Errors
+    ///
+    /// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+    #[cfg(feature = "alloc")]
+    #[inline]
+    pub fn enforce_str(self, input: &str) -> Result<String, PrecisError> {
+        match self {
+            Self::UsernameCaseMapped => username_case_mapped(input),
+            Self::OpaqueString => opaque_string(input),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -953,6 +1044,62 @@ mod tests {
         assert_eq!(opaque_string("user name"), Ok(String::from("user name")));
         assert_eq!(username_case_mapped("A\u{0308}"), Ok(String::from("ä")));
         assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
+    }
+
+    #[test]
+    fn test_precis_profile_dispatch() {
+        let user_prof = PrecisProfile::UsernameCaseMapped;
+        let opaque_prof = PrecisProfile::OpaqueString;
+
+        // label
+        assert_eq!(user_prof.label(), "UsernameCaseMapped");
+        assert_eq!(opaque_prof.label(), "OpaqueString");
+
+        // is_disallowed_cp
+        assert!(user_prof.is_disallowed_cp(0x20));
+        assert!(!opaque_prof.is_disallowed_cp(0x20));
+        assert!(user_prof.is_disallowed_cp(0x00));
+        assert!(opaque_prof.is_disallowed_cp(0x00));
+
+        // all_allowed & find_disallowed_cp
+        let with_space = [b'u' as u32, 0x20, b's' as u32];
+        assert!(!user_prof.all_allowed(&with_space));
+        assert!(opaque_prof.all_allowed(&with_space));
+        assert_eq!(user_prof.find_disallowed_cp(&with_space), Some(0x20));
+        assert_eq!(opaque_prof.find_disallowed_cp(&with_space), None);
+
+        // enforce_cps & precis_cps & enforce_str (feature = "alloc")
+        #[cfg(feature = "alloc")]
+        {
+            let input_cps = [85, 83, 69, 82]; // "USER"
+            assert_eq!(
+                user_prof.enforce_cps(&input_cps),
+                enforce_username_case_mapped_cps(&input_cps)
+            );
+            assert_eq!(
+                opaque_prof.enforce_cps(&input_cps),
+                enforce_opaque_string_cps(&input_cps)
+            );
+            assert_eq!(
+                user_prof.precis_cps(&input_cps),
+                precis_username_case_mapped(&input_cps)
+            );
+            assert_eq!(
+                opaque_prof.precis_cps(&input_cps),
+                precis_opaque_string(&input_cps)
+            );
+
+            assert_eq!(user_prof.enforce_str("User"), username_case_mapped("User"));
+            assert_eq!(opaque_prof.enforce_str("User"), opaque_string("User"));
+            assert_eq!(
+                user_prof.enforce_str("user name"),
+                Err(PrecisError::DisallowedCodePoint(0x0020))
+            );
+            assert_eq!(
+                opaque_prof.enforce_str("user name"),
+                Ok(alloc::string::String::from("user name"))
+            );
+        }
     }
 
     proptest! {
