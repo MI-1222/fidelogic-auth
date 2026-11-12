@@ -253,31 +253,46 @@ impl Argon2idSlotPayload {
             return Err(VaultError::Parse(TlvParseError::InvalidLength));
         }
 
-        let m_cost = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        let t_cost = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-        let p_cost = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        let (m_cost_bytes, rest) = bytes
+            .split_first_chunk::<4>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (t_cost_bytes, rest) = rest
+            .split_first_chunk::<4>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (p_cost_bytes, rest) = rest
+            .split_first_chunk::<4>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+
+        let m_cost = u32::from_be_bytes(*m_cost_bytes);
+        let t_cost = u32::from_be_bytes(*t_cost_bytes);
+        let p_cost = u32::from_be_bytes(*p_cost_bytes);
 
         let params = Argon2Params::custom(m_cost, t_cost, p_cost, Some(DEK_LEN))?;
         validate_slot0_argon2_params(&params)?;
 
-        let mut salt = [0u8; SLOT0_SALT_LEN];
-        salt.copy_from_slice(&bytes[12..28]);
+        let (salt, rest) = rest
+            .split_first_chunk::<SLOT0_SALT_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (nonce, rest) = rest
+            .split_first_chunk::<SLOT0_NONCE_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (ciphertext, rest) = rest
+            .split_first_chunk::<SLOT0_CIPHERTEXT_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (auth_tag, rest) = rest
+            .split_first_chunk::<SLOT0_TAG_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
 
-        let mut nonce = [0u8; SLOT0_NONCE_LEN];
-        nonce.copy_from_slice(&bytes[28..52]);
-
-        let mut ciphertext = [0u8; SLOT0_CIPHERTEXT_LEN];
-        ciphertext.copy_from_slice(&bytes[52..84]);
-
-        let mut auth_tag = [0u8; SLOT0_TAG_LEN];
-        auth_tag.copy_from_slice(&bytes[84..100]);
+        if !rest.is_empty() {
+            return Err(VaultError::Parse(TlvParseError::InvalidLength));
+        }
 
         Ok(Self {
             params,
-            salt,
-            nonce,
-            ciphertext,
-            auth_tag,
+            salt: *salt,
+            nonce: *nonce,
+            ciphertext: *ciphertext,
+            auth_tag: *auth_tag,
         })
     }
 
@@ -336,23 +351,28 @@ impl HkdfSlotFields {
             return Err(VaultError::Parse(TlvParseError::InvalidLength));
         }
 
-        let mut salt = [0u8; SLOT1_SALT_LEN];
-        salt.copy_from_slice(&bytes[0..32]);
+        let (salt, rest) = bytes
+            .split_first_chunk::<SLOT1_SALT_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (nonce, rest) = rest
+            .split_first_chunk::<SLOT1_NONCE_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (ciphertext, rest) = rest
+            .split_first_chunk::<SLOT1_CIPHERTEXT_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
+        let (auth_tag, rest) = rest
+            .split_first_chunk::<SLOT1_TAG_LEN>()
+            .ok_or(VaultError::Parse(TlvParseError::InvalidLength))?;
 
-        let mut nonce = [0u8; SLOT1_NONCE_LEN];
-        nonce.copy_from_slice(&bytes[32..56]);
-
-        let mut ciphertext = [0u8; SLOT1_CIPHERTEXT_LEN];
-        ciphertext.copy_from_slice(&bytes[56..88]);
-
-        let mut auth_tag = [0u8; SLOT1_TAG_LEN];
-        auth_tag.copy_from_slice(&bytes[88..104]);
+        if !rest.is_empty() {
+            return Err(VaultError::Parse(TlvParseError::InvalidLength));
+        }
 
         Ok(Self {
-            salt,
-            nonce,
-            ciphertext,
-            auth_tag,
+            salt: *salt,
+            nonce: *nonce,
+            ciphertext: *ciphertext,
+            auth_tag: *auth_tag,
         })
     }
 
