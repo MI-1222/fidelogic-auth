@@ -2101,13 +2101,9 @@ impl VaultEngine {
         let mut seen_kinds = [false; 3];
 
         // 先行スロットの成否や対象スロットの有無に関わらず、全候補に対して実演算またはダミー演算を1回実行する。
+        // 同一 SlotKind の複数候補(旧・新パスワード等)も順次評価し、後続の正しい候補による解錠を保証する。
         for &credential in credentials {
             let kind_idx = credential.slot_kind().as_slot_id() as usize;
-            if include_missing_slot_kinds && seen_kinds[kind_idx] {
-                // 全スロット平滑化モードでは各 SlotKind につき最大1回のみ評価し、
-                // 同一 SlotKind の重複提示による演算回数超過 (4回以上の演算実行) を防止する。
-                continue;
-            }
             seen_kinds[kind_idx] = true;
             if matched.is_some() {
                 self.run_dummy_for_credential_traced(vault, credential, &header_aad, &mut trace);
@@ -2169,8 +2165,8 @@ impl VaultEngine {
     ///
     /// 提示された `credentials` が特定スロットのみを含む場合でも、
     /// Vault 内の他スロット構成や認証成功スロットの種別に伴う実行時間差を隠蔽したい場合に使用する。
-    /// 同一 [`SlotKind`] の資格情報が複数提示された場合は、演算回数平滑化の不変条件(全 3 スロット種別分)を維持するため、
-    /// 各 [`SlotKind`] につき先頭の 1 件のみを評価し、後続の同一種別資格情報はスキップされる。
+    /// 同一 [`SlotKind`] の資格情報が複数提示された場合(旧・新パスワード候補など)もすべての候補を順次評価(またはダミー演算)し、
+    /// さらに未提示のスロット種別に対するダミー暗号演算を補完して実行時間を平滑化する。
     ///
     /// # Errors
     ///
@@ -3630,8 +3626,41 @@ mod tests {
         assert_eq!(engine_empty.state(), VaultState::Locked);
         assert!(engine_empty.is_safe_state());
 
-        // 重複 SlotKind を渡した場合でも各 SlotKind は最大1回のみ評価され、
-        // 常に全3スロット種別分の演算コスト(Argon2id 1回、HKDF 2回、AEAD 3回)に維持される。
+        // 同一 SlotKind の複数候補を渡した場合でもすべての候補が評価され、
+        // かつ 1 件目が誤り・2 件目が正当な資格情報の場合に正常に解錠できることを確認する。
+        let wrong_pw = b"wrong-password";
+        let correct_pw = b"pw";
+        let mut engine_multi =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let (multi_res, multi_trace) = engine_multi.unlock_vault_with_any_traced(
+            &vault,
+            &[
+                SlotCredential::password(wrong_pw),
+                SlotCredential::password(correct_pw),
+            ],
+            true,
+        );
+        assert_eq!(multi_res, Ok(SlotKind::Argon2id));
+        assert_eq!(multi_trace.argon2id_ops(), 2);
+        assert_eq!(multi_trace.hkdf_ops(), 2); // 未提示の PRF, Recovery 各1回
+        assert_eq!(multi_trace.total_kdf_ops(), 4);
+        assert_eq!(multi_trace.total_aead_ops(), 4);
+        assert_eq!(engine_multi.state(), VaultState::Unlocked);
+
+        // 公開ラッパー unlock_vault_with_all_slots でも同様に解錠できることを確認する。
+        let mut engine_multi_pub =
+            VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(test_params());
+        let pub_res = engine_multi_pub.unlock_vault_with_all_slots(
+            &vault,
+            &[
+                SlotCredential::password(wrong_pw),
+                SlotCredential::password(correct_pw),
+            ],
+        );
+        assert_eq!(pub_res, Ok(SlotKind::Argon2id));
+        assert_eq!(engine_multi_pub.state(), VaultState::Unlocked);
+
+        // 重複 SlotKind を渡した場合でも全候補が評価され、未提示スロット種別のダミー演算も補完される。
         let wrong_pw1 = b"wrong-pw-1";
         let wrong_pw2 = b"wrong-pw-2";
         let wrong_prf = [0x55u8; SLOT1_MIN_PRF_LEN];
@@ -3650,10 +3679,10 @@ mod tests {
             true,
         );
         assert_eq!(dup_res, Err(VaultError::AuthenticationFailed));
-        assert_eq!(dup_trace.argon2id_ops(), 1);
-        assert_eq!(dup_trace.hkdf_ops(), 2);
-        assert_eq!(dup_trace.total_kdf_ops(), 3);
-        assert_eq!(dup_trace.total_aead_ops(), 3);
+        assert_eq!(dup_trace.argon2id_ops(), 2);
+        assert_eq!(dup_trace.hkdf_ops(), 3);
+        assert_eq!(dup_trace.total_kdf_ops(), 5);
+        assert_eq!(dup_trace.total_aead_ops(), 5);
         assert_eq!(engine_dup.state(), VaultState::Locked);
         assert!(engine_dup.is_safe_state());
     }
@@ -4076,30 +4105,34 @@ mod tests {
             for &(kind_sel, use_valid_secret) in &cred_specs {
                 match kind_sel {
                     0 => {
-                        if !include_all || !seen[0] {
-                            expected_argon2_ops += 1;
-                        }
+                        expected_argon2_ops += 1;
                         seen[0] = true;
-                        creds.push(SlotCredential::password(if use_valid_secret { password } else { wrong_pw }));
+                        creds.push(SlotCredential::password(if use_valid_secret {
+                            password
+                        } else {
+                            wrong_pw
+                        }));
                     }
                     1 => {
-                        if !include_all || !seen[1] {
-                            expected_hkdf_ops += 1;
-                        }
+                        expected_hkdf_ops += 1;
                         seen[1] = true;
-                        creds.push(SlotCredential::prf(if use_valid_secret { &prf } else { &wrong_prf }));
+                        creds.push(SlotCredential::prf(if use_valid_secret {
+                            &prf
+                        } else {
+                            &wrong_prf
+                        }));
                     }
                     2 => {
-                        if !include_all || !seen[2] {
-                            expected_hkdf_ops += 1;
-                        }
+                        expected_hkdf_ops += 1;
                         seen[2] = true;
-                        creds.push(SlotCredential::recovery(if use_valid_secret { &recovery } else { &wrong_rec }));
+                        creds.push(SlotCredential::recovery(if use_valid_secret {
+                            &recovery
+                        } else {
+                            &wrong_rec
+                        }));
                     }
                     _ => {
-                        if !include_all || !seen[2] {
-                            expected_hkdf_ops += 1;
-                        }
+                        expected_hkdf_ops += 1;
                         seen[2] = true;
                         creds.push(SlotCredential::recovery_code(b"INVALID"));
                     }
