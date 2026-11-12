@@ -204,6 +204,7 @@ if dec_func_id is not None:
         # loop ブロックごとに内部の分岐命令数を検査(先頭の反復継続判定 br_if 1件のみ許容).
         loop_stack = []
         block_depth = 0
+        barrier_in_loop = False
         for rel_idx, line in enumerate(f_lines):
             stripped = line.strip()
             if re.match(r'^loop\b', stripped):
@@ -217,6 +218,7 @@ if dec_func_id is not None:
                 if loop_stack and loop_stack[-1][0] == block_depth:
                     _, l_start, l_branches, has_barrier_call = loop_stack.pop()
                     if has_barrier_call:
+                        barrier_in_loop = True
                         # ループ内では終端条件用の br_if 1件のみ許容し、if / br_table や複数 br_if を禁止.
                         non_br_if = [b for b in l_branches if b[2] != "br_if"]
                         if non_br_if or len(l_branches) > 1:
@@ -231,6 +233,22 @@ if dec_func_id is not None:
                     m_br = branch_pattern.search(line)
                     if m_br:
                         loop_stack[-1][2].append((start_line + rel_idx, stripped, m_br.group(1)))
+
+        # 完全アンロール展開等によりループ内にバリア呼び出しが存在しない場合の非ループ展開検証.
+        if not barrier_in_loop:
+            func_branches = []
+            for rel_idx, line in enumerate(f_lines):
+                m_br = branch_pattern.search(line)
+                if m_br:
+                    func_branches.append((start_line + rel_idx, line.strip(), m_br.group(1)))
+            non_br_if = [b for b in func_branches if b[2] != "br_if"]
+            if non_br_if or len(func_branches) > 1:
+                print(f"Error: [{profile}] fidelogic_wasm_vault_decrypt 配下の非ループ展開タグ照合関数 func {fid} に秘密依存の分岐が検出されました: {func_branches}", file=sys.stderr)
+                sys.exit(1)
+
+    if not checked_tag_funcs:
+        print(f"Error: [{profile}] 'fidelogic_wasm_vault_decrypt' 配下に subtle バリアを直接呼び出すタグ照合関数が検出されませんでした (checked_tag_funcs is empty)。", file=sys.stderr)
+        sys.exit(1)
 
     print(f"==> [{profile}] [SUCCESS] Verified fidelogic_wasm_vault_decrypt tag comparison (funcs {checked_tag_funcs}) preserves subtle barrier without early-exit branches.")
 EOF
