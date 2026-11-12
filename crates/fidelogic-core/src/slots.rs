@@ -1604,19 +1604,19 @@ impl VaultEngine {
     ///
     /// 外部公開API境界におけるオラクル排除のため、内部詳細エラーは [`VaultError::mask_auth_error`] により
     /// 単一の [`VaultError::AuthenticationFailed`] へ一様マスキングする。
-    fn unlock_with_slot_fn<F>(&mut self, slot_id: u8, unwrap_fn: F) -> Result<(), VaultError>
+    fn unlock_with_slot_fn<F>(&mut self, kind: SlotKind, unwrap_fn: F) -> Result<(), VaultError>
     where
         F: FnOnce(&Argon2Params, bool) -> Result<SecretBytes<DEK_LEN>, VaultError>,
     {
-        self.start_unlock(slot_id)
+        self.start_unlock(kind)
             .map_err(VaultError::mask_auth_error)?;
 
-        let slot_valid = self.slots().is_slot_valid(slot_id);
+        let slot_valid = self.slots().is_kind_valid(kind);
         let fallback_params = *self.dummy_argon2_params();
 
         match unwrap_fn(&fallback_params, slot_valid) {
             Ok(dek) => {
-                if let Err(err) = self.complete_unlock(slot_id, dek) {
+                if let Err(err) = self.complete_unlock(kind, dek) {
                     let _ = self.fail_unlock();
                     return Err(err.mask_auth_error());
                 }
@@ -1678,7 +1678,7 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_ARGON2ID, |fallback_params, slot_valid| {
+        self.unlock_with_slot_fn(SlotKind::Argon2id, |fallback_params, slot_valid| {
             eval_slot0_or_dummy(
                 Some(entry),
                 slot_valid,
@@ -1717,7 +1717,7 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_PRF, |_, slot_valid| {
+        self.unlock_with_slot_fn(SlotKind::Prf, |_, slot_valid| {
             eval_hkdf_slot_or_dummy(
                 &SLOT1_SPEC,
                 Some(entry),
@@ -1755,7 +1755,7 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, |_, slot_valid| {
+        self.unlock_with_slot_fn(SlotKind::Recovery, |_, slot_valid| {
             eval_hkdf_slot_or_dummy(
                 &SLOT2_SPEC,
                 Some(entry),
@@ -1792,7 +1792,7 @@ impl VaultEngine {
         vault_aad: &[u8],
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        self.unlock_with_slot_fn(SLOT_ID_RECOVERY, |_, slot_valid| {
+        self.unlock_with_slot_fn(SlotKind::Recovery, |_, slot_valid| {
             eval_slot2_code_or_dummy(Some(entry), slot_valid, recovery_code, vault_aad, trace)
         })
     }
@@ -1976,14 +1976,14 @@ impl VaultEngine {
         credential: SlotCredential<'_>,
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
-        let slot_id = credential.slot_kind().as_slot_id();
-        self.start_unlock(slot_id)
+        let kind = credential.slot_kind();
+        self.start_unlock(kind)
             .map_err(VaultError::mask_auth_error)?;
 
         let header_aad = vault.header.associated_data();
         match self.eval_vault_credential_traced(vault, credential, &header_aad, trace) {
             Ok(dek) => {
-                if let Err(err) = self.complete_unlock(slot_id, dek) {
+                if let Err(err) = self.complete_unlock(kind, dek) {
                     let _ = self.fail_unlock();
                     return Err(err.mask_auth_error());
                 }
@@ -2011,10 +2011,10 @@ impl VaultEngine {
             return (Err(VaultError::AuthenticationFailed), trace);
         }
 
-        let start_slot_id = credentials
+        let start_kind = credentials
             .first()
-            .map_or(SLOT_ID_ARGON2ID, |cred| cred.slot_kind().as_slot_id());
-        if let Err(err) = self.start_unlock(start_slot_id) {
+            .map_or(SlotKind::Argon2id, |cred| cred.slot_kind());
+        if let Err(err) = self.start_unlock(start_kind) {
             return (Err(err.mask_auth_error()), trace);
         }
 
@@ -2044,7 +2044,7 @@ impl VaultEngine {
         }
 
         match matched {
-            Some((kind, dek)) => match self.complete_unlock(kind.as_slot_id(), dek) {
+            Some((kind, dek)) => match self.complete_unlock(kind, dek) {
                 Ok(()) => (Ok(kind), trace),
                 Err(err) => {
                     let _ = self.fail_unlock();

@@ -395,7 +395,7 @@ fn test_locked_buffer_memory_hygiene_on_zeroize_and_drop() {
 #[cfg(all(feature = "alloc", feature = "profile-vault"))]
 mod vault_memory_hygiene_tests {
     use super::*;
-    use fidelogic_core::envelope::{SLOT_ID_ARGON2ID, SLOT_ID_PRF, VaultState};
+    use fidelogic_core::envelope::{SLOT_ID_PRF, VaultState};
     use fidelogic_core::kdf::{
         Argon2Params, HKDF_SHA256_MAX_OUTPUT_LEN, hkdf_sha256_derive, hkdf_sha256_derive_32,
         hkdf_sha256_derive_vec,
@@ -408,8 +408,8 @@ mod vault_memory_hygiene_tests {
     };
     use fidelogic_core::tlv::{EntryPayload, TlvRecord, Vault, VaultHeader};
     use fidelogic_core::{
-        AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, CryptoError, KEY_LEN, TAG_LEN, VaultCipher,
-        VaultEngine, VaultError, XCHACHA20_POLY1305_NONCE_LEN,
+        AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, CryptoError, KEY_LEN, SlotKind, SlotStatus,
+        TAG_LEN, VaultCipher, VaultEngine, VaultError, XCHACHA20_POLY1305_NONCE_LEN,
     };
 
     /// 固定長 32 バイトの鍵検査用センチネル。
@@ -1050,20 +1050,23 @@ mod vault_memory_hygiene_tests {
 
                 // 状態遷移・スロット契約違反エラー時でも complete_unlock に渡された DEK は即座に消去される。
                 engine
-                    .start_unlock(SLOT_ID_ARGON2ID)
+                    .set_slot_status(SlotKind::Recovery, SlotStatus::Invalid)
+                    .expect("set_slot_status に成功。");
+                engine
+                    .start_unlock(SlotKind::Argon2id)
                     .expect("start_unlock に成功。");
                 assert_eq!(
-                    engine.complete_unlock(99, SecretBytes::new(DEK_SENTINEL)),
-                    Err(VaultError::SlotNotFound)
+                    engine.complete_unlock(SlotKind::Recovery, SecretBytes::new(DEK_SENTINEL)),
+                    Err(VaultError::AuthenticationFailed)
                 );
                 assert!(engine.observe_dek().is_none());
                 assert!(engine.is_safe_state());
                 assert_eq!(
-                    engine.complete_unlock(SLOT_ID_PRF, SecretBytes::new(DEK_SENTINEL)),
+                    engine.complete_unlock(SlotKind::Prf, SecretBytes::new(DEK_SENTINEL)),
                     Ok(())
                 );
                 assert_eq!(
-                    engine.complete_unlock(SLOT_ID_ARGON2ID, SecretBytes::new(DEK_SENTINEL)),
+                    engine.complete_unlock(SlotKind::Argon2id, SecretBytes::new(DEK_SENTINEL)),
                     Err(VaultError::InvalidState)
                 );
                 drop(engine);
