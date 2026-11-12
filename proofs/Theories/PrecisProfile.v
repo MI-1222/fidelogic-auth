@@ -358,6 +358,72 @@ Qed.
 (******************************************************************************)
 
 (** [MODEL]
+    Unicode Zs (Space_Separator) カテゴリ文字判定関数 (RFC 8265 Section 4.2.2)。
+    対象コードポイント:
+    - 0x0020 (SPACE)
+    - 0x00A0 (NO-BREAK SPACE)
+    - 0x1680 (OGHAM SPACE MARK)
+    - 0x2000..0x200A (EN QUAD .. HAIR SPACE)
+    - 0x202F (NARROW NO-BREAK SPACE)
+    - 0x205F (MEDIUM MATHEMATICAL SPACE)
+    - 0x3000 (IDEOGRAPHIC SPACE) *)
+Definition is_zs_space (cp : CodePoint) : bool :=
+  (cp =? 32) || (cp =? 160) || (cp =? 5760) ||
+  in_range 8192 8202 cp ||
+  (cp =? 8239) || (cp =? 8287) || (cp =? 12288).
+
+(** [MODEL]
+    Unicode Zs カテゴリ文字を ASCII 空白 (0x20) へマッピングする純粋関数 (RFC 8265 Section 4.2.2)。
+    対象外のコードポイントは変更せずそのまま返す。 *)
+Definition map_zs_to_space (cp : CodePoint) : CodePoint :=
+  if is_zs_space cp then 32 else cp.
+
+(** [MODEL]
+    文字列全体の Unicode Zs カテゴリ文字を ASCII 空白 (0x20) へマッピングする。 *)
+Definition precis_map_zs (s : PrecisString) : PrecisString :=
+  map map_zs_to_space s.
+
+(** [SPEC]
+    ASCII 空白文字に対する Zs 判定の真値性補題。 *)
+Lemma space_is_zs :
+  is_zs_space 32 = true.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    ASCII 空白文字に対する Zs マッピングの恒等性補題。 *)
+Lemma map_zs_space_id :
+  map_zs_to_space 32 = 32.
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    Zs マッピング関数の冪等性補題。 *)
+Lemma map_zs_to_space_idempotent : forall (cp : CodePoint),
+  map_zs_to_space (map_zs_to_space cp) = map_zs_to_space cp.
+Proof.
+  intros cp.
+  unfold map_zs_to_space.
+  destruct (is_zs_space cp) eqn:H.
+  - reflexivity.
+  - rewrite H. reflexivity.
+Qed.
+
+(** [SPEC]
+    Zs 文字列マッピング関数の冪等性補題。 *)
+Lemma precis_map_zs_idempotent : forall (s : PrecisString),
+  precis_map_zs (precis_map_zs s) = precis_map_zs s.
+Proof.
+  intros s.
+  unfold precis_map_zs.
+  rewrite map_map.
+  apply map_ext.
+  apply map_zs_to_space_idempotent.
+Qed.
+
+(** [MODEL]
     FreeformClass 用の禁止コードポイント判定関数 (RFC 7564 / RFC 8264 Section 4.3.3, RFC 8265 Section 4.2 向けモデル)。
     OpaqueString プロファイルでは ASCII 空白文字 (0x20) を許可するため、
     is_space を除外し、制御文字、サロゲート、私用領域、非文字、範囲外文字のみを禁止とする。 *)
@@ -1559,17 +1625,105 @@ Proof.
     reflexivity.
 Qed.
 
+(** [SPEC]
+    合成可能ペアの合成結果コードポイントに対する Zs 非該当性補題。
+    合成結果 (Latin: 192..255, Hangul: 44032..55203) は Zs 空白文字に該当しない。 *)
+Lemma compose_pair_not_zs : forall (c1 c2 c' : CodePoint),
+  compose_pair c1 c2 = Some c' ->
+  is_zs_space c' = false.
+Proof.
+  intros c1 c2 c' Hcomp.
+  apply compose_pair_range in Hcomp as [Hlat | Hhangul].
+  - unfold is_zs_space.
+    destruct (c' =? 32) eqn:E32; [apply Z.eqb_eq in E32; lia |].
+    destruct (c' =? 160) eqn:E160; [apply Z.eqb_eq in E160; lia |].
+    destruct (c' =? 5760) eqn:E5760; [apply Z.eqb_eq in E5760; lia |].
+    assert (Hnr : in_range 8192 8202 c' = false) by (apply in_range_false; lia).
+    rewrite Hnr.
+    destruct (c' =? 8239) eqn:E8239; [apply Z.eqb_eq in E8239; lia |].
+    destruct (c' =? 8287) eqn:E8287; [apply Z.eqb_eq in E8287; lia |].
+    destruct (c' =? 12288) eqn:E12288; [apply Z.eqb_eq in E12288; lia |].
+    reflexivity.
+  - unfold is_zs_space.
+    destruct (c' =? 32) eqn:E32; [apply Z.eqb_eq in E32; lia |].
+    destruct (c' =? 160) eqn:E160; [apply Z.eqb_eq in E160; lia |].
+    destruct (c' =? 5760) eqn:E5760; [apply Z.eqb_eq in E5760; lia |].
+    assert (Hnr : in_range 8192 8202 c' = false) by (apply in_range_false; lia).
+    rewrite Hnr.
+    destruct (c' =? 8239) eqn:E8239; [apply Z.eqb_eq in E8239; lia |].
+    destruct (c' =? 8287) eqn:E8287; [apply Z.eqb_eq in E8287; lia |].
+    destruct (c' =? 12288) eqn:E12288; [apply Z.eqb_eq in E12288; lia |].
+    reflexivity.
+Qed.
+
+(** [SPEC]
+    合成可能ペアの合成結果に対する Zs マッピング保存補題。 *)
+Lemma map_zs_preserves_composed : forall (c1 c2 c' : CodePoint),
+  compose_pair c1 c2 = Some c' ->
+  map_zs_to_space c' = c'.
+Proof.
+  intros c1 c2 c' Hcomp.
+  unfold map_zs_to_space.
+  rewrite (compose_pair_not_zs c1 c2 c' Hcomp).
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    Zs マッピング済み文字列に対する NFC 正規化結果の Zs マッピング保存補題。 *)
+Lemma map_zs_string_nfc_mapped_id : forall (s : PrecisString),
+  precis_map_zs (precis_nfc_normalize (precis_map_zs s)) =
+  precis_nfc_normalize (precis_map_zs s).
+Proof.
+  intros s.
+  set (mapped := precis_map_zs s).
+  assert (Hmapped_id : forall cp, In cp mapped -> map_zs_to_space cp = cp).
+  { intros cp Hin. subst mapped.
+    apply in_map_iff in Hin as [x [Hx Hin_s]].
+    subst cp.
+    apply map_zs_to_space_idempotent. }
+  unfold precis_map_zs.
+  induction mapped as [f IH] using (well_founded_induction (well_founded_ltof _ (@length _))).
+  unfold ltof in IH.
+  destruct f as [| c1 [| c2 rest2]].
+  - reflexivity.
+  - cbn. f_equal.
+    apply Hmapped_id. left. reflexivity.
+  - rewrite precis_nfc_normalize_cons_cons.
+    destruct (compose_pair c1 c2) as [c' |] eqn:Hcomp.
+    + destruct rest2 as [| c3 rest3].
+      * cbn [map]. f_equal.
+        apply (map_zs_preserves_composed c1 c2 c' Hcomp).
+      * destruct (compose_pair c' c3) as [c'' |] eqn:Hcomp2.
+        { cbn [map]. f_equal.
+          - apply (map_zs_preserves_composed c' c3 c'' Hcomp2).
+          - apply (IH rest3).
+            + simpl length. lia.
+            + intros cp Hin. apply Hmapped_id. right. right. right. exact Hin. }
+        { cbn [map]. f_equal.
+          - apply (map_zs_preserves_composed c1 c2 c' Hcomp).
+          - apply (IH (c3 :: rest3)).
+            + simpl length. lia.
+            + intros cp Hin. apply Hmapped_id. right. right. exact Hin. }
+    + cbn [map]. f_equal.
+      * apply Hmapped_id. left. reflexivity.
+      * apply (IH (c2 :: rest2)).
+        { simpl length. lia. }
+        { intros cp Hin. apply Hmapped_id. right. exact Hin. }
+Qed.
+
 (** [MODEL]
     OpaqueString 正準化関数 (RFC 8265 Section 4.2)。
     1. 空文字列は拒絶 (None)。
-    2. 大文字小文字マッピングは適用せず、Unicode 正規化形式 NFC のみを適用。
-    3. 正規化後の文字列に対して FreeformClass 禁止コードポイント検査を実施。
-    4. 禁止文字が含まれていれば拒絶 (None)、全文字合法であれば正準化結果 (Some) を返却する。 *)
+    2. Unicode Zs (Space_Separator) カテゴリ文字を ASCII 空白 (0x20) へマッピング (Section 4.2.2)。
+    3. 大文字小文字マッピングは適用せず、Unicode 正規化形式 NFC を適用。
+    4. 正規化後の文字列に対して FreeformClass 禁止コードポイント検査を実施。
+    5. 禁止文字が含まれていれば拒絶 (None)、全文字合法であれば正準化結果 (Some) を返却する。 *)
 Definition precis_opaque_string (s : PrecisString) : option PrecisString :=
   match s with
   | [] => None
   | _ =>
-      let normalized := precis_nfc_normalize s in
+      let mapped := precis_map_zs s in
+      let normalized := precis_nfc_normalize mapped in
       if all_opaque_allowed normalized then
         Some normalized
       else
@@ -1585,7 +1739,7 @@ Proof.
   intros s s' H.
   destruct s as [| c rest]; [ discriminate H | ].
   unfold precis_opaque_string in H. cbv zeta in H.
-  destruct (all_opaque_allowed (precis_nfc_normalize (c :: rest))) eqn:He; [ | discriminate H ].
+  destruct (all_opaque_allowed (precis_nfc_normalize (precis_map_zs (c :: rest)))) eqn:He; [ | discriminate H ].
   injection H as Heq; subst s'.
   apply precis_nfc_normalize_not_empty.
 Qed.
@@ -1599,7 +1753,7 @@ Proof.
   intros s s' H.
   destruct s as [| c rest]; [ discriminate H | ].
   unfold precis_opaque_string in H. cbv zeta in H.
-  destruct (all_opaque_allowed (precis_nfc_normalize (c :: rest))) eqn:He; [ | discriminate H ].
+  destruct (all_opaque_allowed (precis_nfc_normalize (precis_map_zs (c :: rest)))) eqn:He; [ | discriminate H ].
   injection H as Heq; subst s'.
   exact He.
 Qed.
@@ -1650,15 +1804,23 @@ Proof.
   intros s s' H.
   destruct s as [| c rest]; [ discriminate H | ].
   unfold precis_opaque_string in H. cbv zeta in H.
-  set (norm := precis_nfc_normalize (c :: rest)) in *.
+  set (mapped := precis_map_zs (c :: rest)) in *.
+  set (norm := precis_nfc_normalize mapped) in *.
   destruct (all_opaque_allowed norm) eqn:He; [ | discriminate H ].
   injection H as Heq; subst s'.
   unfold precis_opaque_string.
   destruct norm as [| c' rest'] eqn:Hnorm.
-  - destruct (precis_nfc_normalize_cons c rest) as [h [t Hcons]].
-    unfold norm in Hnorm.
-    rewrite Hcons in Hnorm. discriminate Hnorm.
-  - assert (Hnorm_id : precis_nfc_normalize (c' :: rest') = c' :: rest').
+  - exfalso.
+    assert (Hnot_nil : precis_nfc_normalize mapped <> []).
+    { subst mapped. cbn [precis_map_zs].
+      apply precis_nfc_normalize_not_empty. }
+    apply Hnot_nil. exact Hnorm.
+  - assert (Hmap_id : precis_map_zs (c' :: rest') = c' :: rest').
+    { rewrite <- Hnorm.
+      subst norm.
+      apply map_zs_string_nfc_mapped_id. }
+    rewrite Hmap_id.
+    assert (Hnorm_id : precis_nfc_normalize (c' :: rest') = c' :: rest').
     { rewrite <- Hnorm.
       subst norm.
       apply nfc_normalize_idempotent. }
@@ -1671,6 +1833,24 @@ Qed.
     テストベクタ検証補題: 空白文字を含むパスワードが OpaqueString で拒絶されず正準化されることの検証。 *)
 Lemma opaque_string_password_with_space :
   precis_opaque_string [112; 97; 115; 115; 32; 119; 111; 114; 100] =
+  Some [112; 97; 115; 115; 32; 119; 111; 114; 100].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    テストベクタ検証補題: 非 ASCII 空白文字 (NBSP 160) を含むパスワードが ASCII 空白 (32) にマッピングされて正準化されることの検証 (RFC 8265 Section 4.2.2)。 *)
+Lemma opaque_string_nbsp_mapped :
+  precis_opaque_string [112; 97; 115; 115; 160; 119; 111; 114; 100] =
+  Some [112; 97; 115; 115; 32; 119; 111; 114; 100].
+Proof.
+  reflexivity.
+Qed.
+
+(** [SPEC]
+    テストベクタ検証補題: 全角スペース (12288) を含むパスワードが ASCII 空白 (32) にマッピングされて正準化されることの検証。 *)
+Lemma opaque_string_ideographic_space_mapped :
+  precis_opaque_string [112; 97; 115; 115; 12288; 119; 111; 114; 100] =
   Some [112; 97; 115; 115; 32; 119; 111; 114; 100].
 Proof.
   reflexivity.
