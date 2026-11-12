@@ -537,7 +537,9 @@ Qed.
 (** [MODEL]
     単一ペアに対する Unicode 正準合成 (Canonical Composition) 写像関数。
     基底文字 (Base) と結合文字 (Combining Mark) のペアを合成文字へと縮約する。
-    - Latin 基底文字 ('A', 'C', 'E', 'I', 'O', 'U', 'a', 'c', 'e', 'i', 'o', 'u') と
+    有界モデルとして対象合成ペアは以下に定義する組のみに限定され、
+    連続結合文字に対する正準結合クラス (CCC) 順の並べ替えや NFD 再分解は扱わない。
+    - Latin 基底文字 ('A', 'C', 'E', 'I', 'N', 'O', 'U', 'Y', 'a', 'c', 'e', 'i', 'n', 'o', 'u', 'y') と
       ダイアクリティカルマーク (Grave, Acute, Circumflex, Tilde, Diaeresis, Ring above, Cedilla) の合成。
     - ハングル Jamo (L, V) の音節合成 (0x1100..0x1112 + 0x1161..0x1175 -> 0xAC00..0xD7A3)。
     - ハングル音節 LV と終声 Jamo T (0x11A8..0x11C2) の音節合成 (LV + T -> LVT)。
@@ -570,6 +572,10 @@ Definition compose_pair (c1 c2 : CodePoint) : option CodePoint :=
     else if c2 =? 770 then Some 206
     else if c2 =? 776 then Some 207
     else None
+  (* Latin 'N' (78) *)
+  else if c1 =? 78 then
+    if c2 =? 771 then Some 209
+    else None
   (* Latin 'O' (79) *)
   else if c1 =? 79 then
     if c2 =? 768 then Some 210
@@ -584,6 +590,10 @@ Definition compose_pair (c1 c2 : CodePoint) : option CodePoint :=
     else if c2 =? 769 then Some 218
     else if c2 =? 770 then Some 219
     else if c2 =? 776 then Some 220
+    else None
+  (* Latin 'Y' (89) *)
+  else if c1 =? 89 then
+    if c2 =? 769 then Some 221
     else None
   (* Latin 'a' (97) *)
   else if c1 =? 97 then
@@ -612,6 +622,10 @@ Definition compose_pair (c1 c2 : CodePoint) : option CodePoint :=
     else if c2 =? 770 then Some 238
     else if c2 =? 776 then Some 239
     else None
+  (* Latin 'n' (110) *)
+  else if c1 =? 110 then
+    if c2 =? 771 then Some 241
+    else None
   (* Latin 'o' (111) *)
   else if c1 =? 111 then
     if c2 =? 768 then Some 242
@@ -627,6 +641,11 @@ Definition compose_pair (c1 c2 : CodePoint) : option CodePoint :=
     else if c2 =? 770 then Some 251
     else if c2 =? 776 then Some 252
     else None
+  (* Latin 'y' (121) *)
+  else if c1 =? 121 then
+    if c2 =? 769 then Some 253
+    else if c2 =? 776 then Some 255
+    else None
   (* Hangul L + V *)
   else if (4352 <=? c1) && (c1 <=? 4370) && (4449 <=? c2) && (c2 <=? 4469) then
     Some (compose_hangul_syllable c1 c2)
@@ -639,11 +658,11 @@ Definition compose_pair (c1 c2 : CodePoint) : option CodePoint :=
 
 (** [SPEC]
     合成後コードポイントの出力値域補題。
-    正準合成の結果は、Latin 合成文字領域 (192..252) または
+    正準合成の結果は、Latin 合成文字領域 (192..255) または
     ハングル音節領域 (44032..55203) のいずれかに属することを示す。 *)
 Lemma compose_pair_range : forall (c1 c2 c' : CodePoint),
   compose_pair c1 c2 = Some c' ->
-  (192 <= c' <= 252 \/ 44032 <= c' <= 55203).
+  (192 <= c' <= 255 \/ 44032 <= c' <= 55203).
 Proof.
   intros c1 c2 c' H.
   unfold compose_pair in H.
@@ -698,14 +717,18 @@ Proof.
     destruct (x =? 67); [ reflexivity | ].
     destruct (x =? 69); [ reflexivity | ].
     destruct (x =? 73); [ reflexivity | ].
+    destruct (x =? 78); [ reflexivity | ].
     destruct (x =? 79); [ reflexivity | ].
     destruct (x =? 85); [ reflexivity | ].
+    destruct (x =? 89); [ reflexivity | ].
     destruct (x =? 97); [ reflexivity | ].
     destruct (x =? 99); [ reflexivity | ].
     destruct (x =? 101); [ reflexivity | ].
     destruct (x =? 105); [ reflexivity | ].
+    destruct (x =? 110); [ reflexivity | ].
     destruct (x =? 111); [ reflexivity | ].
     destruct (x =? 117); [ reflexivity | ].
+    destruct (x =? 121); [ reflexivity | ].
     assert (Hc1 : (4449 <=? c') = false) by (apply Z.leb_gt; lia).
     assert (Hc2 : (4520 <=? c') = false) by (apply Z.leb_gt; lia).
     rewrite Hc1, Hc2.
@@ -723,14 +746,18 @@ Proof.
     destruct (x =? 67); [ reflexivity | ].
     destruct (x =? 69); [ reflexivity | ].
     destruct (x =? 73); [ reflexivity | ].
+    destruct (x =? 78); [ reflexivity | ].
     destruct (x =? 79); [ reflexivity | ].
     destruct (x =? 85); [ reflexivity | ].
+    destruct (x =? 89); [ reflexivity | ].
     destruct (x =? 97); [ reflexivity | ].
     destruct (x =? 99); [ reflexivity | ].
     destruct (x =? 101); [ reflexivity | ].
     destruct (x =? 105); [ reflexivity | ].
+    destruct (x =? 110); [ reflexivity | ].
     destruct (x =? 111); [ reflexivity | ].
     destruct (x =? 117); [ reflexivity | ].
+    destruct (x =? 121); [ reflexivity | ].
     assert (Hc1 : (c' <=? 4469) = false) by (apply Z.leb_gt; lia).
     assert (Hc2 : (c' <=? 4546) = false) by (apply Z.leb_gt; lia).
     rewrite Hc1, Hc2.
@@ -740,9 +767,9 @@ Qed.
 
 (** [SPEC]
     Latin 合成文字の左側不活性性補題。
-    Latin 合成文字 (192..252) は更なる合成の左オペランドになり得ないことを示す。 *)
+    Latin 合成文字 (192..255) は更なる合成の左オペランドになり得ないことを示す。 *)
 Lemma compose_latin_terminal_left : forall (c' : CodePoint),
-  192 <= c' <= 252 ->
+  192 <= c' <= 255 ->
   forall (x : CodePoint), compose_pair c' x = None.
 Proof.
   intros c' Hlat x.
@@ -821,13 +848,16 @@ Proof.
           apply Z.leb_le in Hl2; lia
       end.
     + (* Hangul LV + T 分岐: LVT の左オペランド不活性性 *)
-      repeat rewrite Bool.andb_true_iff in E12.
-      destruct E12 as [[[[Hlv1 Hlv2] Hmod] Ht1] Ht2].
-      injection Hcomp2 as Heq; subst c''.
-      apply Z.leb_le in Hlv1; apply Z.leb_le in Hlv2.
-      apply Z.eqb_eq in Hmod.
-      apply Z.leb_le in Ht1; apply Z.leb_le in Ht2.
-      apply compose_hangul_trailing_terminal_left; [split; assumption | assumption | split; assumption].
+      match goal with
+      | E : (_ && _)%bool = true |- _ =>
+          repeat rewrite Bool.andb_true_iff in E;
+          destruct E as [[[[Hlv1 Hlv2] Hmod] Ht1] Ht2];
+          injection Hcomp2 as Heq; subst c'';
+          apply Z.leb_le in Hlv1; apply Z.leb_le in Hlv2;
+          apply Z.eqb_eq in Hmod;
+          apply Z.leb_le in Ht1; apply Z.leb_le in Ht2;
+          apply compose_hangul_trailing_terminal_left; [split; assumption | assumption | split; assumption]
+      end.
     + discriminate Hcomp2.
 Qed.
 
@@ -907,6 +937,8 @@ Qed.
 (** [MODEL]
     Unicode 正規化形式 NFC (Normalization Form C) を適用する純粋関数。
     リストを走査し、隣接する正準合成可能ペアを決定論的に縮約する。
+    対象となる合成ペアは `compose_pair` に定義されたもののみに限定され、
+    連続結合文字の正準結合クラス (CCC) 順の並べ替えや NFD 再分解は有界モデルの対象外とする。
     ハングル音節合成 (L + V + T -> LVT) に対応するため、
     初声 L と中声 V の合成 (LV) の直後に終声 T が後続する場合は
     連続して LVT 音節へと完全合成する。 *)
@@ -1272,14 +1304,20 @@ Proof.
     destruct (c1 =? 73) eqn:E73.
     { apply Z.eqb_eq in E73. subst c1.
       unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+    destruct (c1 =? 78) eqn:E78.
+    { apply Z.eqb_eq in E78. subst c1.
+      unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
     destruct (c1 =? 79) eqn:E79.
     { apply Z.eqb_eq in E79. subst c1.
       unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
     destruct (c1 =? 85) eqn:E85.
     { apply Z.eqb_eq in E85. subst c1.
       unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
+    destruct (c1 =? 89) eqn:E89.
+    { apply Z.eqb_eq in E89. subst c1.
+      unfold precis_fold_cp in Hfold. cbn in Hfold. lia. }
     unfold compose_pair in Hcomp.
-    rewrite E65, E67, E69, E73, E79, E85 in Hcomp.
+    rewrite E65, E67, E69, E73, E78, E79, E85, E89 in Hcomp.
     repeat (
       match goal with
       | H : context [ if ?b then _ else _ ] |- _ =>

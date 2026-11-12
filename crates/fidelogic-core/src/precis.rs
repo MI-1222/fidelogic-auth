@@ -224,7 +224,10 @@ pub const fn compose_hangul_trailing(lv: u32, t: u32) -> u32 {
 /// 単一ペアに対する Unicode 正準合成 (Canonical Composition) を適用する。
 ///
 /// `PrecisProfile.v` (`compose_pair`) と同一の合成規則に従い、
-/// Latin 基底文字 + 結合ダイアクリティカルマーク、およびハングル Jamo (`L + V`, `LV + T`) を合成する。
+/// Latin 基底文字 (`A/a`, `C/c`, `E/e`, `I/i`, `N/n`, `O/o`, `U/u`, `Y/y`) +
+/// 結合ダイアクリティカルマーク、およびハングル Jamo (`L + V`, `LV + T`) を合成する。
+///
+/// 有界モデルとして、対象となる合成ペアは本関数に定義された組のみに限定される。
 #[must_use]
 pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
     match (c1, c2) {
@@ -262,6 +265,9 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
         (105, 769) => Some(237),
         (105, 770) => Some(238),
         (105, 776) => Some(239),
+        // Latin 'N' (78) / 'n' (110)。
+        (78, 771) => Some(209),
+        (110, 771) => Some(241),
         // Latin 'O' (79) / 'o' (111)。
         (79, 768) => Some(210),
         (79, 769) => Some(211),
@@ -282,6 +288,10 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
         (117, 769) => Some(250),
         (117, 770) => Some(251),
         (117, 776) => Some(252),
+        // Latin 'Y' (89) / 'y' (121)。
+        (89, 769) => Some(221),
+        (121, 769) => Some(253),
+        (121, 776) => Some(255),
         // ハングル L + V および LV + T。
         _ if in_range(HANGUL_L_BASE, HANGUL_L_END, c1)
             && in_range(HANGUL_V_BASE, HANGUL_V_END, c2) =>
@@ -301,6 +311,9 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
 /// コードポイント列に対して Unicode 正準合成 (NFC) を適用する。
 ///
 /// `PrecisProfile.v` (`precis_nfc_normalize`) に一致する。
+/// 対象となる合成ペアは [`compose_pair`] 定義分に限定され、
+/// 連続する結合文字の正準結合クラス (CCC) 順による並べ替えや NFD 再分解は、
+/// 有界モデルの対象外であり未実装である。
 #[cfg(feature = "alloc")]
 #[must_use]
 pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
@@ -681,6 +694,29 @@ mod tests {
         assert_eq!(
             precis_nfc_normalize(&[65, 776, 4352, 4449, 4520, b'z' as u32]),
             alloc::vec![196, 44033, b'z' as u32]
+        );
+
+        // Latin-1 残余合成ペア (Ñ/ñ, Ý/ý, ÿ) および大文字・小文字混在正規化の検証。
+        assert_eq!(compose_pair(b'N' as u32, 0x0303), Some('Ñ' as u32));
+        assert_eq!(compose_pair(b'n' as u32, 0x0303), Some('ñ' as u32));
+        assert_eq!(compose_pair(b'Y' as u32, 0x0301), Some('Ý' as u32));
+        assert_eq!(compose_pair(b'y' as u32, 0x0301), Some('ý' as u32));
+        assert_eq!(compose_pair(b'y' as u32, 0x0308), Some('ÿ' as u32));
+        assert_eq!(
+            username_case_mapped("Español"),
+            username_case_mapped("Espan\u{0303}ol")
+        );
+        assert_eq!(
+            username_case_mapped("ESPAÑOL"),
+            username_case_mapped("ESPAN\u{0303}OL")
+        );
+        assert_eq!(
+            username_case_mapped("Ýýÿ"),
+            username_case_mapped("Y\u{0301}y\u{0301}y\u{0308}")
+        );
+        assert_eq!(
+            opaque_string("Español Ýýÿ"),
+            opaque_string("Espan\u{0303}ol Y\u{0301}y\u{0301}y\u{0308}")
         );
     }
 
