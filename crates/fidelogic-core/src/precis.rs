@@ -138,28 +138,28 @@ pub const fn is_disallowed_cp(cp: u32) -> bool {
 #[inline]
 #[must_use]
 pub fn all_allowed(cps: &[u32]) -> bool {
-    find_disallowed_cp(cps).is_none()
+    PrecisProfile::UsernameCaseMapped.all_allowed(cps)
 }
 
 /// コードポイント列を先頭から走査し、最初に検出された禁止コードポイントを返す。
 #[inline]
 #[must_use]
 pub fn find_disallowed_cp(cps: &[u32]) -> Option<u32> {
-    cps.iter().copied().find(|&cp| is_disallowed_cp(cp))
+    PrecisProfile::UsernameCaseMapped.find_disallowed_cp(cps)
 }
 
 /// コードポイント列のすべての要素が `FreeformClass` (`OpaqueString`) で許可されているかを判定する。
 #[inline]
 #[must_use]
 pub fn all_opaque_allowed(cps: &[u32]) -> bool {
-    find_opaque_disallowed_cp(cps).is_none()
+    PrecisProfile::OpaqueString.all_allowed(cps)
 }
 
 /// コードポイント列を先頭から走査し、`FreeformClass` で最初に検出された禁止コードポイントを返す。
 #[inline]
 #[must_use]
 pub fn find_opaque_disallowed_cp(cps: &[u32]) -> Option<u32> {
-    cps.iter().copied().find(|&cp| is_opaque_disallowed_cp(cp))
+    PrecisProfile::OpaqueString.find_disallowed_cp(cps)
 }
 
 /// 単一コードポイントに対する純粋関数型 Case Folding (大文字小文字マッピング) を適用する。
@@ -518,20 +518,14 @@ impl PrecisProfile {
     #[inline]
     #[must_use]
     pub fn all_allowed(self, cps: &[u32]) -> bool {
-        match self {
-            Self::UsernameCaseMapped => all_allowed(cps),
-            Self::OpaqueString => all_opaque_allowed(cps),
-        }
+        self.find_disallowed_cp(cps).is_none()
     }
 
     /// コードポイント列を走査し、対象プロファイルで最初に検出された禁止コードポイントを返す。
     #[inline]
     #[must_use]
     pub fn find_disallowed_cp(self, cps: &[u32]) -> Option<u32> {
-        match self {
-            Self::UsernameCaseMapped => find_disallowed_cp(cps),
-            Self::OpaqueString => find_opaque_disallowed_cp(cps),
-        }
+        cps.iter().copied().find(|&cp| self.is_disallowed_cp(cp))
     }
 
     /// コードポイント列に対して対象プロファイルの正準化を適用する。
