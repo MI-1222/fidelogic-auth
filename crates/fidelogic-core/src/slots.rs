@@ -1631,9 +1631,12 @@ fn eval_entry_credential_traced(
     }
 }
 
-/// Vault 内から Slot 0 の有効な [`Argon2Params`] を抽出し、取得不能時はフォールバックを返す。
-fn resolve_vault_slot0_argon2_params(vault: &Vault, fallback: &Argon2Params) -> Argon2Params {
-    if let Ok(entry) = find_slot_entry(&vault.slots, SLOT_ID_ARGON2ID)
+/// スロットエントリ一覧から Slot 0 の有効な [`Argon2Params`] を抽出し、取得不能時はフォールバックを返す。
+fn resolve_slot_entries_slot0_argon2_params(
+    entries: &[KekSlotEntry],
+    fallback: &Argon2Params,
+) -> Argon2Params {
+    if let Ok(entry) = find_slot_entry(entries, SLOT_ID_ARGON2ID)
         && let Ok(payload) = Argon2idSlotPayload::from_slot_entry(entry)
     {
         return payload.params;
@@ -1641,11 +1644,22 @@ fn resolve_vault_slot0_argon2_params(vault: &Vault, fallback: &Argon2Params) -> 
     resolve_valid_argon2_params(fallback)
 }
 
+/// Vault 内から Slot 0 の有効な [`Argon2Params`] を抽出し、取得不能時はフォールバックを返す。
+#[inline]
+fn resolve_vault_slot0_argon2_params(vault: &Vault, fallback: &Argon2Params) -> Argon2Params {
+    resolve_slot_entries_slot0_argon2_params(&vault.slots, fallback)
+}
+
 impl VaultEngine {
     /// TLV の [`KekSlotEntry`] 一覧を検証し、施錠状態の新しい [`VaultEngine`] を生成する。
+    ///
+    /// エントリ群の中に有効な Slot 0 (Argon2id) が存在する場合はその [`Argon2Params`] をダミー演算用に初期設定し、
+    /// 不在または破損時はターゲット環境のデフォルトパラメータを採用する。
     #[must_use]
     pub fn from_slot_entries(entries: &[KekSlotEntry]) -> Self {
-        Self::new(inspect_kek_slots(entries))
+        let dummy_argon2_params =
+            resolve_slot_entries_slot0_argon2_params(entries, &Argon2Params::default_for_target());
+        Self::new(inspect_kek_slots(entries)).with_dummy_argon2_params(dummy_argon2_params)
     }
 
     /// 指定スロットの FSM 遷移 (`Locked -> Unlocking -> Unlocked` / `Locked`) と復号を共通実行する内部ヘルパー。
@@ -2002,12 +2016,14 @@ impl VaultEngine {
             }
         };
 
+        let dummy_argon2_params =
+            resolve_vault_slot0_argon2_params(vault, self.dummy_argon2_params());
         eval_entry_credential_traced(
             Some(entry),
             slot_valid,
             credential,
             header_aad,
-            self.dummy_argon2_params(),
+            &dummy_argon2_params,
             trace,
         )
     }
@@ -3830,6 +3846,84 @@ mod tests {
             engine.unlock_with_entry(&entry, SlotCredential::password(b"pw"), b"aad"),
             Err(VaultError::AuthenticationFailed)
         );
+    }
+
+    #[test]
+    fn test_vault_engine_from_slot_entries_inherits_slot0_argon2_params() {
+        let dek = test_dek();
+        let custom_params = Argon2Params::fast_test().with_m_cost(128);
+        let header = test_header();
+        let entry = wrap_dek_slot0(
+            &dek,
+            b"test_password",
+            &[1u8; SLOT0_SALT_LEN],
+            &[2u8; SLOT0_NONCE_LEN],
+            &custom_params,
+            &header.associated_data(),
+        )
+        .expect("Slot 0 ラップに成功。");
+
+        // Slot 0 を含むエントリ群から生成した場合、その params が継承される。
+        let engine_with_slot0 = VaultEngine::from_slot_entries(core::slice::from_ref(&entry));
+        assert_eq!(
+            engine_with_slot0.dummy_argon2_params().m_cost(),
+            custom_params.m_cost()
+        );
+
+        // Slot 0 を含まないエントリ群から生成した場合、default_for_target にフォールバックする。
+        let prf_entry = wrap_dek_slot1(
+            &dek,
+            &[3u8; 32],
+            &[4u8; SLOT1_SALT_LEN],
+            &[5u8; SLOT1_NONCE_LEN],
+            &header.associated_data(),
+        )
+        .expect("Slot 1 ラップに成功。");
+        let engine_without_slot0 =
+            VaultEngine::from_slot_entries(core::slice::from_ref(&prf_entry));
+        assert_eq!(
+            engine_without_slot0.dummy_argon2_params().m_cost(),
+            Argon2Params::default_for_target().m_cost()
+        );
+    }
+
+    #[test]
+    fn test_vault_engine_dummy_argon2_params_consistent_on_invalid_or_missing_slot0() {
+        let dek = test_dek();
+        let custom_params = Argon2Params::fast_test().with_m_cost(128);
+        let header = test_header();
+        let entry = wrap_dek_slot0(
+            &dek,
+            b"test_password",
+            &[1u8; SLOT0_SALT_LEN],
+            &[2u8; SLOT0_NONCE_LEN],
+            &custom_params,
+            &header.associated_data(),
+        )
+        .expect("Slot 0 ラップに成功。");
+        let vault = Vault::new(header, vec![entry], vec![]);
+
+        // 1. スロット無効化状態のエンジンでも、Vault内のカスタムパラメータでダミー演算が実行される。
+        let invalid_engine = VaultEngine::locked();
+        let mut trace = SlotEvalTrace::default();
+        let header_aad = vault.header.associated_data();
+        let res = invalid_engine.eval_vault_credential_traced(
+            &vault,
+            SlotCredential::password(b"wrong_password"),
+            &header_aad,
+            &mut trace,
+        );
+        assert_eq!(res.err(), Some(VaultError::AuthenticationFailed));
+        assert_eq!(trace.dummy_argon2id_ops, 1);
+        assert_eq!(trace.real_argon2id_ops, 0);
+
+        // 2. unlock_vault_with_all_slots で SlotKind::Argon2id が未提示の場合も同様にダミー演算が実行される。
+        let mut all_slots_engine = VaultEngine::from_slot_entries(&vault.slots);
+        let prf_cred = SlotCredential::prf(&[3u8; 32]);
+        let (all_res, all_trace) =
+            all_slots_engine.unlock_vault_with_any_traced(&vault, &[prf_cred], true);
+        assert_eq!(all_res.err(), Some(VaultError::AuthenticationFailed));
+        assert_eq!(all_trace.dummy_argon2id_ops, 1);
     }
 
     proptest! {
