@@ -470,6 +470,14 @@ impl VaultEngine {
             volatile_zeroize(dek.as_mut_slice());
         }
         self.dek = None;
+        // SAFETY: `Option<SecretBytes<DEK_LEN>>` は niche 最適化を持たず、
+        // 判別タグ `0` は `None` を表す。`self.dek = None` の代入に伴うスタック残骸の
+        // ペイロード上書きコピーを防ぎ、バッキングメモリ領域全体を確実にゼロ消去する。
+        unsafe {
+            let ptr = core::ptr::addr_of_mut!(self.dek).cast::<u8>();
+            let len = core::mem::size_of::<Option<SecretBytes<DEK_LEN>>>();
+            crate::zeroize::volatile_zeroize_raw(ptr, len);
+        }
     }
 
     /// 解錠処理を開始し、`Locked` から `Unlocking` へ遷移する (`StepStartUnlock`)。
@@ -996,6 +1004,17 @@ mod tests {
         assert_eq!(engine.state(), VaultState::Locked);
         assert!(engine.observe_dek().is_none());
         assert!(engine.is_safe_state());
+
+        // SAFETY: `engine` は生存しており、`dek_ptr` が指していたメモリ領域は
+        // `scrub_dek_in_place()` により揮発性ゼロ書き込み (`volatile_zeroize`) されている。
+        // コンパイラ最適化による読み飛ばしを抑止して物理メモリ上のゼロ消去を直接検証するため、各バイトを揮発性読み出しで確認する。
+        let observed_zero = unsafe {
+            (0..DEK_LEN).all(|offset| core::ptr::read_volatile(dek_ptr.add(offset)) == 0)
+        };
+        assert!(
+            observed_zero,
+            "lock() 実行後の DEK メモリ領域が確実にゼロクリアされていることを確認。"
+        );
     }
 
     fn arb_slot_status() -> impl Strategy<Value = SlotStatus> {
