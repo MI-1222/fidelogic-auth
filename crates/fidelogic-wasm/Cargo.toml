@@ -12,6 +12,7 @@ default = ["std", "profile-lite"]
 std = ["fidelogic-core/std"]
 profile-lite = ["fidelogic-core/profile-lite"]
 profile-vault = ["fidelogic-core/profile-vault"]
+ci-inspection = []
 
 [dependencies]
 fidelogic-core = { workspace = true }

@@ -69,6 +69,7 @@ pub extern "C" fn fidelogic_wasm_status() -> u32 {
     }
 }
 
+#[cfg(any(test, feature = "ci-inspection"))]
 /// Dead Store Elimination (DSE) 抑止検査用の外部C ABIエクスポート関数。
 ///
 /// 指定されたメモリ領域に対して揮発性ゼロ書き込みを実施する。
@@ -86,6 +87,7 @@ pub unsafe extern "C" fn fidelogic_wasm_zeroize_test(ptr: *mut u8, len: usize) {
     fidelogic_core::zeroize::volatile_zeroize(slice);
 }
 
+#[cfg(any(test, feature = "ci-inspection"))]
 /// 定数時間暗号照合ブロック(32バイト認証タグ・トークン照合)の外部C ABIエクスポート関数。
 ///
 /// 暗号照合ブロック内部にコンパイラ最適化による早期リターンや
@@ -387,7 +389,7 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, 
     }
 }
 
-#[cfg(feature = "profile-vault")]
+#[cfg(all(feature = "profile-vault", any(test, feature = "ci-inspection")))]
 /// サイズゲート計測用アンカー: LTOによる `tlv::serialize` のデッドコード除去を抑止する内部検証用スタブ。
 ///
 /// 本番API([`fidelogic_wasm_vault_deserialize`])から再シリアライズ副作用を分離するために独立させており、
