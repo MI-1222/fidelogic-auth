@@ -362,15 +362,37 @@ impl VaultEngine {
     }
 
     /// KEKスロット構成全体を更新する。
+    ///
+    /// # Errors
+    ///
+    /// 現在の状態が [`VaultState::Unlocking`] である場合は、
+    /// 解錠遷移中の不変条件保護のため [`VaultError::InvalidState`] を返す。
     #[inline]
-    pub fn set_slots(&mut self, slots: KekSlots) {
+    pub fn set_slots(&mut self, slots: KekSlots) -> Result<(), VaultError> {
+        if self.state == VaultState::Unlocking {
+            return Err(VaultError::InvalidState);
+        }
         self.slots = slots;
+        Ok(())
     }
 
     /// 指定されたスロット種別の健全性状態を更新する。
+    ///
+    /// # Errors
+    ///
+    /// 現在の状態が [`VaultState::Unlocking`] である場合は、
+    /// 解錠遷移中の不変条件保護のため [`VaultError::InvalidState`] を返す。
     #[inline]
-    pub fn set_slot_status(&mut self, kind: SlotKind, status: SlotStatus) {
+    pub fn set_slot_status(
+        &mut self,
+        kind: SlotKind,
+        status: SlotStatus,
+    ) -> Result<(), VaultError> {
+        if self.state == VaultState::Unlocking {
+            return Err(VaultError::InvalidState);
+        }
         self.slots.set_status(kind, status);
+        Ok(())
     }
 
     /// 現在のマシン状態が安全述語 `SafeState` を満たしているかを検証する。
@@ -837,6 +859,68 @@ mod tests {
     }
 
     #[test]
+    fn test_set_slots_and_slot_status_state_guards() {
+        let mut engine = VaultEngine::new(all_valid_slots());
+
+        // Locked状態: スロット更新および個別ステータス変更が可能。
+        let new_slots = KekSlots::new(SlotStatus::Invalid, SlotStatus::Valid, SlotStatus::Unset);
+        assert_eq!(engine.set_slots(new_slots), Ok(()));
+        assert_eq!(*engine.slots(), new_slots);
+        assert_eq!(
+            engine.set_slot_status(SlotKind::Argon2id, SlotStatus::Valid),
+            Ok(())
+        );
+        assert_eq!(
+            engine.slots().status_of(SlotKind::Argon2id),
+            SlotStatus::Valid
+        );
+
+        // Unlocking状態への遷移: 解錠処理中におけるスロット変更は不変条件保護のため拒絶される。
+        assert_eq!(engine.start_unlock(SLOT_ID_ARGON2ID), Ok(()));
+        assert_eq!(engine.state(), VaultState::Unlocking);
+
+        let rejected_slots = KekSlots::unset_all();
+        assert_eq!(
+            engine.set_slots(rejected_slots),
+            Err(VaultError::InvalidState),
+            "Unlocking状態でのset_slots拒絶に成功。"
+        );
+        assert_eq!(
+            engine.set_slot_status(SlotKind::Argon2id, SlotStatus::Invalid),
+            Err(VaultError::InvalidState),
+            "Unlocking状態でのset_slot_status拒絶に成功。"
+        );
+        // スロット構成が破壊されていないことを検証。
+        assert_eq!(
+            engine.slots().status_of(SlotKind::Argon2id),
+            SlotStatus::Valid
+        );
+
+        // 復号完了してUnlockedへ遷移: スロット更新が可能。
+        assert_eq!(
+            engine.complete_unlock(SLOT_ID_ARGON2ID, sample_dek(0x42)),
+            Ok(())
+        );
+        assert_eq!(engine.state(), VaultState::Unlocked);
+        assert_eq!(
+            engine.set_slot_status(SlotKind::Prf, SlotStatus::Invalid),
+            Ok(()),
+            "Unlocked状態でのset_slot_status更新に成功。"
+        );
+        assert_eq!(engine.slots().status_of(SlotKind::Prf), SlotStatus::Invalid);
+
+        // Zeroized状態へ隔離後: スロット更新が可能。
+        assert_eq!(engine.zeroize_key(), Ok(()));
+        assert_eq!(engine.state(), VaultState::Zeroized);
+        assert_eq!(
+            engine.set_slots(all_valid_slots()),
+            Ok(()),
+            "Zeroized状態でのset_slots更新に成功。"
+        );
+        assert_eq!(*engine.slots(), all_valid_slots());
+    }
+
+    #[test]
     fn test_zeroized_quarantine_blocks_unlock_until_reset() {
         let mut engine = VaultEngine::new(all_valid_slots());
         engine.start_unlock(SLOT_ID_RECOVERY).unwrap();
@@ -1007,6 +1091,44 @@ mod tests {
                 if prev_state == VaultState::Zeroized && ev != VaultEvent::Reset && res.is_err() {
                     prop_assert_eq!(engine.state(), VaultState::Zeroized);
                 }
+            }
+        }
+
+        #[test]
+        fn prop_set_slots_guards_unlocking_state(
+            initial_slots in arb_kek_slots(),
+            new_slots in arb_kek_slots(),
+            kind in prop_oneof![Just(SlotKind::Argon2id), Just(SlotKind::Prf), Just(SlotKind::Recovery)],
+            new_status in arb_slot_status(),
+            events in prop::collection::vec(arb_vault_event(), 0..16),
+            dek_seed in any::<u8>(),
+        ) {
+            let mut engine = VaultEngine::new(initial_slots);
+            for ev in events {
+                let _ = match ev {
+                    VaultEvent::StartUnlock(id) => engine.start_unlock(id),
+                    VaultEvent::UnlockSuccess(id) => engine.complete_unlock(id, sample_dek(dek_seed)),
+                    VaultEvent::UnlockFail => engine.fail_unlock(),
+                    VaultEvent::Lock => engine.lock(),
+                    VaultEvent::Zeroize => engine.zeroize_key(),
+                    VaultEvent::Reset => engine.reset(),
+                };
+            }
+
+            let state = engine.state();
+            let prev_slots = *engine.slots();
+
+            let res_slots = engine.set_slots(new_slots);
+            let res_status = engine.set_slot_status(kind, new_status);
+
+            if state == VaultState::Unlocking {
+                prop_assert_eq!(res_slots, Err(VaultError::InvalidState), "Unlocking状態でのset_slots拒絶検証に成功。");
+                prop_assert_eq!(res_status, Err(VaultError::InvalidState), "Unlocking状態でのset_slot_status拒絶検証に成功。");
+                prop_assert_eq!(*engine.slots(), prev_slots, "拒絶時のスロット構成不変性の検証に成功。");
+            } else {
+                prop_assert_eq!(res_slots, Ok(()), "非Unlocking状態でのset_slots成功検証に成功。");
+                prop_assert_eq!(res_status, Ok(()), "非Unlocking状態でのset_slot_status成功検証に成功。");
+                prop_assert_eq!(engine.slots().status_of(kind), new_status, "スロット更新反映の検証に成功。");
             }
         }
     }
