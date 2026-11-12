@@ -2,7 +2,7 @@
 //!
 //! 形式仕様 `proofs/Theories/PrecisProfile.v` に対応し、
 //! 禁止コードポイント判定、純粋関数型 Case Folding、正準合成 (NFC)、
-//! および `UsernameCaseMapped` プロファイル正準化を提供する。
+//! `UsernameCaseMapped` および `OpaqueString` プロファイル正準化を提供する。
 
 #[cfg(feature = "alloc")]
 use alloc::{string::String, vec::Vec};
@@ -106,20 +106,32 @@ pub const fn is_out_of_bounds(cp: u32) -> bool {
     cp > UNICODE_MAX_CODE_POINT
 }
 
-/// `IdentifierClass` (`UsernameCaseMapped`) における総合禁止コードポイント判定を行う。
+/// `FreeformClass` (`OpaqueString`) における総合禁止コードポイント判定を行う。
 ///
-/// RFC 7564 Section 8.1 および RFC 8265 Section 3.2 に準拠し、
-/// 範囲外文字、ASCII/非ASCII制御文字、空白 (`0x20`)、サロゲート、私用領域、非文字を禁止する。
+/// `proofs/Theories/PrecisProfile.v` のモデルに対応し、
+/// RFC 7564 (RFC 8264) Section 4.3.3 および RFC 8265 Section 4.2 に基づき、
+/// ASCII 空白 (`0x20`) を許可しつつ、範囲外文字、ASCII/非ASCII制御文字、
+/// サロゲート、私用領域、非文字を禁止する。
 #[inline]
 #[must_use]
-pub const fn is_disallowed_cp(cp: u32) -> bool {
+pub const fn is_opaque_disallowed_cp(cp: u32) -> bool {
     is_out_of_bounds(cp)
         || is_ascii_control(cp)
         || is_non_ascii_control(cp)
-        || is_space(cp)
         || is_surrogate(cp)
         || is_private_use(cp)
         || is_noncharacter(cp)
+}
+
+/// `IdentifierClass` (`UsernameCaseMapped`) における総合禁止コードポイント判定を行う。
+///
+/// `proofs/Theories/PrecisProfile.v` のモデルに対応し、
+/// RFC 7564 (RFC 8264) Section 4.2.3 および RFC 8265 Section 3.3 に基づき、
+/// `FreeformClass` の禁止文字に加えて ASCII 空白 (`0x20`) を禁止する。
+#[inline]
+#[must_use]
+pub const fn is_disallowed_cp(cp: u32) -> bool {
+    is_opaque_disallowed_cp(cp) || is_space(cp)
 }
 
 /// コードポイント列のすべての要素が `IdentifierClass` で許可されているかを判定する。
@@ -134,6 +146,20 @@ pub fn all_allowed(cps: &[u32]) -> bool {
 #[must_use]
 pub fn find_disallowed_cp(cps: &[u32]) -> Option<u32> {
     cps.iter().copied().find(|&cp| is_disallowed_cp(cp))
+}
+
+/// コードポイント列のすべての要素が `FreeformClass` (`OpaqueString`) で許可されているかを判定する。
+#[inline]
+#[must_use]
+pub fn all_opaque_allowed(cps: &[u32]) -> bool {
+    find_opaque_disallowed_cp(cps).is_none()
+}
+
+/// コードポイント列を先頭から走査し、`FreeformClass` で最初に検出された禁止コードポイントを返す。
+#[inline]
+#[must_use]
+pub fn find_opaque_disallowed_cp(cps: &[u32]) -> Option<u32> {
+    cps.iter().copied().find(|&cp| is_opaque_disallowed_cp(cp))
 }
 
 /// 単一コードポイントに対する純粋関数型 Case Folding (大文字小文字マッピング) を適用する。
@@ -308,7 +334,10 @@ pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
     out
 }
 
-/// コードポイント列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用する。
+/// コードポイント列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3 形式モデル) を適用する。
+///
+/// `proofs/Theories/PrecisProfile.v` の仕様に一致する範囲
+/// (限定 Case Folding、NFC 部分合成、および禁止文字検査; 幅マッピングおよび Bidi 規則は対象外) を実装する。
 ///
 /// 処理手順を以下に示す。
 /// 1. 空入力を拒絶 ([`PrecisError::EmptyInput`])。
@@ -341,19 +370,18 @@ pub fn precis_username_case_mapped(cps: &[u32]) -> Option<Vec<u32>> {
     enforce_username_case_mapped_cps(cps).ok()
 }
 
-/// UTF-8 文字列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用する。
-///
-/// # Errors
-///
-/// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+/// UTF-8 文字列をコードポイント列へ変換してプロファイル正準化を適用し、UTF-8 文字列へ再構築する共通ヘルパー。
 #[cfg(feature = "alloc")]
-pub fn username_case_mapped(input: &str) -> Result<String, PrecisError> {
+fn apply_str_profile<F>(input: &str, enforce_cps: F) -> Result<String, PrecisError>
+where
+    F: FnOnce(&[u32]) -> Result<Vec<u32>, PrecisError>,
+{
     if input.is_empty() {
         return Err(PrecisError::EmptyInput);
     }
 
     let cps: Vec<u32> = input.chars().map(|ch| ch as u32).collect();
-    let normalized = enforce_username_case_mapped_cps(&cps)?;
+    let normalized = enforce_cps(&cps)?;
 
     let mut out = String::with_capacity(input.len());
     for cp in normalized {
@@ -362,6 +390,65 @@ pub fn username_case_mapped(input: &str) -> Result<String, PrecisError> {
     }
 
     Ok(out)
+}
+
+/// UTF-8 文字列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用する。
+///
+/// # Errors
+///
+/// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+#[cfg(feature = "alloc")]
+pub fn username_case_mapped(input: &str) -> Result<String, PrecisError> {
+    apply_str_profile(input, enforce_username_case_mapped_cps)
+}
+
+/// コードポイント列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2 形式モデル) を適用する。
+///
+/// `proofs/Theories/PrecisProfile.v` の仕様に一致する範囲を実装する
+/// (RFC 8265 Section 4.2.2 の非 ASCII 空白 `Zs` -> `U+0020` マッピングおよび全 Unicode NFC テーブルは含まない)。
+///
+/// 処理手順を以下に示す。
+/// 1. 空入力を拒絶 ([`PrecisError::EmptyInput`])。
+/// 2. Case Folding を行わずに Unicode NFC 正規化 (`precis_nfc_normalize`) を適用。
+/// 3. `FreeformClass` 禁止コードポイント検査 (`find_opaque_disallowed_cp`) を実施し、
+///    ASCII 空白 (`0x20`) を許可しつつ制御文字・サロゲート・私用領域・非文字等を
+///    [`PrecisError::DisallowedCodePoint`] として拒絶する。
+///
+/// # Errors
+///
+/// 入力が空であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+#[cfg(feature = "alloc")]
+pub fn enforce_opaque_string_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
+    if cps.is_empty() {
+        return Err(PrecisError::EmptyInput);
+    }
+
+    let normalized = precis_nfc_normalize(cps);
+    if let Some(disallowed) = find_opaque_disallowed_cp(&normalized) {
+        return Err(PrecisError::DisallowedCodePoint(disallowed));
+    }
+
+    Ok(normalized)
+}
+
+/// `PrecisProfile.v` (`precis_opaque_string`) に対応する `Option` 返却ラッパー。
+#[cfg(feature = "alloc")]
+#[must_use]
+pub fn precis_opaque_string(cps: &[u32]) -> Option<Vec<u32>> {
+    enforce_opaque_string_cps(cps).ok()
+}
+
+/// UTF-8 文字列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2) を適用する。
+///
+/// 大文字・小文字の区別と ASCII 空白 (`0x20`) を保持したまま Unicode NFC 正規化を適用し、
+/// 制御文字・サロゲート・私用領域・非文字等の禁止コードポイントを拒絶する。
+///
+/// # Errors
+///
+/// 入力が空文字列であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
+#[cfg(feature = "alloc")]
+pub fn opaque_string(input: &str) -> Result<String, PrecisError> {
+    apply_str_profile(input, enforce_opaque_string_cps)
 }
 
 #[cfg(test)]
@@ -597,6 +684,195 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_opaque_disallowed_cp_boundaries() {
+        // ASCII 空白 (0x20) は OpaqueString (FreeformClass) で許可される。
+        assert!(!is_opaque_disallowed_cp(0x20));
+        assert!(is_disallowed_cp(0x20));
+
+        // 制御文字・サロゲート・私用領域・非文字・範囲外は禁止される。
+        for &cp in &[
+            0x00,
+            0x09,
+            0x0A,
+            0x0D,
+            0x1F,
+            0x7F,
+            0x80,
+            0x85,
+            0x9F,
+            0xD800,
+            0xDFFF,
+            0xE000,
+            0xF8FF,
+            0xF_0000,
+            0x10_FFFD,
+            0xFDD0,
+            0xFDEF,
+            0xFFFE,
+            0xFFFF,
+            0x10_FFFF,
+            0x11_0000,
+            u32::MAX,
+        ] {
+            assert!(is_opaque_disallowed_cp(cp));
+            assert!(is_disallowed_cp(cp));
+        }
+
+        // 一般文字 (ASCII大文字小文字、空白、日本語、絵文字等) は許可される。
+        for &cp in &[b'A' as u32, b'z' as u32, 0x20, 0xA0, 0x3042, 0x1F511] {
+            assert!(!is_opaque_disallowed_cp(cp));
+        }
+    }
+
+    #[test]
+    fn test_all_opaque_allowed_and_find_opaque_disallowed_cp() {
+        assert!(all_opaque_allowed(&[]));
+        assert!(all_opaque_allowed(&[
+            b'P' as u32,
+            0x20,
+            b'w' as u32,
+            0x3042
+        ]));
+        assert_eq!(
+            find_opaque_disallowed_cp(&[b'P' as u32, 0x20, b'w' as u32]),
+            None
+        );
+        assert_eq!(
+            find_opaque_disallowed_cp(&[b'a' as u32, 0x20, 0x1F, 0x00]),
+            Some(0x1F),
+            "空白をスキップし、最初に現れる FreeformClass 禁止文字が返されることを確認。"
+        );
+        assert!(!all_opaque_allowed(&[b'a' as u32, 0x20, 0xD800]));
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_precis_profile_v_opaque_golden_vectors() {
+        // PrecisProfile.v の precis_golden_suite (tc_expected_opaque) と全件一致を検証。
+        let cases: &[(&[u32], Option<&[u32]>)] = &[
+            (&[85, 115, 101, 114], Some(&[85, 115, 101, 114])),
+            (&[85, 83, 69, 82], Some(&[85, 83, 69, 82])),
+            (&[117, 115, 101, 114], Some(&[117, 115, 101, 114])),
+            (&[927, 931], Some(&[927, 931])),
+            (&[1048, 1074, 1072, 1085], Some(&[1048, 1074, 1072, 1085])),
+            (&[201], Some(&[201])),
+            (
+                &[117, 115, 101, 114, 32, 110, 97, 109, 101],
+                Some(&[117, 115, 101, 114, 32, 110, 97, 109, 101]),
+            ),
+            (&[], None),
+            (&[0], None),
+            (&[9], None),
+            (&[55296], None),
+            (&[57344], None),
+            (&[65535], None),
+            (&[64976], None),
+            (&[101, 769], Some(&[233])),
+            (&[65, 776], Some(&[196])),
+            (&[99, 807], Some(&[231])),
+            (&[4352, 4449], Some(&[44032])),
+            (&[4352, 4449, 4520], Some(&[44033])),
+            (&[44032, 4520], Some(&[44033])),
+        ];
+
+        for &(input, expected) in cases {
+            let actual = precis_opaque_string(input);
+            assert_eq!(
+                actual.as_deref(),
+                expected,
+                "PrecisProfile.v の OpaqueString ゴールデンベクタ {input:?} が一致することを検証。"
+            );
+        }
+
+        // opaque_string_password_with_space ("pass word") 検証。
+        assert_eq!(
+            precis_opaque_string(&[112, 97, 115, 115, 32, 119, 111, 114, 100]).as_deref(),
+            Some(&[112, 97, 115, 115, 32, 119, 111, 114, 100][..])
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_opaque_string_str_api() {
+        // 大文字小文字と ASCII 空白 (0x20) の保持。
+        assert_eq!(opaque_string("PassWord"), Ok(String::from("PassWord")));
+        assert_eq!(opaque_string("USER"), Ok(String::from("USER")));
+        assert_eq!(opaque_string("ΟΣ"), Ok(String::from("ΟΣ")));
+        assert_eq!(opaque_string("Иван"), Ok(String::from("Иван")));
+        assert_eq!(opaque_string("É"), Ok(String::from("É")));
+        assert_eq!(opaque_string("pass word"), Ok(String::from("pass word")));
+        assert_eq!(opaque_string("user name"), Ok(String::from("user name")));
+        assert_eq!(
+            opaque_string("  leading and trailing  "),
+            Ok(String::from("  leading and trailing  "))
+        );
+
+        // Unicode NFC 正規化 (大文字保持のまま結合文字を合成)。
+        assert_eq!(opaque_string("e\u{0301}"), Ok(String::from("é")));
+        assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
+        assert_eq!(opaque_string("c\u{0327}"), Ok(String::from("ç")));
+        assert_eq!(opaque_string("\u{1100}\u{1161}"), Ok(String::from("가")));
+        assert_eq!(
+            opaque_string("\u{1100}\u{1161}\u{11A8}"),
+            Ok(String::from("각"))
+        );
+        assert_eq!(opaque_string("\u{AC00}\u{11A8}"), Ok(String::from("각")));
+
+        // 空入力および禁止コードポイントの拒絶。
+        assert_eq!(opaque_string(""), Err(PrecisError::EmptyInput));
+        assert_eq!(
+            opaque_string("p\0w"),
+            Err(PrecisError::DisallowedCodePoint(0x0000))
+        );
+        assert_eq!(
+            opaque_string("p\tw"),
+            Err(PrecisError::DisallowedCodePoint(0x0009))
+        );
+        assert_eq!(
+            opaque_string("p\nw"),
+            Err(PrecisError::DisallowedCodePoint(0x000A))
+        );
+        assert_eq!(
+            opaque_string("p\x1Fw"),
+            Err(PrecisError::DisallowedCodePoint(0x001F))
+        );
+        assert_eq!(
+            opaque_string("p\x7Fw"),
+            Err(PrecisError::DisallowedCodePoint(0x007F))
+        );
+        assert_eq!(
+            opaque_string("p\u{0085}w"),
+            Err(PrecisError::DisallowedCodePoint(0x0085))
+        );
+        assert_eq!(
+            opaque_string("p\u{E000}w"),
+            Err(PrecisError::DisallowedCodePoint(0xE000))
+        );
+        assert_eq!(
+            opaque_string("p\u{FDD0}w"),
+            Err(PrecisError::DisallowedCodePoint(0xFDD0))
+        );
+        assert_eq!(
+            opaque_string("p\u{FFFF}w"),
+            Err(PrecisError::DisallowedCodePoint(0xFFFF))
+        );
+        assert_eq!(
+            opaque_string("p\u{10FFFF}w"),
+            Err(PrecisError::DisallowedCodePoint(0x10_FFFF))
+        );
+
+        // UsernameCaseMapped と OpaqueString のプロファイル境界差分。
+        assert_ne!(username_case_mapped("USER"), opaque_string("USER"));
+        assert_eq!(
+            username_case_mapped("user name"),
+            Err(PrecisError::DisallowedCodePoint(0x0020))
+        );
+        assert_eq!(opaque_string("user name"), Ok(String::from("user name")));
+        assert_eq!(username_case_mapped("A\u{0308}"), Ok(String::from("ä")));
+        assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
+    }
+
     proptest! {
         #[test]
         fn prop_case_fold_idempotent_and_preserves_allowed(cp in 0u32..=0x12_0000u32) {
@@ -604,6 +880,17 @@ mod tests {
             prop_assert_eq!(precis_fold_cp(folded), folded);
             if !is_disallowed_cp(cp) {
                 prop_assert!(!is_disallowed_cp(folded));
+            }
+        }
+
+        #[test]
+        fn prop_opaque_disallowed_implies_disallowed(cp in 0u32..=0x12_0000u32) {
+            if is_opaque_disallowed_cp(cp) {
+                prop_assert!(is_disallowed_cp(cp));
+            }
+            if cp == 0x20 {
+                prop_assert!(!is_opaque_disallowed_cp(cp));
+                prop_assert!(is_disallowed_cp(cp));
             }
         }
 
@@ -621,10 +908,31 @@ mod tests {
 
         #[cfg(feature = "alloc")]
         #[test]
+        fn prop_opaque_string_invariants(cps in proptest::collection::vec(0u32..=0x12_0000u32, 0..64)) {
+            if let Some(normalized) = precis_opaque_string(&cps) {
+                prop_assert!(!normalized.is_empty());
+                prop_assert!(normalized.len() <= cps.len());
+                prop_assert!(all_opaque_allowed(&normalized));
+                let re_normalized = precis_opaque_string(&normalized);
+                prop_assert_eq!(re_normalized.as_deref(), Some(normalized.as_slice()));
+            }
+        }
+
+        #[cfg(feature = "alloc")]
+        #[test]
         fn prop_username_case_mapped_str_idempotent(input in "\\PC{0,48}") {
             if let Ok(normalized) = username_case_mapped(&input) {
                 prop_assert!(!normalized.is_empty());
                 prop_assert_eq!(username_case_mapped(&normalized), Ok(normalized.clone()));
+            }
+        }
+
+        #[cfg(feature = "alloc")]
+        #[test]
+        fn prop_opaque_string_str_idempotent(input in "\\PC{0,48}") {
+            if let Ok(normalized) = opaque_string(&input) {
+                prop_assert!(!normalized.is_empty());
+                prop_assert_eq!(opaque_string(&normalized), Ok(normalized.clone()));
             }
         }
     }

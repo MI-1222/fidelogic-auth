@@ -17,15 +17,16 @@ pub use crate::kdf::{
     hkdf_sha256_derive_vec,
 };
 pub use crate::precis::{
-    UNICODE_MAX_CODE_POINT, all_allowed, compose_hangul_syllable, compose_hangul_trailing,
-    compose_pair, find_disallowed_cp, in_range, is_ascii_control, is_disallowed_cp,
-    is_non_ascii_control, is_noncharacter, is_out_of_bounds, is_private_use, is_space,
-    is_surrogate, precis_fold_char, precis_fold_cp,
+    UNICODE_MAX_CODE_POINT, all_allowed, all_opaque_allowed, compose_hangul_syllable,
+    compose_hangul_trailing, compose_pair, find_disallowed_cp, find_opaque_disallowed_cp, in_range,
+    is_ascii_control, is_disallowed_cp, is_non_ascii_control, is_noncharacter,
+    is_opaque_disallowed_cp, is_out_of_bounds, is_private_use, is_space, is_surrogate,
+    precis_fold_char, precis_fold_cp,
 };
 #[cfg(feature = "alloc")]
 pub use crate::precis::{
-    enforce_username_case_mapped_cps, precis_fold_string, precis_nfc_normalize,
-    precis_username_case_mapped, username_case_mapped,
+    enforce_opaque_string_cps, enforce_username_case_mapped_cps, opaque_string, precis_fold_string,
+    precis_nfc_normalize, precis_opaque_string, precis_username_case_mapped, username_case_mapped,
 };
 pub use crate::slots::{
     Argon2idSlotPayload, KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY, KdfKind,
@@ -264,6 +265,11 @@ mod tests {
             username_case_mapped(""),
             Err(PrecisError::EmptyInput),
             "profile_vault経由のPrecisError返却確認に成功。"
+        );
+        assert_eq!(
+            opaque_string("Pass Word\u{0020}A\u{0308}"),
+            Ok(alloc::string::String::from("Pass Word Ä")),
+            "profile_vault経由のopaque_string呼び出しに成功。"
         );
     }
 }

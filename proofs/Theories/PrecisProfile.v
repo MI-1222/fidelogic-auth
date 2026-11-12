@@ -103,8 +103,8 @@ Definition is_out_of_bounds (cp : CodePoint) : bool :=
   (cp <? 0) || (1114111 <? cp).
 
 (** [MODEL]
-    総合禁止コードポイント判定関数。
-    RFC 7564 Section 8.1 および RFC 8265 Section 3.2 に従い、
+    総合禁止コードポイント判定関数 (IdentifierClass 向けモデル)。
+    RFC 7564 (RFC 8264) Section 4.2.3 および RFC 8265 Section 3.3 に基づき、
     制御文字、空白、サロゲート、私用領域、非文字、および範囲外文字を禁止とする。 *)
 Definition is_disallowed_cp (cp : CodePoint) : bool :=
   is_out_of_bounds cp ||
@@ -358,8 +358,8 @@ Qed.
 (******************************************************************************)
 
 (** [MODEL]
-    FreeformClass 用の禁止コードポイント判定関数 (RFC 7564 Section 4.3 / RFC 8265 Section 4.2)。
-    OpaqueString プロファイルでは空白文字 (0x20) を許可するため、
+    FreeformClass 用の禁止コードポイント判定関数 (RFC 7564 / RFC 8264 Section 4.3.3, RFC 8265 Section 4.2 向けモデル)。
+    OpaqueString プロファイルでは ASCII 空白文字 (0x20) を許可するため、
     is_space を除外し、制御文字、サロゲート、私用領域、非文字、範囲外文字のみを禁止とする。 *)
 Definition is_opaque_disallowed_cp (cp : CodePoint) : bool :=
   is_out_of_bounds cp ||
