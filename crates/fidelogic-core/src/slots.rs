@@ -1567,11 +1567,15 @@ impl VaultEngine {
     }
 
     /// 指定スロットの FSM 遷移 (`Locked -> Unlocking -> Unlocked` / `Locked`) と復号を共通実行する内部ヘルパー。
+    ///
+    /// 外部公開API境界におけるオラクル排除のため、内部詳細エラーは [`VaultError::mask_auth_error`] により
+    /// 単一の [`VaultError::AuthenticationFailed`] へ一様マスキングする。
     fn unlock_with_slot_fn<F>(&mut self, slot_id: u8, unwrap_fn: F) -> Result<(), VaultError>
     where
         F: FnOnce(&Argon2Params, bool) -> Result<SecretBytes<DEK_LEN>, VaultError>,
     {
-        self.start_unlock(slot_id)?;
+        self.start_unlock(slot_id)
+            .map_err(VaultError::mask_auth_error)?;
 
         let slot_valid = self.slots().is_slot_valid(slot_id);
         let fallback_params = *self.dummy_argon2_params();
@@ -1580,13 +1584,13 @@ impl VaultEngine {
             Ok(dek) => {
                 if let Err(err) = self.complete_unlock(slot_id, dek) {
                     let _ = self.fail_unlock();
-                    return Err(err);
+                    return Err(err.mask_auth_error());
                 }
                 Ok(())
             }
             Err(err) => {
                 let _ = self.fail_unlock();
-                Err(err)
+                Err(err.mask_auth_error())
             }
         }
     }
@@ -1605,8 +1609,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 現在の状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - Slot 0 が `Valid` でない場合は [`VaultError::AuthenticationFailed`] を返す。
-    /// - フォーマット検証, 鍵導出, AEAD 復号のいずれかに失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット無効, フォーマット不正, KDF パラメータ不正, MAC 不一致などの認証失敗時は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_with_slot0(
         &mut self,
         entry: &KekSlotEntry,
@@ -1660,8 +1664,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 現在の状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - Slot 1 が `Valid` でない場合は [`VaultError::AuthenticationFailed`] を返す。
-    /// - フォーマット検証, PRF 長検証, AEAD 復号のいずれかに失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット無効, フォーマット不正, PRF 長不足, MAC 不一致などの認証失敗時は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_with_slot1(
         &mut self,
         entry: &KekSlotEntry,
@@ -1698,8 +1702,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 現在の状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - Slot 2 が `Valid` でない場合は [`VaultError::AuthenticationFailed`] を返す。
-    /// - フォーマット検証, シークレット長検証, AEAD 復号のいずれかに失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット無効, フォーマット不正, シークレット長不足, MAC 不一致などの認証失敗時は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_with_slot2(
         &mut self,
         entry: &KekSlotEntry,
@@ -1735,7 +1739,8 @@ impl VaultEngine {
     ///
     /// # Errors
     ///
-    /// [`Self::unlock_with_slot2`] および [`normalize_recovery_code`] のエラー条件に従う。
+    /// [`Self::unlock_with_slot2`] と同じく、状態不正時は [`VaultError::InvalidState`] を返し、
+    /// リカバリーコード正準化失敗を含むその他の認証失敗はすべて [`VaultError::AuthenticationFailed`] を返す。
     pub fn unlock_with_slot2_code(
         &mut self,
         entry: &KekSlotEntry,
@@ -1763,8 +1768,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - Slot 0 が存在しない場合は [`VaultError::SlotNotFound`]、重複時は [`VaultError::Parse`] を返す。
-    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット不在, 重複, フォーマット不正, MAC 不一致を含むすべての認証失敗は、
+    ///   オラクル排除のため [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_vault_with_password(
         &mut self,
         vault: &Vault,
@@ -1778,8 +1783,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - Slot 1 が存在しない場合は [`VaultError::SlotNotFound`]、重複時は [`VaultError::Parse`] を返す。
-    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット不在, 重複, フォーマット不正, PRF 長不足, MAC 不一致を含むすべての認証失敗は、
+    ///   オラクル排除のため [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_vault_with_prf(
         &mut self,
         vault: &Vault,
@@ -1794,8 +1799,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - Slot 2 が存在しない場合は [`VaultError::SlotNotFound`]、重複時は [`VaultError::Parse`] を返す。
-    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット不在, 重複, フォーマット不正, シークレット長不足, MAC 不一致を含むすべての認証失敗は、
+    ///   オラクル排除のため [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_vault_with_recovery(
         &mut self,
         vault: &Vault,
@@ -1809,7 +1814,8 @@ impl VaultEngine {
     ///
     /// # Errors
     ///
-    /// [`Self::unlock_vault_with_recovery`] および [`normalize_recovery_code`] のエラー条件に従う。
+    /// [`Self::unlock_vault_with_recovery`] と同じく、状態不正時は [`VaultError::InvalidState`] を返し、
+    /// リカバリーコード正準化失敗を含むその他の認証失敗はすべて [`VaultError::AuthenticationFailed`] を返す。
     pub fn unlock_vault_with_recovery_code(
         &mut self,
         vault: &Vault,
@@ -1918,8 +1924,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - 対象スロットが不在または重複している場合は [`VaultError::SlotNotFound`] / [`VaultError::Parse`] を返す。
-    /// - 認証または復号に失敗した場合は対応する [`VaultError`] を返す。
+    /// - スロット不在, 重複, フォーマット不正, 入力長/形式不正, MAC 不一致を含むすべての認証失敗は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_vault_with_credential(
         &mut self,
         vault: &Vault,
@@ -1937,20 +1943,21 @@ impl VaultEngine {
         trace: &mut SlotEvalTrace,
     ) -> Result<(), VaultError> {
         let slot_id = credential.slot_kind().as_slot_id();
-        self.start_unlock(slot_id)?;
+        self.start_unlock(slot_id)
+            .map_err(VaultError::mask_auth_error)?;
 
         let header_aad = vault.header.associated_data();
         match self.eval_vault_credential_traced(vault, credential, &header_aad, trace) {
             Ok(dek) => {
                 if let Err(err) = self.complete_unlock(slot_id, dek) {
                     let _ = self.fail_unlock();
-                    return Err(err);
+                    return Err(err.mask_auth_error());
                 }
                 Ok(())
             }
             Err(err) => {
                 let _ = self.fail_unlock();
-                Err(err)
+                Err(err.mask_auth_error())
             }
         }
     }
@@ -1974,12 +1981,11 @@ impl VaultEngine {
             .first()
             .map_or(SLOT_ID_ARGON2ID, |cred| cred.slot_kind().as_slot_id());
         if let Err(err) = self.start_unlock(start_slot_id) {
-            return (Err(err), trace);
+            return (Err(err.mask_auth_error()), trace);
         }
 
         let header_aad = vault.header.associated_data();
         let mut matched: Option<(SlotKind, SecretBytes<DEK_LEN>)> = None;
-        let mut last_err = VaultError::AuthenticationFailed;
         let mut seen_kinds = [false; 3];
 
         // 先行スロットの成否や対象スロットの有無に関わらず、全候補に対して実演算またはダミー演算を1回実行する。
@@ -1987,16 +1993,10 @@ impl VaultEngine {
             seen_kinds[credential.slot_kind().as_slot_id() as usize] = true;
             if matched.is_some() {
                 self.run_dummy_for_credential_traced(vault, credential, &header_aad, &mut trace);
-            } else {
-                match self.eval_vault_credential_traced(vault, credential, &header_aad, &mut trace)
-                {
-                    Ok(dek) => {
-                        matched = Some((credential.slot_kind(), dek));
-                    }
-                    Err(err) => {
-                        last_err = err;
-                    }
-                }
+            } else if let Ok(dek) =
+                self.eval_vault_credential_traced(vault, credential, &header_aad, &mut trace)
+            {
+                matched = Some((credential.slot_kind(), dek));
             }
         }
 
@@ -2014,12 +2014,12 @@ impl VaultEngine {
                 Ok(()) => (Ok(kind), trace),
                 Err(err) => {
                     let _ = self.fail_unlock();
-                    (Err(err), trace)
+                    (Err(err.mask_auth_error()), trace)
                 }
             },
             None => {
                 let _ = self.fail_unlock();
-                (Err(last_err), trace)
+                (Err(VaultError::AuthenticationFailed), trace)
             }
         }
     }
@@ -2035,8 +2035,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - `credentials` が空の場合は [`VaultError::AuthenticationFailed`] を返す。
-    /// - すべての資格情報で解錠に失敗した場合は最後に発生した [`VaultError`] を返す。
+    /// - `credentials` が空の場合や、すべての資格情報で解錠に失敗した場合は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_vault_with_any(
         &mut self,
         vault: &Vault,
@@ -2055,7 +2055,8 @@ impl VaultEngine {
     /// # Errors
     ///
     /// - 状態が `Locked` でない場合は [`VaultError::InvalidState`] を返す。
-    /// - すべての資格情報で解錠に失敗した場合は最後に発生した [`VaultError`] を返す (`credentials` が空の場合は [`VaultError::AuthenticationFailed`])。
+    /// - `credentials` が空の場合や、すべての資格情報で解錠に失敗した場合は、
+    ///   オラクル排除のため単一の [`VaultError::AuthenticationFailed`] へ一様マスキングして返す。
     pub fn unlock_vault_with_all_slots(
         &mut self,
         vault: &Vault,
@@ -2404,10 +2405,11 @@ mod tests {
         assert_eq!(engine.slots().status(SLOT_ID_PRF), SlotStatus::Unset);
         assert_eq!(engine.slots().status(SLOT_ID_RECOVERY), SlotStatus::Unset);
 
-        // 誤パスワードでの失敗時は Unlocking -> Locked に復帰し SafeState を維持する。
+        // 誤パスワードでの失敗時は Unlocking -> Locked に復帰し SafeState を維持しつつ、
+        // 外部境界オラクル排除のため単一の AuthenticationFailed を返す。
         assert_eq!(
             engine.unlock_vault_with_password(&parsed_vault, b"wrong-pass"),
-            Err(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+            Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(engine.state(), VaultState::Locked);
         assert!(engine.is_safe_state());
@@ -3108,7 +3110,8 @@ mod tests {
         let header_aad = header.associated_data();
         let prf = test_prf_secret();
 
-        // 空の Vault に対する各スロット解錠では SlotNotFound を返しつつダミー暗号演算を実行する。
+        // 空の Vault に対する各スロット解錠ではダミー暗号演算を実行し、
+        // 内部詳細エラー(SlotNotFound)を漏らさず単一の AuthenticationFailed を返す。
         let empty_vault = Vault::new(header, vec![], vec![]);
         let mut empty_engine = VaultEngine::from_slot_entries(&empty_vault.slots)
             .with_dummy_argon2_params(test_params());
@@ -3120,7 +3123,7 @@ mod tests {
                 SlotCredential::password(b"pw"),
                 &mut trace_pw,
             ),
-            Err(VaultError::SlotNotFound)
+            Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(trace_pw.dummy_argon2id_ops, 1);
         assert_eq!(trace_pw.dummy_aead_ops, 1);
@@ -3132,7 +3135,7 @@ mod tests {
                 SlotCredential::prf(&prf),
                 &mut trace_prf,
             ),
-            Err(VaultError::SlotNotFound)
+            Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(trace_prf.dummy_hkdf_ops, 1);
         assert_eq!(trace_prf.dummy_aead_ops, 1);
@@ -3144,13 +3147,14 @@ mod tests {
                 SlotCredential::recovery_code(b"invalid!"),
                 &mut trace_rec,
             ),
-            Err(VaultError::SlotNotFound)
+            Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(trace_rec.dummy_hkdf_ops, 1);
         assert_eq!(trace_rec.dummy_aead_ops, 1);
         assert_eq!(empty_engine.state(), VaultState::Locked);
 
-        // 重複スロットおよび短小入力, 破損フォーマットでもダミー演算がちょうど 1 回実行される。
+        // 重複スロットおよび短小入力, 破損フォーマットでもダミー演算がちょうど 1 回実行され、
+        // 外部境界では単一の AuthenticationFailed へ一様マスキングされる。
         let slot1 =
             wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
         let dup_vault = Vault::new(header, vec![slot1.clone(), slot1.clone()], vec![]);
@@ -3163,7 +3167,7 @@ mod tests {
                 SlotCredential::prf(&prf),
                 &mut trace_dup,
             ),
-            Err(VaultError::Parse(TlvParseError::InvalidFormat))
+            Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(trace_dup.dummy_hkdf_ops, 1);
         assert_eq!(trace_dup.dummy_aead_ops, 1);
@@ -3219,10 +3223,231 @@ mod tests {
                 &header_aad,
                 &mut trace_bad_code,
             ),
-            Err(VaultError::Crypto(CryptoError::InvalidParameter))
+            Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(trace_bad_code.dummy_hkdf_ops, 1);
         assert_eq!(trace_bad_code.dummy_aead_ops, 1);
+    }
+
+    #[test]
+    fn test_external_unlock_apis_uniformly_mask_internal_errors() {
+        let dek = test_dek();
+        let header = test_header();
+        let header_aad = header.associated_data();
+        let password = b"correct-password";
+        let pepper = b"app-pepper";
+        let prf = test_prf_secret();
+        let recovery = test_recovery_secret();
+        let recovery_code = TEST_RECOVERY_CODE;
+
+        let slot0 = wrap_dek_slot0_with_secret(
+            &dek,
+            password,
+            &test_salt(),
+            &test_nonce(),
+            &test_params(),
+            pepper,
+            &header_aad,
+        )
+        .unwrap();
+        let slot1 =
+            wrap_dek_slot1_for_header(&dek, &prf, &test_salt32(), &test_nonce(), &header).unwrap();
+        let slot2_raw =
+            wrap_dek_slot2_for_header(&dek, &recovery, &test_salt32(), &test_nonce(), &header)
+                .unwrap();
+        let slot2_code = wrap_dek_slot2_code_for_header(
+            &dek,
+            recovery_code,
+            &test_salt32(),
+            &test_nonce(),
+            &header,
+        )
+        .unwrap();
+
+        // 低レベルプリミティブ層は詳細エラーを温存していることを確認する。
+        assert_eq!(
+            find_slot_entry(&[], SLOT_ID_ARGON2ID),
+            Err(VaultError::SlotNotFound)
+        );
+        assert_eq!(
+            unwrap_dek_slot0(&slot0, b"wrong", &header_aad).err(),
+            Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
+        );
+        assert_eq!(
+            unwrap_dek_slot1(&slot1, b"short", &header_aad).err(),
+            Some(VaultError::Crypto(CryptoError::InvalidKeySize))
+        );
+        assert_eq!(
+            normalize_recovery_code(b"INVALID!").err(),
+            Some(VaultError::Crypto(CryptoError::InvalidParameter))
+        );
+
+        // 単一スロット公開API境界: 不正フォーマット, 不正長さ, 不正パラメータ, MAC不一致, 入力不正が
+        // すべて単一の AuthenticationFailed へ一様マスキングされる。
+        let valid_vault = Vault::new(
+            header,
+            vec![slot0.clone(), slot1.clone(), slot2_raw.clone()],
+            vec![],
+        );
+        let mut engine = VaultEngine::from_slot_entries(&valid_vault.slots)
+            .with_dummy_argon2_params(test_params());
+
+        let wrong_id_slot0 =
+            KekSlotEntry::new(SLOT_ID_PRF, KDF_KIND_ARGON2ID, slot0.wrapped_dek().to_vec())
+                .unwrap();
+        let bad_len_slot0 =
+            KekSlotEntry::new(SLOT_ID_ARGON2ID, KDF_KIND_ARGON2ID, vec![0x11; 10]).unwrap();
+        let mut bad_param_bytes = slot0.wrapped_dek().to_vec();
+        bad_param_bytes[0..4].copy_from_slice(&(MAX_SLOT0_M_COST + 1).to_be_bytes());
+        let bad_param_slot0 =
+            KekSlotEntry::new(SLOT_ID_ARGON2ID, KDF_KIND_ARGON2ID, bad_param_bytes).unwrap();
+
+        let slot0_failures = [
+            engine.unlock_with_slot0(&slot0, password, &header_aad),
+            engine.unlock_with_slot0_with_secret(&slot0, password, b"wrong-pepper", &header_aad),
+            engine.unlock_with_slot0_with_secret(&slot0, b"wrong-pw", pepper, &header_aad),
+            engine.unlock_with_slot0_with_secret(&slot0, password, pepper, b"tampered-aad"),
+            engine.unlock_with_slot0(&wrong_id_slot0, password, &header_aad),
+            engine.unlock_with_slot0(&bad_len_slot0, password, &header_aad),
+            engine.unlock_with_slot0(&bad_param_slot0, password, &header_aad),
+        ];
+        for res in slot0_failures {
+            assert_eq!(res, Err(VaultError::AuthenticationFailed));
+            assert_eq!(engine.state(), VaultState::Locked);
+            assert!(engine.is_safe_state());
+            assert!(engine.observe_dek().is_none());
+        }
+
+        let bad_len_slot1 =
+            KekSlotEntry::new(SLOT_ID_PRF, KDF_KIND_HKDF_SHA256, vec![0x22; 16]).unwrap();
+        let wrong_id_slot1 = KekSlotEntry::new(
+            SLOT_ID_RECOVERY,
+            KDF_KIND_HKDF_SHA256,
+            slot1.wrapped_dek().to_vec(),
+        )
+        .unwrap();
+        for res in [
+            engine.unlock_with_slot1(&slot1, &[0x99; SLOT1_MIN_PRF_LEN], &header_aad),
+            engine.unlock_with_slot1(&slot1, b"too-short", &header_aad),
+            engine.unlock_with_slot1(&bad_len_slot1, &prf, &header_aad),
+            engine.unlock_with_slot1(&wrong_id_slot1, &prf, &header_aad),
+            engine.unlock_with_slot1(&slot1, &prf, b"wrong-aad"),
+        ] {
+            assert_eq!(res, Err(VaultError::AuthenticationFailed));
+            assert_eq!(engine.state(), VaultState::Locked);
+        }
+
+        let bad_len_slot2 =
+            KekSlotEntry::new(SLOT_ID_RECOVERY, KDF_KIND_RECOVERY, vec![0x33; 16]).unwrap();
+        for res in [
+            engine.unlock_with_slot2(&slot2_raw, &[0x00; SLOT2_MIN_SECRET_LEN], &header_aad),
+            engine.unlock_with_slot2(&slot2_raw, b"short", &header_aad),
+            engine.unlock_with_slot2(&bad_len_slot2, &recovery, &header_aad),
+            engine.unlock_with_slot2_code(&slot2_code, b"SHORT", &header_aad),
+            engine.unlock_with_slot2_code(
+                &slot2_code,
+                b"BAD!-CODE-1234-5678-9012-3456",
+                &header_aad,
+            ),
+            engine.unlock_with_slot2_code(
+                &slot2_code,
+                b"AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG",
+                &header_aad,
+            ),
+        ] {
+            assert_eq!(res, Err(VaultError::AuthenticationFailed));
+            assert_eq!(engine.state(), VaultState::Locked);
+        }
+
+        // Vault 全体の解錠公開API境界:
+        // スロット不在, 重複, 破損, 誤認証, 入力不足のすべてが同一の AuthenticationFailed に収束する。
+        let empty_vault = Vault::new(header, vec![], vec![]);
+        let dup_vault = Vault::new(
+            header,
+            vec![
+                slot0.clone(),
+                slot0.clone(),
+                slot1.clone(),
+                slot1.clone(),
+                slot2_raw.clone(),
+                slot2_raw.clone(),
+            ],
+            vec![],
+        );
+        let corrupt_vault = Vault::new(
+            header,
+            vec![bad_len_slot0, bad_len_slot1, bad_len_slot2],
+            vec![],
+        );
+        let rollback_header = VaultHeader {
+            epoch_id: header.epoch_id - 1,
+            ..header
+        };
+        let rollback_vault = Vault::new(rollback_header, vec![slot0, slot1, slot2_code], vec![]);
+
+        for target_vault in [
+            &empty_vault,
+            &dup_vault,
+            &corrupt_vault,
+            &valid_vault,
+            &rollback_vault,
+        ] {
+            let mut v_engine = VaultEngine::from_slot_entries(&target_vault.slots)
+                .with_dummy_argon2_params(test_params());
+
+            let wrong_creds = [
+                SlotCredential::password(b"wrong-password"),
+                SlotCredential::prf(b"short-prf"),
+                SlotCredential::recovery(b"short-rec"),
+                SlotCredential::recovery_code(b"INVALID!"),
+            ];
+            for res in [
+                v_engine.unlock_vault_with_password(target_vault, b"wrong-password"),
+                v_engine.unlock_vault_with_prf(target_vault, b"short-prf"),
+                v_engine.unlock_vault_with_recovery(target_vault, b"short-rec"),
+                v_engine.unlock_vault_with_recovery_code(target_vault, b"INVALID!"),
+                v_engine.unlock_vault_with_credential(
+                    target_vault,
+                    SlotCredential::password_with_secret(password, b"wrong-pepper"),
+                ),
+                v_engine
+                    .unlock_vault_with_any(target_vault, &wrong_creds)
+                    .map(|_| ()),
+                v_engine
+                    .unlock_vault_with_all_slots(target_vault, &wrong_creds)
+                    .map(|_| ()),
+                v_engine
+                    .unlock_vault_with_any(target_vault, &[])
+                    .map(|_| ()),
+                v_engine
+                    .unlock_vault_with_all_slots(target_vault, &[])
+                    .map(|_| ()),
+            ] {
+                assert_eq!(res, Err(VaultError::AuthenticationFailed));
+                assert_eq!(v_engine.state(), VaultState::Locked);
+                assert!(v_engine.is_safe_state());
+                assert!(v_engine.observe_dek().is_none());
+            }
+        }
+
+        // FSM の公開状態契約違反 (Unlocked / Zeroized) は InvalidState として維持される。
+        engine
+            .unlock_vault_with_recovery(&valid_vault, &recovery)
+            .unwrap();
+        assert_eq!(engine.state(), VaultState::Unlocked);
+        assert_eq!(
+            engine.unlock_vault_with_password(&empty_vault, b"pw"),
+            Err(VaultError::InvalidState)
+        );
+        assert_eq!(
+            engine.unlock_vault_with_any(&empty_vault, &[SlotCredential::prf(&prf)]),
+            Err(VaultError::InvalidState)
+        );
+        engine.zeroize_key().unwrap();
+        assert_eq!(
+            engine.unlock_vault_with_all_slots(&valid_vault, &[SlotCredential::prf(&prf)]),
+            Err(VaultError::InvalidState)
+        );
     }
 
     #[test]
@@ -3483,6 +3708,76 @@ mod tests {
                     prop_assert!(engine.observe_dek().is_none());
                 }
             }
+        }
+
+        #[test]
+        fn prop_external_unlock_non_interference_error_uniformity(
+            slot_modes_a in [0u8..4, 0u8..4, 0u8..4],
+            slot_modes_b in [0u8..4, 0u8..4, 0u8..4],
+            cred_kind in 0u8..4,
+            include_all in any::<bool>(),
+        ) {
+            // 任意の2つのスロット構成 A, B (不在, 有効, 破損, 重複の任意の組み合わせ) に対し、
+            // 認証失敗時に外部公開API境界から観測されるエラー型は常に単一の AuthenticationFailed であり、
+            // スロットの有無や破損状態の差異が一切漏洩しないことを検証する。
+            let dek = test_dek();
+            let header = test_header();
+            let valid_entries = [
+                wrap_dek_slot0_for_header(&dek, b"right-pw", &test_salt(), &test_nonce(), &test_params(), &header).unwrap(),
+                wrap_dek_slot1_for_header(&dek, &test_prf_secret(), &test_salt32(), &test_nonce(), &header).unwrap(),
+                wrap_dek_slot2_for_header(&dek, &test_recovery_secret(), &test_salt32(), &test_nonce(), &header).unwrap(),
+            ];
+            let kdf_kinds = [KDF_KIND_ARGON2ID, KDF_KIND_HKDF_SHA256, KDF_KIND_RECOVERY];
+
+            let build_vault = |modes: [u8; 3]| -> Vault {
+                let mut entries = alloc::vec::Vec::new();
+                for idx in 0..3 {
+                    match modes[idx] {
+                        1 => entries.push(valid_entries[idx].clone()),
+                        2 => entries.push(KekSlotEntry::new(idx as u8, kdf_kinds[idx], vec![0xAA; 12]).unwrap()),
+                        3 => {
+                            entries.push(valid_entries[idx].clone());
+                            entries.push(valid_entries[idx].clone());
+                        }
+                        _ => {}
+                    }
+                }
+                Vault::new(header, entries, vec![])
+            };
+
+            let vault_a = build_vault(slot_modes_a);
+            let vault_b = build_vault(slot_modes_b);
+            let mut engine_a = VaultEngine::from_slot_entries(&vault_a.slots).with_dummy_argon2_params(test_params());
+            let mut engine_b = VaultEngine::from_slot_entries(&vault_b.slots).with_dummy_argon2_params(test_params());
+
+            let wrong_prf = [0x01u8; SLOT1_MIN_PRF_LEN];
+            let wrong_rec = [0x02u8; SLOT2_MIN_SECRET_LEN];
+            let cred = match cred_kind {
+                0 => SlotCredential::password(b"wrong-pw"),
+                1 => SlotCredential::prf(&wrong_prf),
+                2 => SlotCredential::recovery(&wrong_rec),
+                _ => SlotCredential::recovery_code(b"SHORT!"),
+            };
+
+            let err_single_a = engine_a.unlock_vault_with_credential(&vault_a, cred);
+            let err_single_b = engine_b.unlock_vault_with_credential(&vault_b, cred);
+            prop_assert_eq!(err_single_a, Err(VaultError::AuthenticationFailed));
+            prop_assert_eq!(err_single_a, err_single_b);
+
+            let err_multi_a = if include_all {
+                engine_a.unlock_vault_with_all_slots(&vault_a, &[cred])
+            } else {
+                engine_a.unlock_vault_with_any(&vault_a, &[cred])
+            };
+            let err_multi_b = if include_all {
+                engine_b.unlock_vault_with_all_slots(&vault_b, &[cred])
+            } else {
+                engine_b.unlock_vault_with_any(&vault_b, &[cred])
+            };
+            prop_assert_eq!(err_multi_a, Err(VaultError::AuthenticationFailed));
+            prop_assert_eq!(err_multi_a, err_multi_b);
+            prop_assert!(engine_a.is_safe_state());
+            prop_assert!(engine_b.is_safe_state());
         }
     }
 }

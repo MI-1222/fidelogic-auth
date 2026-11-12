@@ -77,6 +77,30 @@ pub enum VaultError {
     RollbackDetected,
 }
 
+impl VaultError {
+    /// 外部公開API境界におけるオラクル排除のため、内部詳細エラーを
+    /// 単一の [`VaultError::AuthenticationFailed`] へ一様マスキングする。
+    ///
+    /// FSM の公開状態契約違反を表す [`VaultError::InvalidState`] および、
+    /// 世代巻き戻し検証結果を表す [`VaultError::RollbackDetected`] を除き、
+    /// スロット不在 ([`VaultError::SlotNotFound`])、MAC 不一致や鍵長不正 ([`VaultError::Crypto`])、
+    /// スロット形式・重複・長さ異常 ([`VaultError::Parse`])、システム例外 ([`VaultError::System`]) 等の
+    /// 内部詳細エラーをすべて [`VaultError::AuthenticationFailed`] へ畳み込む。
+    #[inline]
+    #[must_use]
+    pub const fn mask_auth_error(self) -> Self {
+        match self {
+            Self::InvalidState => Self::InvalidState,
+            Self::RollbackDetected => Self::RollbackDetected,
+            Self::Parse(_)
+            | Self::Crypto(_)
+            | Self::System(_)
+            | Self::SlotNotFound
+            | Self::AuthenticationFailed => Self::AuthenticationFailed,
+        }
+    }
+}
+
 impl From<TlvParseError> for VaultError {
     #[inline]
     fn from(err: TlvParseError) -> Self {
@@ -303,6 +327,44 @@ mod tests {
         assert!(
             vault_auth.source().is_none(),
             "VaultError::AuthenticationFailedのsourceがNoneであることに成功。"
+        );
+    }
+
+    #[test]
+    fn test_vault_error_mask_auth_error() {
+        let masked_variants = [
+            VaultError::SlotNotFound,
+            VaultError::AuthenticationFailed,
+            VaultError::Parse(TlvParseError::UnexpectedEof),
+            VaultError::Parse(TlvParseError::InvalidFormat),
+            VaultError::Parse(TlvParseError::InvalidLength),
+            VaultError::Parse(TlvParseError::UnsupportedSuite),
+            VaultError::Crypto(CryptoError::AeadDecryptionFailed),
+            VaultError::Crypto(CryptoError::KeyDerivationFailed),
+            VaultError::Crypto(CryptoError::InvalidKeySize),
+            VaultError::Crypto(CryptoError::InvalidParameter),
+            VaultError::Crypto(CryptoError::InvalidSliceLength),
+            VaultError::System(SystemError::MemoryLockFailed),
+            VaultError::System(SystemError::EntropySourceFailed),
+        ];
+
+        for err in masked_variants {
+            assert_eq!(
+                err.mask_auth_error(),
+                VaultError::AuthenticationFailed,
+                "内部詳細エラーがAuthenticationFailedへ一様マスキングされることを確認。"
+            );
+        }
+
+        assert_eq!(
+            VaultError::InvalidState.mask_auth_error(),
+            VaultError::InvalidState,
+            "公開状態契約違反InvalidStateが保持されることを確認。"
+        );
+        assert_eq!(
+            VaultError::RollbackDetected.mask_auth_error(),
+            VaultError::RollbackDetected,
+            "ロールバック検知RollbackDetectedが保持されることを確認。"
         );
     }
 }
