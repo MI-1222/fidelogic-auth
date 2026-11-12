@@ -412,6 +412,26 @@ pub unsafe extern "C" fn fidelogic_wasm_size_anchor(bytes_ptr: *const u8, len: u
     }
 }
 
+#[cfg(all(feature = "profile-vault", any(test, feature = "ci-inspection")))]
+/// CI 静的解析用エクスポート: ダミー暗号演算 (Argon2id, HKDF-SHA256, XChaCha20-Poly1305 AEAD) の DCE 抑止検証用スタブ。
+///
+/// # Safety
+/// 各ポインタは指定された長さの有効なメモリ領域を指していること (NULL または長さ 0 の場合は空 AAD として扱う)。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fidelogic_wasm_dummy_slot_eval_test(
+    aad_ptr: *const u8,
+    aad_len: usize,
+) -> u32 {
+    let aad = if aad_ptr.is_null() || aad_len == 0 {
+        &[]
+    } else {
+        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
+    };
+    let summary = fidelogic_core::slots::run_dummy_slot_eval_for_inspection(aad);
+    let total_ops = summary.dummy_argon2id_ops + summary.dummy_hkdf_ops + summary.dummy_aead_ops;
+    core::hint::black_box(total_ops as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,6 +836,25 @@ mod tests {
         unsafe {
             let res = fidelogic_wasm_size_anchor(header.as_ptr(), header.len());
             assert_eq!(res, 0, "サイズ計測アンカーの往復処理に成功。");
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_dummy_slot_eval_test_export() {
+        let aad = b"wasm_vault_aad_for_test";
+        unsafe {
+            let res = fidelogic_wasm_dummy_slot_eval_test(aad.as_ptr(), aad.len());
+            assert_eq!(
+                res, 6,
+                "ダミー暗号演算パイプライン (1+2+3=6 ops) の実行に成功。"
+            );
+
+            let null_res = fidelogic_wasm_dummy_slot_eval_test(core::ptr::null(), 0);
+            assert_eq!(
+                null_res, 6,
+                "空AAD指定でのダミー暗号演算パイプライン実行に成功。"
+            );
         }
     }
 }

@@ -1391,6 +1391,36 @@ fn dummy_unwrap_slot2_code_traced(vault_aad: &[u8], trace: &mut SlotEvalTrace) {
     dummy_unwrap_hkdf_slot_traced(&SLOT2_SPEC, vault_aad, trace);
 }
 
+/// ダミー暗号演算パイプラインの実行回数記録。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DummySlotEvalSummary {
+    /// 実行されたダミー Argon2id 演算回数。
+    pub dummy_argon2id_ops: usize,
+    /// 実行されたダミー HKDF-SHA256 演算回数。
+    pub dummy_hkdf_ops: usize,
+    /// 実行されたダミー AEAD 復号演算回数。
+    pub dummy_aead_ops: usize,
+}
+
+/// 静的解析および検査向けに、Slot 0/1/2 のダミー暗号演算パイプラインを実行する。
+///
+/// コンパイラ最適化によるダミー暗号演算呼び出しの除去 (DCE) を防ぐため、
+/// ダミー Argon2id, HKDF-SHA256, AEAD 復号演算を明示的に呼び出し、
+/// その実行回数サマリを返す。
+#[doc(hidden)]
+pub fn run_dummy_slot_eval_for_inspection(vault_aad: &[u8]) -> DummySlotEvalSummary {
+    let mut trace = SlotEvalTrace::default();
+    dummy_unwrap_slot0_traced(&Argon2Params::default_for_target(), vault_aad, &mut trace);
+    dummy_unwrap_hkdf_slot_traced(&SLOT1_SPEC, vault_aad, &mut trace);
+    dummy_unwrap_slot2_code_traced(vault_aad, &mut trace);
+    let summary = DummySlotEvalSummary {
+        dummy_argon2id_ops: trace.dummy_argon2id_ops,
+        dummy_hkdf_ops: trace.dummy_hkdf_ops,
+        dummy_aead_ops: trace.dummy_aead_ops,
+    };
+    core::hint::black_box(summary)
+}
+
 /// Slot 0 エントリの復号を試行し、不在・無効・フォーマット不正・エラー時はダミー暗号演算で補完する。
 fn eval_slot0_or_dummy(
     entry: Option<&KekSlotEntry>,
@@ -3231,6 +3261,27 @@ mod tests {
         );
         assert_eq!(trace_bad_code.dummy_hkdf_ops, 1);
         assert_eq!(trace_bad_code.dummy_aead_ops, 1);
+    }
+
+    #[test]
+    fn test_dummy_slot_eval_pipeline_execution() {
+        let aad = b"test_vault_aad_payload";
+        let summary = run_dummy_slot_eval_for_inspection(aad);
+        assert_eq!(summary.dummy_argon2id_ops, 1);
+        assert_eq!(summary.dummy_hkdf_ops, 2);
+        assert_eq!(summary.dummy_aead_ops, 3);
+
+        // 空AADおよび過大AADに対しても安全にフォールバックダミー演算が完結することを確認。
+        let empty_summary = run_dummy_slot_eval_for_inspection(&[]);
+        assert_eq!(empty_summary.dummy_argon2id_ops, 1);
+        assert_eq!(empty_summary.dummy_hkdf_ops, 2);
+        assert_eq!(empty_summary.dummy_aead_ops, 3);
+
+        let huge_aad = [0x5Au8; 2048];
+        let huge_summary = run_dummy_slot_eval_for_inspection(&huge_aad);
+        assert_eq!(huge_summary.dummy_argon2id_ops, 1);
+        assert_eq!(huge_summary.dummy_hkdf_ops, 2);
+        assert_eq!(huge_summary.dummy_aead_ops, 3);
     }
 
     #[test]

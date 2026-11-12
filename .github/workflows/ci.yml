@@ -90,5 +90,8 @@ jobs:
       - name: Verify zeroize volatile store preservation (DSE audit)
         run: ./scripts/ci/check_zeroize_dse.sh
 
+      - name: Verify dummy slot timing equalisation preservation (DCE audit)
+        run: ./scripts/ci/check_dummy_slot_dce.sh
+
       - name: Verify constant-time crypto operations (branch-free audit)
         run: ./scripts/ci/check_constant_time.sh
