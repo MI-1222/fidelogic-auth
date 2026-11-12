@@ -1451,31 +1451,23 @@ fn eval_slot0_or_dummy(
     fallback_params: &Argon2Params,
     trace: &mut SlotEvalTrace,
 ) -> Result<SecretBytes<DEK_LEN>, VaultError> {
+    if !is_slot_valid {
+        dummy_unwrap_slot0_traced(fallback_params, vault_aad, trace);
+        return Err(VaultError::AuthenticationFailed);
+    }
+
     let Some(slot_entry) = entry else {
         dummy_unwrap_slot0_traced(fallback_params, vault_aad, trace);
-        return Err(if is_slot_valid {
-            VaultError::SlotNotFound
-        } else {
-            VaultError::AuthenticationFailed
-        });
+        return Err(VaultError::SlotNotFound);
     };
 
     let payload = match Argon2idSlotPayload::from_slot_entry(slot_entry) {
         Ok(parsed) => parsed,
         Err(parse_err) => {
             dummy_unwrap_slot0_traced(fallback_params, vault_aad, trace);
-            return Err(if is_slot_valid {
-                parse_err
-            } else {
-                VaultError::AuthenticationFailed
-            });
+            return Err(parse_err);
         }
     };
-
-    if !is_slot_valid {
-        dummy_unwrap_slot0_traced(&payload.params, vault_aad, trace);
-        return Err(VaultError::AuthenticationFailed);
-    }
 
     let aad = match build_slot0_aad(&payload.params, &payload.salt, vault_aad) {
         Ok(aad) => aad,
@@ -3792,6 +3784,52 @@ mod tests {
             Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(engine_mismatch.state(), VaultState::Locked);
+    }
+
+    #[test]
+    fn test_invalid_slot0_uses_fallback_params_for_dummy_eval() {
+        let dek = test_dek();
+        let minimal_params = Argon2Params::custom(64, 1, 1, Some(DEK_LEN)).unwrap();
+        let entry = wrap_dek_slot0(
+            &dek,
+            b"pw",
+            &test_salt(),
+            &test_nonce(),
+            &minimal_params,
+            b"aad",
+        )
+        .unwrap();
+
+        let fallback_params = test_params();
+        let mut trace = SlotEvalTrace::default();
+
+        // is_slot_valid == false のとき、エントリの minimal_params ではなく fallback_params でダミー演算が実行される。
+        let res = eval_slot0_or_dummy(
+            Some(&entry),
+            false,
+            b"pw",
+            &[],
+            b"aad",
+            &fallback_params,
+            &mut trace,
+        );
+
+        assert_eq!(res.err(), Some(VaultError::AuthenticationFailed));
+        assert_eq!(trace.dummy_argon2id_ops, 1);
+        assert_eq!(trace.real_argon2id_ops, 0);
+
+        // 重複スロットにより Invalid となったエンジンに対する解錠試行でも一様失敗の確認に成功。
+        let dup_vault = Vault::new(test_header(), vec![entry.clone(), entry.clone()], vec![]);
+        let mut engine = VaultEngine::from_slot_entries(&dup_vault.slots)
+            .with_dummy_argon2_params(fallback_params);
+        assert_eq!(
+            engine.unlock_vault_with_password(&dup_vault, b"pw"),
+            Err(VaultError::AuthenticationFailed)
+        );
+        assert_eq!(
+            engine.unlock_with_entry(&entry, SlotCredential::password(b"pw"), b"aad"),
+            Err(VaultError::AuthenticationFailed)
+        );
     }
 
     proptest! {
