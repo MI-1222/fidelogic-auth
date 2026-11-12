@@ -153,25 +153,41 @@ impl From<CipherSuiteId> for u8 {
     }
 }
 
-/// 暗号化コンテナで使用されるAEAD暗号スイートの列挙型ディスパッチ構造体。
+/// 暗号化コンテナで使用されるAEAD暗号スイートの静的ディスパッチ構造体。
 ///
 /// トレイトオブジェクト(`dyn AeadInPlace`)による間接呼び出しオーバーヘッドや
 /// vtableメタデータの保持を完全に排除し、静的インライン化およびゼロコストディスパッチを実現する。
 /// ヒープ確保(`Box`)を排して `no_std` 環境でのゼロアロケーション運用を維持するため、
-/// バリアント間サイズ差の警告を抑制している。
+/// 内部列挙型のバリアント間サイズ差の警告を抑制している。
 #[allow(clippy::large_enum_variant)]
-pub enum VaultCipher {
+enum VaultCipherInner {
     /// XChaCha20-Poly1305 暗号インスタンス。
     XChaCha20Poly1305(XChaCha20Poly1305),
     /// AES-256-GCM-SIV 暗号インスタンス。
     Aes256GcmSiv(Aes256GcmSiv),
 }
 
+/// 暗号化コンテナで使用されるAEAD暗号スイートの安全破棄ラッパー。
+///
+/// 内部の `XChaCha20Poly1305` および `Aes256GcmSiv` による鍵消去に加え、
+/// Drop 時に列挙型パディング領域を含む構造体全体(`size_of::<Self>()`)を揮発性ゼロ書込みで消去する。
+pub struct VaultCipher {
+    suite_id: CipherSuiteId,
+    inner: core::mem::ManuallyDrop<VaultCipherInner>,
+}
+
 impl Drop for VaultCipher {
     #[inline]
     fn drop(&mut self) {
-        // バリアント内部の XChaCha20Poly1305 および Aes256GcmSiv(内部の aes::Aes256) は、
-        // 本 Drop 完了後に実行される各フィールドの Drop により保持する鍵・拡張ラウンド鍵をゼロ消去する。
+        // 先に各プリミティブの Drop を実行して内部鍵・拡張ラウンド鍵を消去した後、
+        // バリアント差パディングやタグ領域を含めた構造体メモリ全体を揮発性ゼロ書込みで消去する。
+        unsafe {
+            core::mem::ManuallyDrop::drop(&mut self.inner);
+            crate::zeroize::volatile_zeroize_raw(
+                (self as *mut Self).cast::<u8>(),
+                core::mem::size_of::<Self>(),
+            );
+        }
     }
 }
 
@@ -189,11 +205,17 @@ impl VaultCipher {
     #[inline]
     pub fn new(suite_id: CipherSuiteId, key: &[u8; KEY_LEN]) -> Self {
         let key_arr = GenericArray::from_slice(key);
-        match suite_id {
+        let inner = match suite_id {
             CipherSuiteId::XChaCha20Poly1305 => {
-                Self::XChaCha20Poly1305(XChaCha20Poly1305::new(key_arr))
+                VaultCipherInner::XChaCha20Poly1305(XChaCha20Poly1305::new(key_arr))
             }
-            CipherSuiteId::Aes256GcmSiv => Self::Aes256GcmSiv(Aes256GcmSiv::new(key_arr)),
+            CipherSuiteId::Aes256GcmSiv => {
+                VaultCipherInner::Aes256GcmSiv(Aes256GcmSiv::new(key_arr))
+            }
+        };
+        Self {
+            suite_id,
+            inner: core::mem::ManuallyDrop::new(inner),
         }
     }
 
@@ -215,10 +237,7 @@ impl VaultCipher {
     /// 本暗号インスタンスの暗号スイート識別子を返す。
     #[inline]
     pub const fn suite_id(&self) -> CipherSuiteId {
-        match self {
-            Self::XChaCha20Poly1305(_) => CipherSuiteId::XChaCha20Poly1305,
-            Self::Aes256GcmSiv(_) => CipherSuiteId::Aes256GcmSiv,
-        }
+        self.suite_id
     }
 
     /// 本暗号インスタンスで要求されるノンス長(バイト数)を返す。
@@ -254,8 +273,8 @@ impl VaultCipher {
         validate_payload_len(buffer)?;
         validate_aad_len(aad)?;
 
-        let tag = match self {
-            Self::XChaCha20Poly1305(cipher) => {
+        let tag = match &*self.inner {
+            VaultCipherInner::XChaCha20Poly1305(cipher) => {
                 let nonce_arr = GenericArray::from_slice(nonce);
                 cipher
                     .encrypt_in_place_detached(nonce_arr, aad, buffer)
@@ -264,7 +283,7 @@ impl VaultCipher {
                         CryptoError::AeadEncryptionFailed
                     })?
             }
-            Self::Aes256GcmSiv(cipher) => {
+            VaultCipherInner::Aes256GcmSiv(cipher) => {
                 let nonce_arr = GenericArray::from_slice(nonce);
                 cipher
                     .encrypt_in_place_detached(nonce_arr, aad, buffer)
@@ -329,12 +348,12 @@ impl VaultCipher {
         validate_aad_len(aad)?;
 
         let tag_arr = GenericArray::from_slice(tag);
-        let result = match self {
-            Self::XChaCha20Poly1305(cipher) => {
+        let result = match &*self.inner {
+            VaultCipherInner::XChaCha20Poly1305(cipher) => {
                 let nonce_arr = GenericArray::from_slice(nonce);
                 cipher.decrypt_in_place_detached(nonce_arr, aad, buffer, tag_arr)
             }
-            Self::Aes256GcmSiv(cipher) => {
+            VaultCipherInner::Aes256GcmSiv(cipher) => {
                 let nonce_arr = GenericArray::from_slice(nonce);
                 cipher.decrypt_in_place_detached(nonce_arr, aad, buffer, tag_arr)
             }

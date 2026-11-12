@@ -16,6 +16,24 @@ pub fn volatile_zeroize(buffer: &mut [u8]) {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
+/// 指定ポインタ先頭から `len` バイトの領域(未初期化パディング領域を含む)を揮発性ゼロ書込みで消去する。
+///
+/// 列挙型やアラインメントパディング等の未初期化バイトを含みうる領域に対し、
+/// `&mut [u8]` 参照を生成せずにバイト単位で `0x00` を書き込み、Dead Store Elimination を抑止する。
+///
+/// # 安全性
+/// `ptr` は少なくとも `len` バイトの書き込み可能な連続メモリ領域を指している必要がある。
+#[cfg_attr(not(feature = "profile-vault"), allow(dead_code))]
+#[inline(never)]
+pub(crate) unsafe fn volatile_zeroize_raw(ptr: *mut u8, len: usize) {
+    let mut offset = 0usize;
+    while offset < len {
+        unsafe { core::ptr::write_volatile(ptr.add(offset), 0u8) };
+        offset += 1;
+    }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+}
+
 /// 固定長バイト配列を保持し、スコープ離脱時(Drop時)にメモリを確実にゼロ消去するセキュアバッファ。
 ///
 /// スタック上で管理される暗号鍵(DEK/KEK等)や認証タグの保持に適しており、
