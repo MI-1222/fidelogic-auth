@@ -157,29 +157,30 @@ for fid, (_, f_lines) in funcs.items():
     if ("loop" in body and re.search(r'i32\.const\s+0\s*\n\s*i32\.store8\b', body)) or re.search(r'i32\.const\s+0\s*\n[^\n]*\n\s*memory\.fill\b', body):
         zero_loop_funcs.add(fid)
 
-volatile_zeroize_callees = set(call_chain) - {func_id}
-if not (volatile_zeroize_callees & zero_loop_funcs) and not matched_stores:
+target_callees = set(call_chain) - {func_id}
+if not (target_callees & zero_loop_funcs) and not matched_stores:
     print(f"Error: [{profile}] '{target_sym}' の呼び出し先にゼロクリアストア命令を特定できませんでした。", file=sys.stderr)
     sys.exit(1)
 
 # 4. 本番エクスポート関数でのゼロ消去到達検証(DSE/DCE バイパス防止).
-prod_checks = [("fidelogic_wasm_x25519_dh", zero_loop_funcs | volatile_zeroize_callees)]
+# 中間ラッパーや共通ヘルパーによる偽陽性リスクを排除するため、実際のゼロ消去処理(zero_loop_funcs)に一本化して検証する.
+prod_symbols = ["fidelogic_wasm_x25519_dh"]
 if profile == "profile-vault":
-    prod_checks.extend([
-        ("fidelogic_wasm_vault_encrypt", volatile_zeroize_callees),
-        ("fidelogic_wasm_vault_decrypt", volatile_zeroize_callees),
-        ("fidelogic_wasm_kdf_derive_key", zero_loop_funcs | volatile_zeroize_callees),
+    prod_symbols.extend([
+        "fidelogic_wasm_vault_encrypt",
+        "fidelogic_wasm_vault_decrypt",
+        "fidelogic_wasm_kdf_derive_key",
     ])
 
-for prod_sym, expected_targets in prod_checks:
+for prod_sym in prod_symbols:
     prod_fid = resolve_export(prod_sym)
     if not prod_fid:
         print(f"Error: [{profile}] 本番シンボル '{prod_sym}' が WAT 内に見つかりません。", file=sys.stderr)
         sys.exit(1)
     prod_chain, _ = trace_reachable(prod_fid)
-    reached = sorted(set(prod_chain) & expected_targets)
+    reached = sorted(set(prod_chain) & zero_loop_funcs)
     if not reached:
-        print(f"Error: [{profile}] 本番関数 '{prod_sym}' (func {prod_fid}) から zeroize / volatile_zeroize 処理への到達が DSE または DCE により消失しました！", file=sys.stderr)
+        print(f"Error: [{profile}] 本番関数 '{prod_sym}' (func {prod_fid}) から zeroize 処理 (zero_loop_funcs) への到達が DSE または DCE により消失しました！", file=sys.stderr)
         sys.exit(1)
     print(f"==> [{profile}] [SUCCESS] Verified production '{prod_sym}' preserves zeroize reachability -> funcs {reached}")
 EOF
