@@ -55,6 +55,46 @@ impl From<WasmStatusCode> for u32 {
     }
 }
 
+/// 不正なスライスポインタまたは `isize::MAX` を超える長さを検証し、安全に不変スライスを取得する。
+///
+/// `len == 0` の場合はポインタが NULL であっても安全に空スライス `&[]` を返す。
+/// `len > 0` の場合は `ptr` が非NULLかつ `len <= isize::MAX as usize` であることを検証する。
+#[allow(dead_code)]
+#[inline]
+unsafe fn slice_from_raw_parts_checked<'a>(
+    ptr: *const u8,
+    len: usize,
+) -> Result<&'a [u8], WasmStatusCode> {
+    if len == 0 {
+        Ok(&[])
+    } else if ptr.is_null() || len > isize::MAX as usize {
+        Err(WasmStatusCode::InvalidPointer)
+    } else {
+        // SAFETY: 呼び出し元が `ptr` の有効性とエイリアシング契約を保証し、`len <= isize::MAX` かつ非NULL。
+        Ok(unsafe { core::slice::from_raw_parts(ptr, len) })
+    }
+}
+
+/// 不正なスライスポインタまたは `isize::MAX` を超える長さを検証し、安全に可変スライスを取得する。
+///
+/// `len == 0` の場合はポインタが NULL であっても安全に空スライス `&mut []` を返す。
+/// `len > 0` の場合は `ptr` が非NULLかつ `len <= isize::MAX as usize` であることを検証する。
+#[allow(dead_code)]
+#[inline]
+unsafe fn slice_from_raw_parts_mut_checked<'a>(
+    ptr: *mut u8,
+    len: usize,
+) -> Result<&'a mut [u8], WasmStatusCode> {
+    if len == 0 {
+        Ok(&mut [])
+    } else if ptr.is_null() || len > isize::MAX as usize {
+        Err(WasmStatusCode::InvalidPointer)
+    } else {
+        // SAFETY: 呼び出し元が `ptr` の有効性と排他性を保証し、`len <= isize::MAX` かつ非NULL。
+        Ok(unsafe { core::slice::from_raw_parts_mut(ptr, len) })
+    }
+}
+
 /// 現在リンクされているコアエンジンのプロファイルステータスコードを取得する。
 ///
 /// 外部C ABIからも直接呼び出し可能なインターフェース骨格。
@@ -79,12 +119,11 @@ pub extern "C" fn fidelogic_wasm_status() -> u32 {
 /// 呼び出し元は `ptr` が有効であり、少なくとも `len` バイトの連続した書き込み可能メモリを指していることを保証しなければならない。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_zeroize_test(ptr: *mut u8, len: usize) {
-    if ptr.is_null() || len == 0 {
-        return;
+    if let Ok(slice) = unsafe { slice_from_raw_parts_mut_checked(ptr, len) }
+        && !slice.is_empty()
+    {
+        fidelogic_core::zeroize::volatile_zeroize(slice);
     }
-    // SAFETY: 関数の事前条件に基づき、`ptr` は有効かつ `len` バイトの範囲でアクセス可能。
-    let slice = unsafe { core::slice::from_raw_parts_mut(ptr, len) };
-    fidelogic_core::zeroize::volatile_zeroize(slice);
 }
 
 #[cfg(any(test, feature = "ci-inspection"))]
@@ -132,10 +171,15 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
         || out_suite_id.is_null()
         || out_epoch_id.is_null()
         || len < fidelogic_core::tlv::VAULT_HEADER_LEN
+        || len > isize::MAX as usize
     {
         return WasmStatusCode::InvalidPointer.as_u32();
     }
-    let slice = unsafe { core::slice::from_raw_parts(header_bytes_ptr, len) };
+    // SAFETY: 事前検証により `header_bytes_ptr` は非NULLであり、少なくとも VAULT_HEADER_LEN バイトの
+    // 有効なメモリ領域を指している。先頭のヘッダー部分のみをスライス化することで安全性を担保する。
+    let slice = unsafe {
+        core::slice::from_raw_parts(header_bytes_ptr, fidelogic_core::tlv::VAULT_HEADER_LEN)
+    };
     match fidelogic_core::tlv::deserialize_header(slice) {
         Ok((header, _)) => {
             unsafe {
@@ -199,12 +243,18 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     out_ptr: *mut u8,
     out_len: usize,
 ) -> u32 {
-    if password_ptr.is_null() || salt_ptr.is_null() || out_ptr.is_null() {
-        return WasmStatusCode::InvalidPointer.as_u32();
-    }
-    let password = unsafe { core::slice::from_raw_parts(password_ptr, password_len) };
-    let salt = unsafe { core::slice::from_raw_parts(salt_ptr, salt_len) };
-    let out = unsafe { core::slice::from_raw_parts_mut(out_ptr, out_len) };
+    let password = match unsafe { slice_from_raw_parts_checked(password_ptr, password_len) } {
+        Ok(s) => s,
+        Err(code) => return code.as_u32(),
+    };
+    let salt = match unsafe { slice_from_raw_parts_checked(salt_ptr, salt_len) } {
+        Ok(s) => s,
+        Err(code) => return code.as_u32(),
+    };
+    let out = match unsafe { slice_from_raw_parts_mut_checked(out_ptr, out_len) } {
+        Ok(s) => s,
+        Err(code) => return code.as_u32(),
+    };
 
     let params = match fidelogic_core::Argon2Params::for_wasm()
         .with_output_len(out_len)
@@ -212,7 +262,7 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     {
         Ok(p) => p,
         Err(_) => {
-            if out_len > 0 {
+            if !out.is_empty() {
                 fidelogic_core::zeroize::volatile_zeroize(out);
             }
             return WasmStatusCode::InvalidParameter.as_u32();
@@ -222,7 +272,7 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     match params.derive_key(password, salt, out) {
         Ok(()) => WasmStatusCode::Success.as_u32(),
         Err(_) => {
-            if out_len > 0 {
+            if !out.is_empty() {
                 fidelogic_core::zeroize::volatile_zeroize(out);
             }
             WasmStatusCode::ExecutionFailed.as_u32()
@@ -259,28 +309,14 @@ unsafe fn parse_vault_params<'a>(
     if key_ptr.is_null() || nonce_ptr.is_null() {
         return Err(WasmStatusCode::InvalidPointer);
     }
-    if data_len > 0 && data_ptr.is_null() {
-        return Err(WasmStatusCode::InvalidPointer);
-    }
-    if aad_len > 0 && aad_ptr.is_null() {
-        return Err(WasmStatusCode::InvalidPointer);
-    }
     let suite = fidelogic_core::CipherSuiteId::from_u8(suite_id)
         .map_err(|_| WasmStatusCode::InvalidParameter)?;
     let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
     let cipher = fidelogic_core::VaultCipher::new(suite, key);
 
-    let nonce = unsafe { core::slice::from_raw_parts(nonce_ptr, nonce_len) };
-    let aad = if aad_len > 0 {
-        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
-    } else {
-        &[]
-    };
-    let data = if data_len > 0 {
-        unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) }
-    } else {
-        &mut []
-    };
+    let nonce = unsafe { slice_from_raw_parts_checked(nonce_ptr, nonce_len)? };
+    let aad = unsafe { slice_from_raw_parts_checked(aad_ptr, aad_len)? };
+    let data = unsafe { slice_from_raw_parts_mut_checked(data_ptr, data_len)? };
 
     Ok(VaultOpParams {
         cipher,
@@ -379,10 +415,10 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
 /// 各ポインタは指定された長さの有効なメモリ領域を指していること。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, len: usize) -> u32 {
-    if bytes_ptr.is_null() || len == 0 {
-        return WasmStatusCode::InvalidPointer.as_u32();
-    }
-    let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
+    let bytes = match unsafe { slice_from_raw_parts_checked(bytes_ptr, len) } {
+        Ok(b) if !b.is_empty() => b,
+        _ => return WasmStatusCode::InvalidPointer.as_u32(),
+    };
     match fidelogic_core::tlv::deserialize(bytes) {
         Ok((_vault, _)) => WasmStatusCode::Success.as_u32(),
         Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
@@ -399,10 +435,10 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, 
 /// 各ポインタは指定された長さの有効なメモリ領域を指していること。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_size_anchor(bytes_ptr: *const u8, len: usize) -> u32 {
-    if bytes_ptr.is_null() || len == 0 {
-        return WasmStatusCode::InvalidPointer.as_u32();
-    }
-    let bytes = unsafe { core::slice::from_raw_parts(bytes_ptr, len) };
+    let bytes = match unsafe { slice_from_raw_parts_checked(bytes_ptr, len) } {
+        Ok(b) if !b.is_empty() => b,
+        _ => return WasmStatusCode::InvalidPointer.as_u32(),
+    };
     match fidelogic_core::tlv::deserialize(bytes) {
         Ok((vault, _)) => match fidelogic_core::tlv::serialize(&vault) {
             Ok(_) => WasmStatusCode::Success.as_u32(),
@@ -422,10 +458,9 @@ pub unsafe extern "C" fn fidelogic_wasm_dummy_slot_eval_test(
     aad_ptr: *const u8,
     aad_len: usize,
 ) -> u32 {
-    let aad = if aad_ptr.is_null() || aad_len == 0 {
-        &[]
-    } else {
-        unsafe { core::slice::from_raw_parts(aad_ptr, aad_len) }
+    let aad = match unsafe { slice_from_raw_parts_checked(aad_ptr, aad_len) } {
+        Ok(s) => s,
+        Err(_) => &[],
     };
     let summary = fidelogic_core::slots::run_dummy_slot_eval_for_inspection(aad);
     let total_ops = summary.dummy_argon2id_ops + summary.dummy_hkdf_ops + summary.dummy_aead_ops;
@@ -513,6 +548,31 @@ mod tests {
             let invalid_res =
                 fidelogic_wasm_header_parse(valid_header.as_ptr(), 5, &mut suite_id, &mut epoch_id);
             assert_eq!(invalid_res, 1, "長さ不足時の検証エラーに成功。");
+
+            // isize::MAX 超過によるエラーの検証
+            let overflow_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                usize::MAX,
+                &mut suite_id,
+                &mut epoch_id,
+            );
+            assert_eq!(overflow_res, 1, "isize::MAX超過時の検証エラーに成功。");
+
+            // VAULT_HEADER_LEN を超えるバッファが渡された場合でも先頭14バイトのみで安全にパースされる検証
+            let extended_buf = [
+                b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 42, 0xFF, 0xFF,
+            ];
+            let extended_res = fidelogic_wasm_header_parse(
+                extended_buf.as_ptr(),
+                extended_buf.len(),
+                &mut suite_id,
+                &mut epoch_id,
+            );
+            assert_eq!(
+                extended_res, 0,
+                "先頭14バイトのみを参照したヘッダーパースに成功。"
+            );
+            assert_eq!(epoch_id, 42, "世代カウンターの取得に成功。");
 
             // NULLポインタ引数に対するエラーの検証
             let null_header_res = fidelogic_wasm_header_parse(
@@ -653,6 +713,62 @@ mod tests {
             );
             assert_eq!(invalid_res, 2, "不正な出力長に対してエラーコード2を返却。");
 
+            // 空パスワード(password_ptr = NULL, password_len = 0)の許容と鍵導出成功を検証。
+            let mut empty_pw_key = [0u8; 32];
+            let empty_pw_res = fidelogic_wasm_kdf_derive_key(
+                core::ptr::null(),
+                0,
+                salt.as_ptr(),
+                salt.len(),
+                empty_pw_key.as_mut_ptr(),
+                empty_pw_key.len(),
+            );
+            assert_eq!(empty_pw_res, 0, "空パスワード(NULL, 0)での鍵導出に成功。");
+            assert_ne!(
+                empty_pw_key, [0u8; 32],
+                "空パスワードからの非ゼロ鍵導出に成功。"
+            );
+
+            // isize::MAX 超過ポインタ・長さ引数のエラーコード1返却を検証。
+            let overflow_pw_res = fidelogic_wasm_kdf_derive_key(
+                password.as_ptr(),
+                usize::MAX,
+                salt.as_ptr(),
+                salt.len(),
+                derived_key.as_mut_ptr(),
+                derived_key.len(),
+            );
+            assert_eq!(
+                overflow_pw_res, 1,
+                "password_len が isize::MAX 超過時にエラーコード1を返却。"
+            );
+
+            let overflow_salt_res = fidelogic_wasm_kdf_derive_key(
+                password.as_ptr(),
+                password.len(),
+                salt.as_ptr(),
+                usize::MAX,
+                derived_key.as_mut_ptr(),
+                derived_key.len(),
+            );
+            assert_eq!(
+                overflow_salt_res, 1,
+                "salt_len が isize::MAX 超過時にエラーコード1を返却。"
+            );
+
+            let overflow_out_res = fidelogic_wasm_kdf_derive_key(
+                password.as_ptr(),
+                password.len(),
+                salt.as_ptr(),
+                salt.len(),
+                derived_key.as_mut_ptr(),
+                usize::MAX,
+            );
+            assert_eq!(
+                overflow_out_res, 1,
+                "out_len が isize::MAX 超過時にエラーコード1を返却。"
+            );
+
             // 不正な出力長(out_len = 3: RFC 9106最小出力長4バイト未満)での事前検証失敗時に、
             // 出力バッファの既存データがゼロ消去されることを検証。
             let mut dirty_buf = [0xBBu8; 3];
@@ -748,6 +864,55 @@ mod tests {
                 "暗号化エラー時は出力タグバッファを変更しないことを確認。"
             );
 
+            // isize::MAX 超過時の引数エラー検証 (nonce_len, aad_len, data_len)
+            let overflow_nonce_res = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                usize::MAX,
+                aad.as_ptr(),
+                aad.len(),
+                untouched_buf.as_mut_ptr(),
+                untouched_buf.len(),
+                untouched_tag.as_mut_ptr(),
+            );
+            assert_eq!(
+                overflow_nonce_res, 1,
+                "nonce_len が isize::MAX 超過時にエラーコード1を返却。"
+            );
+
+            let overflow_aad_res = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                usize::MAX,
+                untouched_buf.as_mut_ptr(),
+                untouched_buf.len(),
+                untouched_tag.as_mut_ptr(),
+            );
+            assert_eq!(
+                overflow_aad_res, 1,
+                "aad_len が isize::MAX 超過時にエラーコード1を返却。"
+            );
+
+            let overflow_data_res = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                untouched_buf.as_mut_ptr(),
+                usize::MAX,
+                untouched_tag.as_mut_ptr(),
+            );
+            assert_eq!(
+                overflow_data_res, 1,
+                "data_len が isize::MAX 超過時にエラーコード1を返却。"
+            );
+
             let null_aad_dec_res = fidelogic_wasm_vault_decrypt(
                 1,
                 key.as_ptr(),
@@ -821,6 +986,9 @@ mod tests {
             let empty_res = fidelogic_wasm_vault_deserialize(header.as_ptr(), 0);
             assert_eq!(empty_res, 1, "長さ0指定時に引数エラー1を返却。");
 
+            let overflow_res = fidelogic_wasm_vault_deserialize(header.as_ptr(), usize::MAX);
+            assert_eq!(overflow_res, 1, "isize::MAX超過時に引数エラー1を返却。");
+
             let invalid_res = fidelogic_wasm_vault_deserialize(header.as_ptr(), 4);
             assert_eq!(invalid_res, 3, "不正Vaultバイト列に対してエラー3を返却。");
         }
@@ -836,6 +1004,12 @@ mod tests {
         unsafe {
             let res = fidelogic_wasm_size_anchor(header.as_ptr(), header.len());
             assert_eq!(res, 0, "サイズ計測アンカーの往復処理に成功。");
+
+            let overflow_res = fidelogic_wasm_size_anchor(header.as_ptr(), usize::MAX);
+            assert_eq!(
+                overflow_res, 1,
+                "isize::MAX超過時にサイズアンカーでエラーコード1を返却。"
+            );
         }
     }
 
@@ -855,6 +1029,27 @@ mod tests {
                 null_res, 6,
                 "空AAD指定でのダミー暗号演算パイプライン実行に成功。"
             );
+
+            let overflow_res = fidelogic_wasm_dummy_slot_eval_test(aad.as_ptr(), usize::MAX);
+            assert_eq!(
+                overflow_res, 6,
+                "isize::MAX超過時に空AADへ安全にフォールバックして実行に成功。"
+            );
+        }
+    }
+
+    #[cfg(any(test, feature = "ci-inspection"))]
+    #[test]
+    fn test_zeroize_test_export() {
+        let mut buf = [0x55u8; 16];
+        unsafe {
+            fidelogic_wasm_zeroize_test(buf.as_mut_ptr(), buf.len());
+            assert_eq!(buf, [0u8; 16], "指定バッファのゼロ消去に成功。");
+
+            // NULLポインタや長さ0、isize::MAX超過時に未定義動作を起こさず安全にリターンすることを検証。
+            fidelogic_wasm_zeroize_test(core::ptr::null_mut(), 16);
+            fidelogic_wasm_zeroize_test(buf.as_mut_ptr(), 0);
+            fidelogic_wasm_zeroize_test(buf.as_mut_ptr(), usize::MAX);
         }
     }
 }
