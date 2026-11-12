@@ -1,0 +1,3070 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Shared golden test vectors for PRECIS profiles (UsernameCaseMapped and OpaqueString) aligned with proofs/Theories/PrecisProfile.v, crates/fidelogic-core/src/precis.rs, and future TypeScript SDK.",
+  "standards": [
+    "RFC 7564",
+    "RFC 8264",
+    "RFC 8265"
+  ],
+  "formal_model": "proofs/Theories/PrecisProfile.v",
+  "rust_implementation": "crates/fidelogic-core/src/precis.rs",
+  "vector_count": 124,
+  "vectors": [
+    {
+      "id": "rocq_golden_00_ascii_mixed",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_golden_suite[0]",
+      "description": "ASCII mixed-case 'User'",
+      "input": {
+        "codepoints": [85, 115, 101, 114],
+        "utf8": "User"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [117, 115, 101, 114],
+        "utf8": "user",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [85, 115, 101, 114],
+        "utf8": "User",
+        "error": null
+      },
+      "rocq_suite_index": 0
+    },
+    {
+      "id": "rocq_golden_01_ascii_upper",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_golden_suite[1]",
+      "description": "ASCII uppercase 'USER'",
+      "input": {
+        "codepoints": [85, 83, 69, 82],
+        "utf8": "USER"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [117, 115, 101, 114],
+        "utf8": "user",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [85, 83, 69, 82],
+        "utf8": "USER",
+        "error": null
+      },
+      "rocq_suite_index": 1
+    },
+    {
+      "id": "rocq_golden_02_ascii_lower",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_golden_suite[2]",
+      "description": "ASCII lowercase 'user' identity",
+      "input": {
+        "codepoints": [117, 115, 101, 114],
+        "utf8": "user"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [117, 115, 101, 114],
+        "utf8": "user",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [117, 115, 101, 114],
+        "utf8": "user",
+        "error": null
+      },
+      "rocq_suite_index": 2
+    },
+    {
+      "id": "rocq_golden_03_greek_upper",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_golden_suite[3]",
+      "description": "Greek uppercase '\u039f\u03a3'",
+      "input": {
+        "codepoints": [927, 931],
+        "utf8": "\u039f\u03a3"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [959, 963],
+        "utf8": "\u03bf\u03c3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [927, 931],
+        "utf8": "\u039f\u03a3",
+        "error": null
+      },
+      "rocq_suite_index": 3
+    },
+    {
+      "id": "rocq_golden_04_cyrillic_mixed",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_golden_suite[4]",
+      "description": "Cyrillic '\u0418\u0432\u0430\u043d'",
+      "input": {
+        "codepoints": [1048, 1074, 1072, 1085],
+        "utf8": "\u0418\u0432\u0430\u043d"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [1080, 1074, 1072, 1085],
+        "utf8": "\u0438\u0432\u0430\u043d",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [1048, 1074, 1072, 1085],
+        "utf8": "\u0418\u0432\u0430\u043d",
+        "error": null
+      },
+      "rocq_suite_index": 4
+    },
+    {
+      "id": "rocq_golden_05_latin1_upper",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_golden_suite[5]",
+      "description": "Latin-1 uppercase '\u00c9'",
+      "input": {
+        "codepoints": [201],
+        "utf8": "\u00c9"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [233],
+        "utf8": "\u00e9",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [201],
+        "utf8": "\u00c9",
+        "error": null
+      },
+      "rocq_suite_index": 5
+    },
+    {
+      "id": "rocq_golden_06_ascii_space_discrepancy",
+      "category": "profile_discrepancy",
+      "source": "PrecisProfile.v:precis_golden_suite[6]",
+      "description": "ASCII space in 'user name'",
+      "input": {
+        "codepoints": [117, 115, 101, 114, 32, 110, 97, 109, 101],
+        "utf8": "user name"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [117, 115, 101, 114, 32, 110, 97, 109, 101],
+        "utf8": "user name",
+        "error": null
+      },
+      "rocq_suite_index": 6
+    },
+    {
+      "id": "rocq_golden_07_empty",
+      "category": "disallowed_empty",
+      "source": "PrecisProfile.v:precis_golden_suite[7]",
+      "description": "Empty input sequence",
+      "input": {
+        "codepoints": [],
+        "utf8": ""
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "EmptyInput",
+          "codepoint": null
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "EmptyInput",
+          "codepoint": null
+        }
+      },
+      "rocq_suite_index": 7
+    },
+    {
+      "id": "rocq_golden_08_nul",
+      "category": "disallowed_control",
+      "source": "PrecisProfile.v:precis_golden_suite[8]",
+      "description": "ASCII NUL (U+0000)",
+      "input": {
+        "codepoints": [0],
+        "utf8": "\u0000"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 0
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 0
+        }
+      },
+      "rocq_suite_index": 8
+    },
+    {
+      "id": "rocq_golden_09_tab",
+      "category": "disallowed_control",
+      "source": "PrecisProfile.v:precis_golden_suite[9]",
+      "description": "ASCII TAB (U+0009)",
+      "input": {
+        "codepoints": [9],
+        "utf8": "\t"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 9
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 9
+        }
+      },
+      "rocq_suite_index": 9
+    },
+    {
+      "id": "rocq_golden_10_surrogate",
+      "category": "disallowed_surrogate",
+      "source": "PrecisProfile.v:precis_golden_suite[10]",
+      "description": "UTF-16 surrogate U+D800",
+      "input": {
+        "codepoints": [55296],
+        "utf8": null
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 55296
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 55296
+        }
+      },
+      "rocq_suite_index": 10
+    },
+    {
+      "id": "rocq_golden_11_pua_bmp",
+      "category": "disallowed_pua",
+      "source": "PrecisProfile.v:precis_golden_suite[11]",
+      "description": "BMP Private Use U+E000",
+      "input": {
+        "codepoints": [57344],
+        "utf8": "\ue000"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 57344
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 57344
+        }
+      },
+      "rocq_suite_index": 11
+    },
+    {
+      "id": "rocq_golden_12_nonchar_ffff",
+      "category": "disallowed_noncharacter",
+      "source": "PrecisProfile.v:precis_golden_suite[12]",
+      "description": "Noncharacter U+FFFF",
+      "input": {
+        "codepoints": [65535],
+        "utf8": "\uffff"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 65535
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 65535
+        }
+      },
+      "rocq_suite_index": 12
+    },
+    {
+      "id": "rocq_golden_13_nonchar_fdd0",
+      "category": "disallowed_noncharacter",
+      "source": "PrecisProfile.v:precis_golden_suite[13]",
+      "description": "Noncharacter U+FDD0",
+      "input": {
+        "codepoints": [64976],
+        "utf8": "\ufdd0"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 64976
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 64976
+        }
+      },
+      "rocq_suite_index": 13
+    },
+    {
+      "id": "rocq_golden_14_nfc_e_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:precis_golden_suite[14]",
+      "description": "Latin 'e' + U+0301 -> '\u00e9'",
+      "input": {
+        "codepoints": [101, 769],
+        "utf8": "e\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [233],
+        "utf8": "\u00e9",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [233],
+        "utf8": "\u00e9",
+        "error": null
+      },
+      "rocq_suite_index": 14
+    },
+    {
+      "id": "rocq_golden_15_nfc_cap_a_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:precis_golden_suite[15]",
+      "description": "Latin 'A' + U+0308 -> '\u00e4' / '\u00c4'",
+      "input": {
+        "codepoints": [65, 776],
+        "utf8": "A\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [228],
+        "utf8": "\u00e4",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [196],
+        "utf8": "\u00c4",
+        "error": null
+      },
+      "rocq_suite_index": 15
+    },
+    {
+      "id": "rocq_golden_16_nfc_c_cedilla",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:precis_golden_suite[16]",
+      "description": "Latin 'c' + U+0327 -> '\u00e7'",
+      "input": {
+        "codepoints": [99, 807],
+        "utf8": "c\u0327"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [231],
+        "utf8": "\u00e7",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [231],
+        "utf8": "\u00e7",
+        "error": null
+      },
+      "rocq_suite_index": 16
+    },
+    {
+      "id": "rocq_golden_17_hangul_lv",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:precis_golden_suite[17]",
+      "description": "Hangul Jamo L+V -> '\uac00'",
+      "input": {
+        "codepoints": [4352, 4449],
+        "utf8": "\u1100\u1161"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [44032],
+        "utf8": "\uac00",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [44032],
+        "utf8": "\uac00",
+        "error": null
+      },
+      "rocq_suite_index": 17
+    },
+    {
+      "id": "rocq_golden_18_hangul_lvt",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:precis_golden_suite[18]",
+      "description": "Hangul Jamo L+V+T -> '\uac01'",
+      "input": {
+        "codepoints": [4352, 4449, 4520],
+        "utf8": "\u1100\u1161\u11a8"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [44033],
+        "utf8": "\uac01",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [44033],
+        "utf8": "\uac01",
+        "error": null
+      },
+      "rocq_suite_index": 18
+    },
+    {
+      "id": "rocq_golden_19_hangul_lv_t",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:precis_golden_suite[19]",
+      "description": "Hangul Syllable LV+T -> '\uac01'",
+      "input": {
+        "codepoints": [44032, 4520],
+        "utf8": "\uac00\u11a8"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [44033],
+        "utf8": "\uac01",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [44033],
+        "utf8": "\uac01",
+        "error": null
+      },
+      "rocq_suite_index": 19
+    },
+    {
+      "id": "rocq_lemma_password_with_space",
+      "category": "profile_discrepancy",
+      "source": "PrecisProfile.v:opaque_string_password_with_space",
+      "description": "Space-containing passphrase 'pass word' accepted by OpaqueString, rejected by UsernameCaseMapped.",
+      "input": {
+        "codepoints": [112, 97, 115, 115, 32, 119, 111, 114, 100],
+        "utf8": "pass word"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [112, 97, 115, 115, 32, 119, 111, 114, 100],
+        "utf8": "pass word",
+        "error": null
+      }
+    },
+    {
+      "id": "rocq_lemma_username_reject_tab",
+      "category": "disallowed_control",
+      "source": "PrecisProfile.v:test_vector_username_reject_tab",
+      "description": "Control character TAB inside 'u\\ts' rejected by both profiles.",
+      "input": {
+        "codepoints": [117, 9, 115],
+        "utf8": "u\ts"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 9
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 9
+        }
+      }
+    },
+    {
+      "id": "rocq_lemma_opaque_preserve_case",
+      "category": "profile_discrepancy",
+      "source": "PrecisProfile.v:test_vector_opaque_preserve_case",
+      "description": "Mixed-case password 'PassWord' preserves case in OpaqueString and folds in UsernameCaseMapped.",
+      "input": {
+        "codepoints": [80, 97, 115, 115, 87, 111, 114, 100],
+        "utf8": "PassWord"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [112, 97, 115, 115, 119, 111, 114, 100],
+        "utf8": "password",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [80, 97, 115, 115, 87, 111, 114, 100],
+        "utf8": "PassWord",
+        "error": null
+      }
+    },
+    {
+      "id": "rocq_lemma_opaque_reject_control_1f",
+      "category": "disallowed_control",
+      "source": "PrecisProfile.v:test_vector_opaque_reject_control_1f",
+      "description": "ASCII control upper boundary U+001F rejected by both profiles.",
+      "input": {
+        "codepoints": [31],
+        "utf8": "\u001f"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 31
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 31
+        }
+      }
+    },
+    {
+      "id": "rfc8265_t1_at_sign",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#1)",
+      "description": "The '@' sign is permitted in PRECIS IdentifierClass and FreeformClass.",
+      "input": {
+        "codepoints": [106, 117, 108, 105, 101, 116, 64, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109],
+        "utf8": "juliet@example.com"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [106, 117, 108, 105, 101, 116, 64, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109],
+        "utf8": "juliet@example.com",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [106, 117, 108, 105, 101, 116, 64, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109],
+        "utf8": "juliet@example.com",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_at_sign_mixed_case",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#1 variant)",
+      "description": "Mixed-case email-like username 'Juliet@Example.COM' folds under UsernameCaseMapped.",
+      "input": {
+        "codepoints": [74, 117, 108, 105, 101, 116, 64, 69, 120, 97, 109, 112, 108, 101, 46, 67, 79, 77],
+        "utf8": "Juliet@Example.COM"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [106, 117, 108, 105, 101, 116, 64, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109],
+        "utf8": "juliet@example.com",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [74, 117, 108, 105, 101, 116, 64, 69, 120, 97, 109, 112, 108, 101, 46, 67, 79, 77],
+        "utf8": "Juliet@Example.COM",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_fussball",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#2)",
+      "description": "ASCII 'fussball' remains distinct from 'fu\u00dfball'.",
+      "input": {
+        "codepoints": [102, 117, 115, 115, 98, 97, 108, 108],
+        "utf8": "fussball"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [102, 117, 115, 115, 98, 97, 108, 108],
+        "utf8": "fussball",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [102, 117, 115, 115, 98, 97, 108, 108],
+        "utf8": "fussball",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_sharp_s",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#3)",
+      "description": "German Eszett '\u00df' (U+00DF) is preserved without mapping to 'ss'.",
+      "input": {
+        "codepoints": [102, 117, 223, 98, 97, 108, 108],
+        "utf8": "fu\u00dfball"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [102, 117, 223, 98, 97, 108, 108],
+        "utf8": "fu\u00dfball",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [102, 117, 223, 98, 97, 108, 108],
+        "utf8": "fu\u00dfball",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_greek_pi",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#4)",
+      "description": "Greek lowercase pi '\u03c0' (U+03C0) is valid.",
+      "input": {
+        "codepoints": [960],
+        "utf8": "\u03c0"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [960],
+        "utf8": "\u03c0",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [960],
+        "utf8": "\u03c0",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_greek_cap_sigma",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#5)",
+      "description": "Greek uppercase Sigma '\u03a3' (U+03A3) folds to '\u03c3' (U+03C3) in UsernameCaseMapped.",
+      "input": {
+        "codepoints": [931],
+        "utf8": "\u03a3"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [963],
+        "utf8": "\u03c3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [931],
+        "utf8": "\u03a3",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_greek_small_sigma",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#6)",
+      "description": "Greek lowercase sigma '\u03c3' (U+03C3) is unchanged.",
+      "input": {
+        "codepoints": [963],
+        "utf8": "\u03c3"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [963],
+        "utf8": "\u03c3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [963],
+        "utf8": "\u03c3",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t1_greek_final_sigma",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 1 (#7)",
+      "description": "Greek final sigma '\u03c2' (U+03C2) is distinct and unchanged.",
+      "input": {
+        "codepoints": [962],
+        "utf8": "\u03c2"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [962],
+        "utf8": "\u03c2",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [962],
+        "utf8": "\u03c2",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t2_foo_bar_space",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 3.6 Table 2 (#1)",
+      "description": "Interior space 'foo bar' violates userpart (IdentifierClass) but is valid under OpaqueString.",
+      "input": {
+        "codepoints": [102, 111, 111, 32, 98, 97, 114],
+        "utf8": "foo bar"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [102, 111, 111, 32, 98, 97, 114],
+        "utf8": "foo bar",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t3_passphrase_lower",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 4.3 Table 3 (#12)",
+      "description": "Space-separated passphrase 'correct horse battery staple' is legal in OpaqueString.",
+      "input": {
+        "codepoints": [99, 111, 114, 114, 101, 99, 116, 32, 104, 111, 114, 115, 101, 32, 98, 97, 116, 116, 101, 114, 121, 32, 115, 116, 97, 112, 108, 101],
+        "utf8": "correct horse battery staple"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [99, 111, 114, 114, 101, 99, 116, 32, 104, 111, 114, 115, 101, 32, 98, 97, 116, 116, 101, 114, 121, 32, 115, 116, 97, 112, 108, 101],
+        "utf8": "correct horse battery staple",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t3_passphrase_title",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 4.3 Table 3 (#13)",
+      "description": "Case-sensitive passphrase 'Correct Horse Battery Staple' preserves case in OpaqueString.",
+      "input": {
+        "codepoints": [67, 111, 114, 114, 101, 99, 116, 32, 72, 111, 114, 115, 101, 32, 66, 97, 116, 116, 101, 114, 121, 32, 83, 116, 97, 112, 108, 101],
+        "utf8": "Correct Horse Battery Staple"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [67, 111, 114, 114, 101, 99, 116, 32, 72, 111, 114, 115, 101, 32, 66, 97, 116, 116, 101, 114, 121, 32, 83, 116, 97, 112, 108, 101],
+        "utf8": "Correct Horse Battery Staple",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t3_leading_trailing_space",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 4.3",
+      "description": "Leading and trailing ASCII spaces are preserved in OpaqueString and rejected in UsernameCaseMapped.",
+      "input": {
+        "codepoints": [32, 32, 108, 101, 97, 100, 105, 110, 103, 32, 97, 110, 100, 32, 116, 114, 97, 105, 108, 105, 110, 103, 32, 32],
+        "utf8": "  leading and trailing  "
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [32, 32, 108, 101, 97, 100, 105, 110, 103, 32, 97, 110, 100, 32, 116, 114, 97, 105, 108, 105, 110, 103, 32, 32],
+        "utf8": "  leading and trailing  ",
+        "error": null
+      }
+    },
+    {
+      "id": "rfc8265_t4_tab_in_password",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 4.3 Table 4",
+      "description": "TAB control character (U+0009) inside 'my cat is a \\tby' violates both profiles.",
+      "input": {
+        "codepoints": [109, 121, 32, 99, 97, 116, 32, 105, 115, 32, 97, 32, 9, 98, 121],
+        "utf8": "my cat is a \tby"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 9
+        }
+      }
+    },
+    {
+      "id": "rfc8265_t3_ascii_symbols_password",
+      "category": "rfc8265_appendix",
+      "source": "RFC 8265 Section 4.3",
+      "description": "Printable ASCII symbols in '<secret_!#123>' are preserved.",
+      "input": {
+        "codepoints": [60, 115, 101, 99, 114, 101, 116, 95, 33, 35, 49, 50, 51, 62],
+        "utf8": "<secret_!#123>"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [60, 115, 101, 99, 114, 101, 116, 95, 33, 35, 49, 50, 51, 62],
+        "utf8": "<secret_!#123>",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [60, 115, 101, 99, 114, 101, 116, 95, 33, 35, 49, 50, 51, 62],
+        "utf8": "<secret_!#123>",
+        "error": null
+      }
+    },
+    {
+      "id": "fold_ascii_boundaries",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_fold_cp",
+      "description": "ASCII range boundaries '@'(0x40), 'A'(0x41), 'Z'(0x5A), '['(0x5B).",
+      "input": {
+        "codepoints": [64, 65, 90, 91],
+        "utf8": "@AZ["
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [64, 97, 122, 91],
+        "utf8": "@az[",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [64, 65, 90, 91],
+        "utf8": "@AZ[",
+        "error": null
+      }
+    },
+    {
+      "id": "fold_latin1_boundaries",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_fold_cp",
+      "description": "Latin-1 uppercase ranges U+00C0..U+00D6, U+00D8..U+00DE with U+00D7 ('\u00d7') and U+00DF ('\u00df') excluded.",
+      "input": {
+        "codepoints": [192, 214, 215, 216, 222, 223],
+        "utf8": "\u00c0\u00d6\u00d7\u00d8\u00de\u00df"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [224, 246, 215, 248, 254, 223],
+        "utf8": "\u00e0\u00f6\u00d7\u00f8\u00fe\u00df",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [192, 214, 215, 216, 222, 223],
+        "utf8": "\u00c0\u00d6\u00d7\u00d8\u00de\u00df",
+        "error": null
+      }
+    },
+    {
+      "id": "fold_greek_boundaries",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_fold_cp",
+      "description": "Greek uppercase ranges U+0391..U+03A1, U+03A3..U+03AB with U+03A2 excluded.",
+      "input": {
+        "codepoints": [913, 929, 930, 931, 939],
+        "utf8": "\u0391\u03a1\u03a2\u03a3\u03ab"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [945, 961, 930, 963, 971],
+        "utf8": "\u03b1\u03c1\u03a2\u03c3\u03cb",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [913, 929, 930, 931, 939],
+        "utf8": "\u0391\u03a1\u03a2\u03a3\u03ab",
+        "error": null
+      }
+    },
+    {
+      "id": "fold_cyrillic_boundaries",
+      "category": "case_folding",
+      "source": "PrecisProfile.v:precis_fold_cp",
+      "description": "Cyrillic uppercase boundaries U+0410 ('\u0410') and U+042F ('\u042f').",
+      "input": {
+        "codepoints": [1040, 1071],
+        "utf8": "\u0410\u042f"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [1072, 1103],
+        "utf8": "\u0430\u044f",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [1040, 1071],
+        "utf8": "\u0410\u042f",
+        "error": null
+      }
+    },
+    {
+      "id": "fold_non_latin_cjk_emoji",
+      "category": "boundary_preserved",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Japanese Hiragana and supplementary plane emoji U+1F511 remain unchanged and allowed.",
+      "input": {
+        "codepoints": [12354, 12356, 12358, 128273, 118, 97, 117, 108, 116],
+        "utf8": "\u3042\u3044\u3046\ud83d\udd11vault"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [12354, 12356, 12358, 128273, 118, 97, 117, 108, 116],
+        "utf8": "\u3042\u3044\u3046\ud83d\udd11vault",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [12354, 12356, 12358, 128273, 118, 97, 117, 108, 116],
+        "utf8": "\u3042\u3044\u3046\ud83d\udd11vault",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_a_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "A + U+0300 -> \u00e0 (User) / \u00c0 (Opaque).",
+      "input": {
+        "codepoints": [65, 768],
+        "utf8": "A\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [224],
+        "utf8": "\u00e0",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [192],
+        "utf8": "\u00c0",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_a_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "a + U+0300 -> \u00e0 in both profiles.",
+      "input": {
+        "codepoints": [97, 768],
+        "utf8": "a\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [224],
+        "utf8": "\u00e0",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [224],
+        "utf8": "\u00e0",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_a_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "A + U+0301 -> \u00e1 (User) / \u00c1 (Opaque).",
+      "input": {
+        "codepoints": [65, 769],
+        "utf8": "A\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [225],
+        "utf8": "\u00e1",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [193],
+        "utf8": "\u00c1",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_a_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "a + U+0301 -> \u00e1 in both profiles.",
+      "input": {
+        "codepoints": [97, 769],
+        "utf8": "a\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [225],
+        "utf8": "\u00e1",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [225],
+        "utf8": "\u00e1",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_a_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "A + U+0302 -> \u00e2 (User) / \u00c2 (Opaque).",
+      "input": {
+        "codepoints": [65, 770],
+        "utf8": "A\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [226],
+        "utf8": "\u00e2",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [194],
+        "utf8": "\u00c2",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_a_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "a + U+0302 -> \u00e2 in both profiles.",
+      "input": {
+        "codepoints": [97, 770],
+        "utf8": "a\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [226],
+        "utf8": "\u00e2",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [226],
+        "utf8": "\u00e2",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_a_tilde",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "A + U+0303 -> \u00e3 (User) / \u00c3 (Opaque).",
+      "input": {
+        "codepoints": [65, 771],
+        "utf8": "A\u0303"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [227],
+        "utf8": "\u00e3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [195],
+        "utf8": "\u00c3",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_a_tilde",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "a + U+0303 -> \u00e3 in both profiles.",
+      "input": {
+        "codepoints": [97, 771],
+        "utf8": "a\u0303"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [227],
+        "utf8": "\u00e3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [227],
+        "utf8": "\u00e3",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_a_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "a + U+0308 -> \u00e4 in both profiles.",
+      "input": {
+        "codepoints": [97, 776],
+        "utf8": "a\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [228],
+        "utf8": "\u00e4",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [228],
+        "utf8": "\u00e4",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_a_ring",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "A + U+030A -> \u00e5 (User) / \u00c5 (Opaque).",
+      "input": {
+        "codepoints": [65, 778],
+        "utf8": "A\u030a"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [229],
+        "utf8": "\u00e5",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [197],
+        "utf8": "\u00c5",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_a_ring",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "a + U+030A -> \u00e5 in both profiles.",
+      "input": {
+        "codepoints": [97, 778],
+        "utf8": "a\u030a"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [229],
+        "utf8": "\u00e5",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [229],
+        "utf8": "\u00e5",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_c_cedilla",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "C + U+0327 -> \u00e7 (User) / \u00c7 (Opaque).",
+      "input": {
+        "codepoints": [67, 807],
+        "utf8": "C\u0327"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [231],
+        "utf8": "\u00e7",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [199],
+        "utf8": "\u00c7",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_e_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "E + U+0300 -> \u00e8 (User) / \u00c8 (Opaque).",
+      "input": {
+        "codepoints": [69, 768],
+        "utf8": "E\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [232],
+        "utf8": "\u00e8",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [200],
+        "utf8": "\u00c8",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_e_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "e + U+0300 -> \u00e8 in both profiles.",
+      "input": {
+        "codepoints": [101, 768],
+        "utf8": "e\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [232],
+        "utf8": "\u00e8",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [232],
+        "utf8": "\u00e8",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_e_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "E + U+0301 -> \u00e9 (User) / \u00c9 (Opaque).",
+      "input": {
+        "codepoints": [69, 769],
+        "utf8": "E\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [233],
+        "utf8": "\u00e9",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [201],
+        "utf8": "\u00c9",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_e_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "E + U+0302 -> \u00ea (User) / \u00ca (Opaque).",
+      "input": {
+        "codepoints": [69, 770],
+        "utf8": "E\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [234],
+        "utf8": "\u00ea",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [202],
+        "utf8": "\u00ca",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_e_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "e + U+0302 -> \u00ea in both profiles.",
+      "input": {
+        "codepoints": [101, 770],
+        "utf8": "e\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [234],
+        "utf8": "\u00ea",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [234],
+        "utf8": "\u00ea",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_e_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "E + U+0308 -> \u00eb (User) / \u00cb (Opaque).",
+      "input": {
+        "codepoints": [69, 776],
+        "utf8": "E\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [235],
+        "utf8": "\u00eb",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [203],
+        "utf8": "\u00cb",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_e_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "e + U+0308 -> \u00eb in both profiles.",
+      "input": {
+        "codepoints": [101, 776],
+        "utf8": "e\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [235],
+        "utf8": "\u00eb",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [235],
+        "utf8": "\u00eb",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_i_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "I + U+0300 -> \u00ec (User) / \u00cc (Opaque).",
+      "input": {
+        "codepoints": [73, 768],
+        "utf8": "I\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [236],
+        "utf8": "\u00ec",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [204],
+        "utf8": "\u00cc",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_i_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "i + U+0300 -> \u00ec in both profiles.",
+      "input": {
+        "codepoints": [105, 768],
+        "utf8": "i\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [236],
+        "utf8": "\u00ec",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [236],
+        "utf8": "\u00ec",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_i_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "I + U+0301 -> \u00ed (User) / \u00cd (Opaque).",
+      "input": {
+        "codepoints": [73, 769],
+        "utf8": "I\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [237],
+        "utf8": "\u00ed",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [205],
+        "utf8": "\u00cd",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_i_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "i + U+0301 -> \u00ed in both profiles.",
+      "input": {
+        "codepoints": [105, 769],
+        "utf8": "i\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [237],
+        "utf8": "\u00ed",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [237],
+        "utf8": "\u00ed",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_i_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "I + U+0302 -> \u00ee (User) / \u00ce (Opaque).",
+      "input": {
+        "codepoints": [73, 770],
+        "utf8": "I\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [238],
+        "utf8": "\u00ee",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [206],
+        "utf8": "\u00ce",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_i_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "i + U+0302 -> \u00ee in both profiles.",
+      "input": {
+        "codepoints": [105, 770],
+        "utf8": "i\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [238],
+        "utf8": "\u00ee",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [238],
+        "utf8": "\u00ee",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_i_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "I + U+0308 -> \u00ef (User) / \u00cf (Opaque).",
+      "input": {
+        "codepoints": [73, 776],
+        "utf8": "I\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [239],
+        "utf8": "\u00ef",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [207],
+        "utf8": "\u00cf",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_i_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "i + U+0308 -> \u00ef in both profiles.",
+      "input": {
+        "codepoints": [105, 776],
+        "utf8": "i\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [239],
+        "utf8": "\u00ef",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [239],
+        "utf8": "\u00ef",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_o_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "O + U+0300 -> \u00f2 (User) / \u00d2 (Opaque).",
+      "input": {
+        "codepoints": [79, 768],
+        "utf8": "O\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [242],
+        "utf8": "\u00f2",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [210],
+        "utf8": "\u00d2",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_o_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "o + U+0300 -> \u00f2 in both profiles.",
+      "input": {
+        "codepoints": [111, 768],
+        "utf8": "o\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [242],
+        "utf8": "\u00f2",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [242],
+        "utf8": "\u00f2",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_o_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "O + U+0301 -> \u00f3 (User) / \u00d3 (Opaque).",
+      "input": {
+        "codepoints": [79, 769],
+        "utf8": "O\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [243],
+        "utf8": "\u00f3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [211],
+        "utf8": "\u00d3",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_o_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "o + U+0301 -> \u00f3 in both profiles.",
+      "input": {
+        "codepoints": [111, 769],
+        "utf8": "o\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [243],
+        "utf8": "\u00f3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [243],
+        "utf8": "\u00f3",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_o_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "O + U+0302 -> \u00f4 (User) / \u00d4 (Opaque).",
+      "input": {
+        "codepoints": [79, 770],
+        "utf8": "O\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [244],
+        "utf8": "\u00f4",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [212],
+        "utf8": "\u00d4",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_o_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "o + U+0302 -> \u00f4 in both profiles.",
+      "input": {
+        "codepoints": [111, 770],
+        "utf8": "o\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [244],
+        "utf8": "\u00f4",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [244],
+        "utf8": "\u00f4",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_o_tilde",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "O + U+0303 -> \u00f5 (User) / \u00d5 (Opaque).",
+      "input": {
+        "codepoints": [79, 771],
+        "utf8": "O\u0303"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [245],
+        "utf8": "\u00f5",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [213],
+        "utf8": "\u00d5",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_o_tilde",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "o + U+0303 -> \u00f5 in both profiles.",
+      "input": {
+        "codepoints": [111, 771],
+        "utf8": "o\u0303"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [245],
+        "utf8": "\u00f5",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [245],
+        "utf8": "\u00f5",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_o_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "O + U+0308 -> \u00f6 (User) / \u00d6 (Opaque).",
+      "input": {
+        "codepoints": [79, 776],
+        "utf8": "O\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [246],
+        "utf8": "\u00f6",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [214],
+        "utf8": "\u00d6",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_o_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "o + U+0308 -> \u00f6 in both profiles.",
+      "input": {
+        "codepoints": [111, 776],
+        "utf8": "o\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [246],
+        "utf8": "\u00f6",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [246],
+        "utf8": "\u00f6",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_u_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "U + U+0300 -> \u00f9 (User) / \u00d9 (Opaque).",
+      "input": {
+        "codepoints": [85, 768],
+        "utf8": "U\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [249],
+        "utf8": "\u00f9",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [217],
+        "utf8": "\u00d9",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_u_grave",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "u + U+0300 -> \u00f9 in both profiles.",
+      "input": {
+        "codepoints": [117, 768],
+        "utf8": "u\u0300"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [249],
+        "utf8": "\u00f9",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [249],
+        "utf8": "\u00f9",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_u_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "U + U+0301 -> \u00fa (User) / \u00da (Opaque).",
+      "input": {
+        "codepoints": [85, 769],
+        "utf8": "U\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [250],
+        "utf8": "\u00fa",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [218],
+        "utf8": "\u00da",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_u_acute",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "u + U+0301 -> \u00fa in both profiles.",
+      "input": {
+        "codepoints": [117, 769],
+        "utf8": "u\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [250],
+        "utf8": "\u00fa",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [250],
+        "utf8": "\u00fa",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_u_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "U + U+0302 -> \u00fb (User) / \u00db (Opaque).",
+      "input": {
+        "codepoints": [85, 770],
+        "utf8": "U\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [251],
+        "utf8": "\u00fb",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [219],
+        "utf8": "\u00db",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_u_circumflex",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "u + U+0302 -> \u00fb in both profiles.",
+      "input": {
+        "codepoints": [117, 770],
+        "utf8": "u\u0302"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [251],
+        "utf8": "\u00fb",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [251],
+        "utf8": "\u00fb",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_cap_u_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "U + U+0308 -> \u00fc (User) / \u00dc (Opaque).",
+      "input": {
+        "codepoints": [85, 776],
+        "utf8": "U\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [252],
+        "utf8": "\u00fc",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [220],
+        "utf8": "\u00dc",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_lower_u_diaeresis",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "u + U+0308 -> \u00fc in both profiles.",
+      "input": {
+        "codepoints": [117, 776],
+        "utf8": "u\u0308"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [252],
+        "utf8": "\u00fc",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [252],
+        "utf8": "\u00fc",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_mixed_cafe_nfd",
+      "category": "combining_nfc",
+      "source": "RFC 8265 / PrecisProfile.v",
+      "description": "Mixed string 'Cafe\\u0301' composes and folds to 'caf\u00e9' / 'Caf\u00e9'.",
+      "input": {
+        "codepoints": [67, 97, 102, 101, 769],
+        "utf8": "Cafe\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [99, 97, 102, 233],
+        "utf8": "caf\u00e9",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [67, 97, 102, 233],
+        "utf8": "Caf\u00e9",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_mixed_latin_hangul",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:precis_nfc_normalize",
+      "description": "Consecutive composition across Latin + Hangul L+V+T + trailing ASCII.",
+      "input": {
+        "codepoints": [65, 776, 4352, 4449, 4520, 122],
+        "utf8": "A\u0308\u1100\u1161\u11a8z"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [228, 44033, 122],
+        "utf8": "\u00e4\uac01z",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [196, 44033, 122],
+        "utf8": "\u00c4\uac01z",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_non_composing_pair_preserved",
+      "category": "combining_nfc",
+      "source": "PrecisProfile.v:precis_nfc_normalize",
+      "description": "Non-composing pair 'b' + U+0301 remains uncomposed and allowed.",
+      "input": {
+        "codepoints": [98, 769],
+        "utf8": "b\u0301"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [98, 769],
+        "utf8": "b\u0301",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [98, 769],
+        "utf8": "b\u0301",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_hangul_max_lv",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:compose_hangul_syllable",
+      "description": "Hangul Jamo upper boundary L(U+1112) + V(U+1175) -> '\ud788'(U+D788).",
+      "input": {
+        "codepoints": [4370, 4469],
+        "utf8": "\u1112\u1175"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [55176],
+        "utf8": "\ud788",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [55176],
+        "utf8": "\ud788",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_hangul_max_lvt",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:compose_hangul_trailing",
+      "description": "Hangul Jamo upper boundary L(U+1112) + V(U+1175) + T(U+11C2) -> '\ud7a3'(U+D7A3).",
+      "input": {
+        "codepoints": [4370, 4469, 4546],
+        "utf8": "\u1112\u1175\u11c2"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [55203],
+        "utf8": "\ud7a3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [55203],
+        "utf8": "\ud7a3",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_hangul_already_composed_lvt",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:compose_pair",
+      "description": "Precomposed Hangul LVT '\ud7a3'(U+D7A3) is already normalized and idempotent.",
+      "input": {
+        "codepoints": [55203],
+        "utf8": "\ud7a3"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [55203],
+        "utf8": "\ud7a3",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [55203],
+        "utf8": "\ud7a3",
+        "error": null
+      }
+    },
+    {
+      "id": "nfc_hangul_unpaired_jamo",
+      "category": "hangul_nfc",
+      "source": "PrecisProfile.v:precis_nfc_normalize",
+      "description": "Reverse order V+L [U+1161, U+1100] does not compose.",
+      "input": {
+        "codepoints": [4449, 4352],
+        "utf8": "\u1161\u1100"
+      },
+      "username_case_mapped": {
+        "status": "ok",
+        "codepoints": [4449, 4352],
+        "utf8": "\u1161\u1100",
+        "error": null
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [4449, 4352],
+        "utf8": "\u1161\u1100",
+        "error": null
+      }
+    },
+    {
+      "id": "reject_ascii_ctrl_0x01",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "ASCII control U+0001 (SOH) rejected.",
+      "input": {
+        "codepoints": [1],
+        "utf8": "\u0001"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1
+        }
+      }
+    },
+    {
+      "id": "reject_ascii_ctrl_lf",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "ASCII LF (U+000A) rejected.",
+      "input": {
+        "codepoints": [97, 10, 98],
+        "utf8": "a\nb"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 10
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 10
+        }
+      }
+    },
+    {
+      "id": "reject_ascii_ctrl_cr",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "ASCII CR (U+000D) rejected.",
+      "input": {
+        "codepoints": [97, 13, 98],
+        "utf8": "a\rb"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 13
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 13
+        }
+      }
+    },
+    {
+      "id": "reject_ascii_ctrl_del",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "ASCII DEL (U+007F) rejected.",
+      "input": {
+        "codepoints": [127],
+        "utf8": "\u007f"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 127
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 127
+        }
+      }
+    },
+    {
+      "id": "reject_non_ascii_ctrl_0x80",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "Non-ASCII C1 control lower boundary U+0080 rejected.",
+      "input": {
+        "codepoints": [128],
+        "utf8": "\u0080"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 128
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 128
+        }
+      }
+    },
+    {
+      "id": "reject_non_ascii_ctrl_0x85",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "Non-ASCII C1 control NEL (U+0085) rejected.",
+      "input": {
+        "codepoints": [133],
+        "utf8": "\u0085"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 133
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 133
+        }
+      }
+    },
+    {
+      "id": "reject_non_ascii_ctrl_0x9f",
+      "category": "disallowed_control",
+      "source": "RFC 7564 Section 4.2.3 / PrecisProfile.v",
+      "description": "Non-ASCII C1 control upper boundary U+009F rejected.",
+      "input": {
+        "codepoints": [159],
+        "utf8": "\u009f"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 159
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 159
+        }
+      }
+    },
+    {
+      "id": "reject_space_leading_user",
+      "category": "disallowed_space",
+      "source": "RFC 8265 Section 3.3",
+      "description": "Leading ASCII space rejected in UsernameCaseMapped, allowed in OpaqueString.",
+      "input": {
+        "codepoints": [32, 97, 108, 105, 99, 101],
+        "utf8": " alice"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [32, 97, 108, 105, 99, 101],
+        "utf8": " alice",
+        "error": null
+      }
+    },
+    {
+      "id": "reject_space_trailing_user",
+      "category": "disallowed_space",
+      "source": "RFC 8265 Section 3.3",
+      "description": "Trailing ASCII space rejected in UsernameCaseMapped, allowed in OpaqueString.",
+      "input": {
+        "codepoints": [97, 108, 105, 99, 101, 32],
+        "utf8": "alice "
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "ok",
+        "codepoints": [97, 108, 105, 99, 101, 32],
+        "utf8": "alice ",
+        "error": null
+      }
+    },
+    {
+      "id": "reject_surrogate_low_bound",
+      "category": "disallowed_surrogate",
+      "source": "RFC 7564 / Unicode Scalar",
+      "description": "Surrogate upper boundary U+DFFF rejected (non-UTF8 codepoint sequence).",
+      "input": {
+        "codepoints": [57343],
+        "utf8": null
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 57343
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 57343
+        }
+      }
+    },
+    {
+      "id": "reject_pua_bmp_upper",
+      "category": "disallowed_pua",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "BMP Private Use upper boundary U+F8FF rejected.",
+      "input": {
+        "codepoints": [63743],
+        "utf8": "\uf8ff"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 63743
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 63743
+        }
+      }
+    },
+    {
+      "id": "reject_pua_plane15_lower",
+      "category": "disallowed_pua",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 15 Private Use lower boundary U+F0000 rejected.",
+      "input": {
+        "codepoints": [983040],
+        "utf8": "\udb80\udc00"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 983040
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 983040
+        }
+      }
+    },
+    {
+      "id": "reject_pua_plane15_upper",
+      "category": "disallowed_pua",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 15 Private Use upper boundary U+FFFFD rejected.",
+      "input": {
+        "codepoints": [1048573],
+        "utf8": "\udbbf\udffd"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1048573
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1048573
+        }
+      }
+    },
+    {
+      "id": "reject_pua_plane16_lower",
+      "category": "disallowed_pua",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 16 Private Use lower boundary U+100000 rejected.",
+      "input": {
+        "codepoints": [1048576],
+        "utf8": "\udbc0\udc00"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1048576
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1048576
+        }
+      }
+    },
+    {
+      "id": "reject_pua_plane16_upper",
+      "category": "disallowed_pua",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 16 Private Use upper boundary U+10FFFD rejected.",
+      "input": {
+        "codepoints": [1114109],
+        "utf8": "\udbff\udffd"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114109
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114109
+        }
+      }
+    },
+    {
+      "id": "reject_nonchar_fdef",
+      "category": "disallowed_noncharacter",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Noncharacter range upper boundary U+FDEF rejected.",
+      "input": {
+        "codepoints": [65007],
+        "utf8": "\ufdef"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 65007
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 65007
+        }
+      }
+    },
+    {
+      "id": "reject_nonchar_fffe",
+      "category": "disallowed_noncharacter",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "BMP noncharacter U+FFFE rejected.",
+      "input": {
+        "codepoints": [65534],
+        "utf8": "\ufffe"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 65534
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 65534
+        }
+      }
+    },
+    {
+      "id": "reject_nonchar_1fffe",
+      "category": "disallowed_noncharacter",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 1 noncharacter U+1FFFE rejected.",
+      "input": {
+        "codepoints": [131070],
+        "utf8": "\ud83f\udffe"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 131070
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 131070
+        }
+      }
+    },
+    {
+      "id": "reject_nonchar_10fffe",
+      "category": "disallowed_noncharacter",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 16 noncharacter U+10FFFE rejected.",
+      "input": {
+        "codepoints": [1114110],
+        "utf8": "\udbff\udffe"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114110
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114110
+        }
+      }
+    },
+    {
+      "id": "reject_nonchar_10ffff",
+      "category": "disallowed_noncharacter",
+      "source": "RFC 7564 / PrecisProfile.v",
+      "description": "Plane 16 noncharacter U+10FFFF rejected.",
+      "input": {
+        "codepoints": [1114111],
+        "utf8": "\udbff\udfff"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114111
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114111
+        }
+      }
+    },
+    {
+      "id": "reject_out_of_bounds_110000",
+      "category": "disallowed_out_of_bounds",
+      "source": "PrecisProfile.v:is_out_of_bounds",
+      "description": "Code point U+110000 (> U+10FFFF) rejected.",
+      "input": {
+        "codepoints": [1114112],
+        "utf8": null
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114112
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114112
+        }
+      }
+    },
+    {
+      "id": "reject_out_of_bounds_u32_max",
+      "category": "disallowed_out_of_bounds",
+      "source": "PrecisProfile.v:is_out_of_bounds",
+      "description": "u32::MAX (0xFFFFFFFF) rejected.",
+      "input": {
+        "codepoints": [4294967295],
+        "utf8": null
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 4294967295
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 4294967295
+        }
+      }
+    },
+    {
+      "id": "mutation_leading_nul",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "Valid username mutated with leading NUL (U+0000).",
+      "input": {
+        "codepoints": [0, 97, 108, 105, 99, 101],
+        "utf8": "\u0000alice"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 0
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 0
+        }
+      }
+    },
+    {
+      "id": "mutation_middle_c1_nel",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "Valid string mutated with middle C1 control U+0085.",
+      "input": {
+        "codepoints": [65, 108, 105, 99, 101, 133, 66, 111, 98],
+        "utf8": "Alice\u0085Bob"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 133
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 133
+        }
+      }
+    },
+    {
+      "id": "mutation_space_then_control",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "First disallowed differs per profile: UsernameCaseMapped detects U+0020, OpaqueString skips U+0020 and detects U+001F.",
+      "input": {
+        "codepoints": [65, 108, 105, 99, 101, 32, 31, 66, 111, 98],
+        "utf8": "Alice \u001fBob"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 32
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 31
+        }
+      }
+    },
+    {
+      "id": "mutation_middle_pua",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "Valid string mutated with middle BMP PUA U+E000.",
+      "input": {
+        "codepoints": [117, 115, 101, 114, 57344, 110, 97, 109, 101],
+        "utf8": "user\ue000name"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 57344
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 57344
+        }
+      }
+    },
+    {
+      "id": "mutation_trailing_nonchar",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "NFC-composed input mutated with trailing noncharacter U+FDD0.",
+      "input": {
+        "codepoints": [101, 769, 64976],
+        "utf8": "e\u0301\ufdd0"
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 64976
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 64976
+        }
+      }
+    },
+    {
+      "id": "mutation_middle_surrogate",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "Valid codepoint sequence mutated with middle surrogate U+D800.",
+      "input": {
+        "codepoints": [117, 115, 101, 114, 55296, 49],
+        "utf8": null
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 55296
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 55296
+        }
+      }
+    },
+    {
+      "id": "mutation_trailing_oob",
+      "category": "mutation_rejection",
+      "source": "RFC 7564 / PrecisProfile.v (mutation)",
+      "description": "Valid codepoint sequence mutated with trailing out-of-bounds 0x110000.",
+      "input": {
+        "codepoints": [117, 115, 101, 114, 1114112],
+        "utf8": null
+      },
+      "username_case_mapped": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114112
+        }
+      },
+      "opaque_string": {
+        "status": "err",
+        "codepoints": null,
+        "utf8": null,
+        "error": {
+          "kind": "DisallowedCodePoint",
+          "codepoint": 1114112
+        }
+      }
+    }
+  ],
+  "rfc_extended_reference_vectors": [
+    {
+      "id": "rfc8265_t2_roman_numeral_four",
+      "source": "RFC 8265 Section 3.6 Table 2 (#3)",
+      "description": "Compatibility equivalent 'henry\u2163' (U+2163): disallowed by full RFC 8265 IdentifierClass (HasCompat), outside current bounded PrecisProfile.v model.",
+      "input": {
+        "codepoints": [104, 101, 110, 114, 121, 8547],
+        "utf8": "henry\u2163"
+      },
+      "rfc_full_expected": {
+        "username_case_mapped": "err",
+        "opaque_string": "ok",
+        "reason": "U+2163 has compatibility decomposition (<compat> 0049 0056) which is disallowed in IdentifierClass (RFC 7564 Section 9.17)."
+      },
+      "current_model_scope": "out_of_scope_compat_table"
+    },
+    {
+      "id": "rfc8265_t2_infinity_symbol",
+      "source": "RFC 8265 Section 3.6 Table 2 (#4)",
+      "description": "Math symbol '\u221e' (U+221E): disallowed by full RFC 8265 IdentifierClass (Symbols/Sm), outside current bounded PrecisProfile.v model.",
+      "input": {
+        "codepoints": [8734],
+        "utf8": "\u221e"
+      },
+      "rfc_full_expected": {
+        "username_case_mapped": "err",
+        "opaque_string": "ok",
+        "reason": "U+221E (Sm) is disallowed in IdentifierClass (RFC 7564 Section 4.2.3)."
+      },
+      "current_model_scope": "out_of_scope_unicode_category_table"
+    },
+    {
+      "id": "rfc8265_sec3_3_width_mapping_fullwidth",
+      "source": "RFC 8265 Section 3.3 / RFC 7564 Section 5.2.1",
+      "description": "Fullwidth Latin '\uff21\uff4c\uff49\uff43\uff45' (U+FF21..): mapped to 'alice' via Width Mapping in full UsernameCaseMapped, preserved in OpaqueString.",
+      "input": {
+        "codepoints": [65313, 65356, 65353, 65347, 65349],
+        "utf8": "\uff21\uff4c\uff49\uff43\uff45"
+      },
+      "rfc_full_expected": {
+        "username_case_mapped": "ok:alice",
+        "opaque_string": "ok:\uff21\uff4c\uff49\uff43\uff45",
+        "reason": "RFC 8265 Section 3.3 applies width mapping before case mapping."
+      },
+      "current_model_scope": "out_of_scope_width_mapping"
+    },
+    {
+      "id": "rfc8265_sec4_2_non_ascii_space_nbsp",
+      "source": "RFC 8265 Section 4.2.2",
+      "description": "Non-breaking space U+00A0 in 'pass\\u00A0word': mapped to U+0020 in full OpaqueString, disallowed in full UsernameCaseMapped.",
+      "input": {
+        "codepoints": [112, 97, 115, 115, 160, 119, 111, 114, 100],
+        "utf8": "pass\u00a0word"
+      },
+      "rfc_full_expected": {
+        "username_case_mapped": "err",
+        "opaque_string": "ok:pass word",
+        "reason": "RFC 8265 Section 4.2.2 maps Unicode Zs spaces to ASCII U+0020."
+      },
+      "current_model_scope": "out_of_scope_zs_space_mapping"
+    }
+  ]
+}
