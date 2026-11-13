@@ -254,11 +254,8 @@ impl VaultCipher {
     /// 本暗号インスタンスの暗号スイート識別子を返す。
     #[inline]
     #[must_use]
-    pub const fn suite_id(&self) -> CipherSuiteId {
-        // 安全性: self.inner は VaultCipher::new で有効な VaultCipherInner により初期化され、
-        // Drop 実行前まで破棄されない。ManuallyDrop<T> は T と同一レイアウトを持つ。
-        let inner = unsafe { &*core::ptr::addr_of!(self.inner).cast::<VaultCipherInner>() };
-        match inner {
+    pub fn suite_id(&self) -> CipherSuiteId {
+        match &*self.inner {
             VaultCipherInner::XChaCha20Poly1305(_) => CipherSuiteId::XChaCha20Poly1305,
             VaultCipherInner::Aes256GcmSiv(_) => CipherSuiteId::Aes256GcmSiv,
         }
@@ -267,14 +264,14 @@ impl VaultCipher {
     /// 本暗号インスタンスで要求されるノンス長(バイト数)を返す。
     #[inline]
     #[must_use]
-    pub const fn nonce_len(&self) -> usize {
+    pub fn nonce_len(&self) -> usize {
         self.suite_id().nonce_len()
     }
 
     /// 本暗号インスタンスで要求される認証タグ長(バイト数)を返す。
     #[inline]
     #[must_use]
-    pub const fn tag_len(&self) -> usize {
+    pub fn tag_len(&self) -> usize {
         self.suite_id().tag_len()
     }
 
