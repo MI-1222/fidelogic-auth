@@ -226,7 +226,32 @@ impl From<KdfKind> for u8 {
 
 /// Slot 0 (Argon2id マスターパスワード) の暗号化 DEK ペイロード構造体。
 ///
-/// KDF パラメータ, ソルト, 192-bit ノンス, 暗号化 DEK 本体, 認証タグを保持する。
+/// [`KekSlotEntry::wrapped_dek`] 内に格納される固定長 100 バイトのバイナリ表現を扱う。
+/// KDF パラメータとソルトは AEAD 関連データ (AAD) にもバインドされ、
+/// パラメータダウングレードやスロット間のすり替えを検知する。
+///
+/// ## バイナリ構造 (100バイト)
+/// | フィールド | サイズ | 内容 |
+/// | :--- | :--- | :--- |
+/// | `m_cost` | 4B (BE) | メモリコスト (KiB) |
+/// | `t_cost` | 4B (BE) | 時間コスト (反復回数) |
+/// | `p_cost` | 4B (BE) | 並列度 (レーン数) |
+/// | `salt` | 16B | Argon2id ソルト |
+/// | `nonce` | 24B | XChaCha20-Poly1305 ノンス |
+/// | `ciphertext` | 32B | 暗号化 DEK (256-bit) |
+/// | `auth_tag` | 16B | Poly1305 認証タグ |
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "Argon2idSlotPayload （100バイト）" as Slot0 {
+///     state "KDF設定 （m_cost: 4B, t_cost: 4B, p_cost: 4B, salt: 16B）" as KdfHeader
+///     state "暗号化DEK （nonce: 24B, ciphertext: 32B, auth_tag: 16B）" as SealedDek
+///   }
+///   KdfHeader --> KEK: Argon2id 鍵導出
+///   KEK --> PlainDEK: XChaCha20-Poly1305 復号
+///   SealedDek --> PlainDEK
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Argon2idSlotPayload {
     /// 復号時に使用する Argon2id パラメータ (`output_len == 32` 固定)。
@@ -426,7 +451,13 @@ const SLOT2_SPEC: HkdfSlotSpec = HkdfSlotSpec {
 
 /// Slot 1 (WebAuthn PRF / HKDF-SHA256) の暗号化 DEK ペイロード構造体。
 ///
-/// HKDF-SHA256 ソルト (32バイト), 192-bit ノンス (24バイト), 暗号化 DEK 本体 (32バイト), Poly1305 認証タグ (16バイト) の計 104 バイトを保持する。
+/// ## バイナリ構造 (104バイト)
+/// | フィールド | サイズ | 内容 |
+/// | :--- | :--- | :--- |
+/// | `salt` | 32B | HKDF-SHA256 ソルト |
+/// | `nonce` | 24B | XChaCha20-Poly1305 ノンス |
+/// | `ciphertext` | 32B | 暗号化 DEK (256-bit) |
+/// | `auth_tag` | 16B | Poly1305 認証タグ |
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrfSlotPayload {
     /// HKDF-SHA256 ソルト (32バイト)。
@@ -461,7 +492,6 @@ impl PrfSlotPayload {
     /// 固定長 104 バイトのバイナリ表現から [`PrfSlotPayload`] をデコードする。
     ///
     /// # Errors
-    ///
     /// 入力長が [`SLOT1_WRAPPED_DEK_LEN`] と一致しない場合は、
     /// [`VaultError::Parse`] ([`TlvParseError::InvalidLength`]) を返す。
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, VaultError> {
@@ -477,7 +507,6 @@ impl PrfSlotPayload {
     /// TLV の [`KekSlotEntry`] が有効な Slot 1 エントリであるかを検証し、ペイロードを抽出する。
     ///
     /// # Errors
-    ///
     /// - `slot_id != SLOT_ID_PRF` または `kdf_kind != KDF_KIND_HKDF_SHA256` の場合は、
     ///   [`VaultError::Parse`] ([`TlvParseError::InvalidFormat`]) を返す。
     /// - ペイロード長が不正な場合は [`VaultError::Parse`] ([`TlvParseError::InvalidLength`]) を返す。
@@ -488,7 +517,6 @@ impl PrfSlotPayload {
     /// TLV の [`KekSlotEntry`] へ変換する。
     ///
     /// # Errors
-    ///
     /// スロットエントリ長制限を超過する場合は [`VaultError::Parse`] を返す。
     pub fn to_slot_entry(&self) -> Result<KekSlotEntry, VaultError> {
         self.as_fields().to_slot_entry(&SLOT1_SPEC)
@@ -497,7 +525,13 @@ impl PrfSlotPayload {
 
 /// Slot 2 (高エントロピーリカバリーコード) の暗号化 DEK ペイロード構造体。
 ///
-/// HKDF-SHA256 ソルト (32バイト), 192-bit ノンス (24バイト), 暗号化 DEK 本体 (32バイト), Poly1305 認証タグ (16バイト) の計 104 バイトを保持する。
+/// ## バイナリ構造 (104バイト)
+/// | フィールド | サイズ | 内容 |
+/// | :--- | :--- | :--- |
+/// | `salt` | 32B | HKDF-SHA256 ソルト |
+/// | `nonce` | 24B | XChaCha20-Poly1305 ノンス |
+/// | `ciphertext` | 32B | 暗号化 DEK (256-bit) |
+/// | `auth_tag` | 16B | Poly1305 認証タグ |
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoverySlotPayload {
     /// HKDF-SHA256 ソルト (32バイト)。
@@ -1309,6 +1343,21 @@ pub fn inspect_kek_slots(entries: &[KekSlotEntry]) -> KekSlots {
 }
 
 /// Vault 解錠試行時に呼び出し元が提示する各 KEK スロット向けの認証資格情報。
+///
+/// 3種のスロット (Argon2id, WebAuthn PRF, リカバリーコード) のうちいずれかを指定して解錠を試みる。
+/// 解錠処理中、選択されなかった残余スロットに対しては自動的にダミー暗号演算が実行され、
+/// 実行時間の差分によるスロット特定やタイミング攻撃を遮断する。
+///
+/// ```mermaid
+/// flowchart TD
+///   Cred["SlotCredential （提示された認証資格情報）"] --> Match{"スロット照合"}
+///   Match -->|Slot 0 / 1 / 2| Decrypt["有効スロット復号 （DEK導出）"]
+///   Match -->|未指定スロット| Dummy["ダミー暗号演算補完 （タイミング平滑化）"]
+///   Decrypt --> Merge["単一DEK確定"]
+///   Dummy --> Merge
+///   Merge --> Out["VaultEngine::complete_unlock"]
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Clone, Copy)]
 pub enum SlotCredential<'a> {
     /// Slot 0: Argon2id マスターパスワードおよび任意ペッパー。

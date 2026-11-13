@@ -168,10 +168,22 @@ impl SlotStatus {
     }
 }
 
-/// 3つのKEKスロット全体の健全性構成を保持する構造体。
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// 3つの KEK スロット全体の健全性構成を保持する構造体。
 ///
 /// `EnvelopeFsm.v` のレコード型 `KekSlots` に対応し、
-/// スロット0 (Argon2id), スロット1 (WebAuthn PRF), スロット2 (リカバリーコード) の健全性を管理する。
+/// いずれか 1 つのスロットが [`SlotStatus::Valid`] であれば DEK の復号が可能となる。
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "KekSlots （3スロット多重化構成）" as Slots {
+///     state "Slot 0: Argon2id （マスターパスワード）" as S0
+///     state "Slot 1: Prf （WebAuthn PRF）" as S1
+///     state "Slot 2: Recovery （リカバリーコード）" as S2
+///   }
+///   Slots --> Unlockable: いずれか1つが SlotStatus#58;#58;Valid
+///   Unlockable --> PlainDEK: 認証・復号成功
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KekSlots {
     /// スロット0 (Argon2id: マスターパスワード) の健全性状態。
@@ -288,16 +300,27 @@ pub enum VaultEvent {
 
 /// `EnvelopeFsm.v` の `VaultMachineState` と遷移関係を具現化する状態機械構造体。
 ///
+/// ## 4状態遷移モデル
+/// ```mermaid
+/// stateDiagram-v2
+///   [*] --> Locked
+///   Locked --> Unlocking: start_unlock
+///   Unlocking --> Unlocked: complete_unlock （有効スロット認証成功）
+///   Unlocking --> Locked: fail_unlock （認証失敗）
+///   Unlocked --> Locked: lock （再施錠）
+///   Unlocked --> Zeroized: zeroize_key （緊急ゼロ消去）
+///   Zeroized --> Locked: reset （再初期化）
+/// ```
+///
 /// ## 不変条件 (`SafeState`)
 /// - `state` が [`VaultState::Locked`], [`VaultState::Unlocking`], [`VaultState::Zeroized`] の間、
 ///   内部の平文DEKバッファ (`dek`) は未初期化とみなされ、物理メモリ上はすべてゼロ消去状態に保たれる。
 /// - `state` が [`VaultState::Unlocked`] の間のみ、有効な [`SecretBytes<DEK_LEN>`] を保持する。
-/// - [`ManuallyDrop`] による透明なバッファ管理を採用し、`Option` の判別タグ領域に対する
-///   `unsafe` な生ゼロ書き込みを排除することで未定義動作 (UB) を回避しつつ、
-///   ゼロコストで安全なインプレース消去を実現する。
-/// - 施錠, ゼロ消去, 失敗時の破棄, インスタンス破棄 (`Drop`) の各処理では、
+/// - [`ManuallyDrop`] による透明なバッファ管理を採用し、ゼロコストで安全なインプレース消去を実現する。
+/// - 施錠、ゼロ消去、失敗時の破棄、インスタンス破棄 (`Drop`) の各処理では、
 ///   `volatile_zeroize` によるインプレース揮発性ゼロ書き込みとコンパイラフェンスを実行し、
 ///   Dead Store Elimination (DSE) による消去命令の除去を防止する。
+#[cfg_attr(doc, aquamarine::aquamarine)]
 pub struct VaultEngine {
     state: VaultState,
     dek: ManuallyDrop<SecretBytes<DEK_LEN>>,

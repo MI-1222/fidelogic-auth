@@ -17,6 +17,7 @@ ci-inspection = ["fidelogic-core/ci-inspection"]
 [dependencies]
 fidelogic-core = { workspace = true }
 dlmalloc = { workspace = true }
+aquamarine = { workspace = true }
 
 [dev-dependencies]
 fidelogic-core = { workspace = true, features = ["test-hooks"] }

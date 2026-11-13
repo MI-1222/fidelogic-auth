@@ -668,6 +668,19 @@ pub fn opaque_string_secret(input: &str) -> Result<SecretVec, PrecisError> {
 /// RFC 8265 で規定される `UsernameCaseMapped` (Section 3.3) および
 /// `OpaqueString` (Section 4.2) の正準化戦略を表現する。
 /// 列挙型のメソッドを経由してゼロコスト静的ディスパッチによる一貫した正準化インターフェースを提供する。
+///
+/// ```mermaid
+/// flowchart LR
+///   Input["入力文字列 / コードポイント"] --> Profile{"プロファイル選択"}
+///   Profile -->|UsernameCaseMapped| Map1["Case Folding （小文字化）"]
+///   Profile -->|OpaqueString| Map2["Zs空白マッピング （U+0020統一）"]
+///   Map1 --> NFC["PrecisNfcIter （有界NFC正準合成）"]
+///   Map2 --> NFC
+///   NFC --> Check{"禁止文字検査"}
+///   Check -->|合格| Out["Zeroizing （保護文字列） / SecretVec"]
+///   Check -->|違反| Err["PrecisError::DisallowedCodePoint"]
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrecisProfile {
     /// ユーザー名用プロファイル (`IdentifierClass` + Case Folding + NFC)。

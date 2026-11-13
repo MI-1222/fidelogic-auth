@@ -1,11 +1,11 @@
-//! # メモリロック保護モジュール(Native限定)
+//! # メモリロック保護モジュール (Native限定)。
 //!
-//! DEK(データ暗号化鍵)やKEK(鍵暗号化鍵)などの極小暗号領域に対して、
-//! OSレベルのメモリ保護(`libc::mlock` および `libc::madvise(MADV_DONTDUMP)` 等)を提供する。
+//! DEK (データ暗号化鍵) や KEK (鍵暗号化鍵) などの極小暗号領域に対して、
+//! OSレベルのメモリ保護 (`libc::mlock` および `libc::madvise(MADV_DONTDUMP)` 等) を提供する。
 //! スワップ領域への書き出し防止とコアダンプ生成時の機密漏洩遮断を確立し、
 //! 非特権コンテナ環境等におけるフォールバック動作をサポートする。
 //!
-//! ## プラットフォーム別のダンプ抑止と macOS における注意
+//! ## プラットフォーム別のダンプ抑止と macOS における注意。
 //! Linux/Android では `libc::MADV_DONTDUMP`、FreeBSD では `libc::MADV_NOCORE` により、
 //! 個別ページ単位でコアダンプ書き出しを抑止する。
 //! 一方で macOS (Darwin) のカーネルには個別メモリ領域単位のダンプ抑止 API が存在しないため、
@@ -13,13 +13,13 @@
 //! プロセス起動時または初期化時に `libc::setrlimit(libc::RLIMIT_CORE, &rlim)` で
 //! コアダンプ上限サイズをゼロ (`rlim_cur = 0`, `rlim_max = 0`) に設定する等のプロセスレベルの防御が必要となる。
 //!
-//! ## ページ独立性に関する設計上の注意
+//! ## ページ独立性に関する設計上の注意。
 //! Linux等のPOSIX環境において、`libc::mlock` および `libc::munlock` はシステムページ単位で動作し、
 //! カーネル側にロック参照カウントを保持しない。
-//! 通常のヒープアロケータ(`Box` 等)で複数の小さな鍵を隣接配置した場合、
+//! 通常のヒープアロケータ (`Box` 等) で複数の小さな鍵を隣接配置した場合、
 //! 一方の `Drop` に伴う `munlock` が同一ページ上の別バッファのロックまで即座に解除してしまう問題が発生する。
 //! これを構造的に防止するため、本モジュールはUnix環境において `libc::mmap` を用いて、
-//! システムページ境界にアラインされた独立匿名ページ(ページサイズ単位)を専用で確保し、
+//! システムページ境界にアラインされた独立匿名ページ (ページサイズ単位) を専用で確保し、
 //! 他の [`LockedBuffer`] や一般ヒープ領域とページを共有しない。
 
 use alloc::boxed::Box;
@@ -35,26 +35,38 @@ enum BufferStorage<const N: usize> {
     /// システムページ境界に独立配置され、`mlock` 保護が適用された専用匿名ページ領域。
     #[cfg(unix)]
     PageLocked { ptr: NonNull<u8>, alloc_len: usize },
-    /// 通常ヒープ上のフォールバック領域(ロック失敗時、ゼロ長時、または非Unix環境)。
+    /// 通常ヒープ上のフォールバック領域 (ロック失敗時、ゼロ長時、または非Unix環境)。
     HeapFallback(Box<SecretBytes<N>>),
 }
 
-/// OSレベルでページロック(スワップ防止)およびダンプ抑止が適用された固定長セキュアバッファ。
+/// OSレベルでページロック (スワップ防止) およびダンプ抑止が適用された固定長セキュアバッファ。
 ///
 /// Unix環境では `libc::mmap` により他のバッファや通常ヒープとページを共有しない独立ページ上に配置され、
-/// 破棄時(`Drop`)には内部メモリを即座にゼロ消去した上で `libc::munlock` および `libc::munmap` を実行する。
+/// 破棄時 (`Drop`) には内部メモリを即座にゼロ消去した上で `libc::munlock` および `libc::munmap` を実行する。
 /// そのため、あるインスタンスの破棄が他の [`LockedBuffer`] のメモリロックを早期解除することはない。
 ///
-/// # リソース消費およびコアダンプ抑止に関する注意
-/// 各インスタンスは独立性を保証するため、最低1システムページ(通常4 KiB〜16 KiB)の仮想メモリと
+/// ```mermaid
+/// flowchart TD
+///   Init["LockedBuffer 生成"] --> Alloc{"Unix環境 ＆＆ N > 0"}
+///   Alloc -->|Yes| Mmap["mmap （独立匿名ページ確保）"]
+///   Mmap --> Lock["mlock （RAM固定） ＆＆ madvise （ダンプ抑止）"]
+///   Lock -->|成功| Locked["PageLocked （ロック保護有効）"]
+///   Lock -->|失敗| Fallback["HeapFallback （通常ヒープ保管）"]
+///   Alloc -->|No| Fallback
+///   Fallback --> Unlocked["is_locked == false"]
+/// ```
+///
+/// # リソース消費およびコアダンプ抑止に関する注意。
+/// 各インスタンスは独立性を保証するため、最低1システムページ (通常4 KiB〜16 KiB) の仮想メモリと
 /// `RLIMIT_MEMLOCK` クォータを消費する。DEKやKEKなど、少数の極小暗号鍵専用として使用すること。
 ///
 /// Linux/Android/FreeBSD では `madvise` により対象ページがコアダンプから除外されるが、
 /// macOS では個別メモリ領域のダンプ抑止フラグが存在しないため、
 /// プロセス側で `RLIMIT_CORE = 0` を設定してコアダンプ生成自体を無効化する必要がある。
 ///
-/// 非特権環境等で `mlock` に失敗してフォールバック生成された場合(`is_locked() == false`)は、
+/// 非特権環境等で `mlock` に失敗してフォールバック生成された場合 (`is_locked() == false`) は、
 /// 通常ヒープへ格納され、破棄時に `munlock` は実行されない。
+#[cfg_attr(doc, aquamarine::aquamarine)]
 pub struct LockedBuffer<const N: usize> {
     storage: BufferStorage<N>,
     locked: bool,
@@ -70,10 +82,10 @@ impl<const N: usize> LockedBuffer<N> {
     /// 新しい [`LockedBuffer`] を生成し、メモリロック保護を適用する。
     ///
     /// 非特権環境やリソース制限によりメモリロックに失敗した場合は、
-    /// アンロック状態のセキュアバッファとしてフォールバック生成する(呼び出し側で [`Self::is_locked`] を検査可能)。
+    /// アンロック状態のセキュアバッファとしてフォールバック生成する (呼び出し側で [`Self::is_locked`] を検査可能)。
     /// メモリロック失敗を許容しない場合は [`Self::new_strict`] を使用すること。
     ///
-    /// # 注意
+    /// # Notes
     /// 値渡しされた引数配列の内部バッファは生成処理完了時にゼロ消去されるが、
     /// 呼び出し元スタックフレーム上の元の配列がコピーされている場合、呼び出し元側のスタック残留は防げない。
     /// 呼び出し元バッファを確実に消費・消去するには [`Self::from_consumed_secret`] の使用を推奨する。
@@ -89,7 +101,7 @@ impl<const N: usize> LockedBuffer<N> {
     ///
     /// 呼び出し元のスタック上に平文秘密情報が残留することを構造的に防止する。
     /// 非特権環境やリソース制限によりメモリロックに失敗した場合は、
-    /// アンロック状態のセキュアバッファとしてフォールバック生成する(呼び出し側で [`Self::is_locked`] を検査可能)。
+    /// アンロック状態のセキュアバッファとしてフォールバック生成する (呼び出し側で [`Self::is_locked`] を検査可能)。
     /// メモリロック失敗を許容しない場合は [`Self::try_from_consumed_secret`] を使用すること。
     #[must_use]
     pub fn from_consumed_secret(secret: &mut SecretBytes<N>) -> Self {
@@ -122,11 +134,11 @@ impl<const N: usize> LockedBuffer<N> {
     /// メモリロックまたはダンプ抑止の適用に失敗した場合はフォールバックを行わず、
     /// 即座に [`SystemError::MemoryLockFailed`] を返却する。
     ///
-    /// # 注意
+    /// # Notes
     /// 呼び出し元バッファを確実に消費・消去するには [`Self::try_from_consumed_secret`] の使用を推奨する。
     ///
-    /// # エラー
-    /// OSシステムコール(`mmap`, `mlock` 等)が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
+    /// # Errors
+    /// OSシステムコール (`mmap`, `mlock` 等) が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
     pub fn new_strict(mut bytes: [u8; N]) -> Result<Self, SystemError> {
         let mut secret = SecretBytes::new(bytes);
         volatile_zeroize(&mut bytes);
@@ -137,10 +149,10 @@ impl<const N: usize> LockedBuffer<N> {
     /// コピー完了後に呼び出し元の秘密バッファを即座にゼロ消去する。
     ///
     /// メモリロックまたはダンプ抑止の適用に失敗した場合はフォールバックを行わず、
-    /// 即座に [`SystemError::MemoryLockFailed`] を返却する(その場合も呼び出し元の秘密バッファは確実にゼロ消去される)。
+    /// 即座に [`SystemError::MemoryLockFailed`] を返却する (その場合も呼び出し元の秘密バッファは確実にゼロ消去される)。
     ///
-    /// # エラー
-    /// OSシステムコール(`mmap`, `mlock` 等)が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
+    /// # Errors
+    /// OSシステムコール (`mmap`, `mlock` 等) が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
     pub fn try_from_consumed_secret(secret: &mut SecretBytes<N>) -> Result<Self, SystemError> {
         secret.consume_with(|bytes| {
             if N == 0 {
@@ -160,7 +172,7 @@ impl<const N: usize> LockedBuffer<N> {
         })
     }
 
-    /// ゼロ埋めされた新しい [`LockedBuffer`] を生成する(非特権環境フォールバック付き)。
+    /// ゼロ埋めされた新しい [`LockedBuffer`] を生成する (非特権環境フォールバック付き)。
     #[must_use]
     pub fn zero() -> Self {
         Self::new([0u8; N])
@@ -168,13 +180,13 @@ impl<const N: usize> LockedBuffer<N> {
 
     /// ゼロ埋めされた新しい [`LockedBuffer`] を厳格モードで生成する。
     ///
-    /// # エラー
-    /// OSシステムコール(`mmap`, `mlock` 等)が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
+    /// # Errors
+    /// OSシステムコール (`mmap`, `mlock` 等) が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
     pub fn zero_strict() -> Result<Self, SystemError> {
         Self::new_strict([0u8; N])
     }
 
-    /// メモリロック(スワップ防止保護)が正常に適用されているかを判定する。
+    /// メモリロック (スワップ防止保護) が正常に適用されているかを判定する。
     #[inline]
     #[must_use]
     pub const fn is_locked(&self) -> bool {

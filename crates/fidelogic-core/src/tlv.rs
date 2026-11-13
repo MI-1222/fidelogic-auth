@@ -1,6 +1,12 @@
-//! # 最小限のゼロコピーTLVパーサー
+//! # 最小限のゼロコピーTLVパーサー。
 //!
-//! Charon / Aeneas 形式検証ターゲット用の純粋関数型パースロジック。
+//! 形式検証モデル (`TlvTotality.v` / `TlvRoundtrip.v`) と連携し、
+//! パニックフリーな全域性と未知タグ保持による前方互換性を保証する純粋関数型パーサーを提供する。
+//!
+//! ## バイナリワイヤーフォーマット
+//! - **VaultHeader** (14バイト固定): `magic(4B) | version(1B) | suite_id(1B) | epoch_id(8B, BE)`
+//! - **KEK Slots**: `slot_count(1B) | [slot_id(1B) | kdf_kind(1B) | len(2B, BE) | wrapped_dek(len B)]*`
+//! - **TLV Records**: `[tag(1B) | len(1B) | payload(len B)]*`
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -9,7 +15,7 @@ pub struct TlvHeader {
     pub length: u8,
 }
 
-/// TLVレコードヘッダーのバイト長(2バイト: Tag 1B + Length 1B)。
+/// TLVレコードヘッダーのバイト長 (2バイト: Tag 1B + Length 1B)。
 pub const TLV_HEADER_LEN: usize = 2;
 
 /// 2バイトのヘッダー [Tag (1B), Length (1B)] を安全に取得する。
@@ -39,27 +45,39 @@ pub fn validate_tlv_bounds(bytes: &[u8]) -> bool {
 /// Vaultヘッダーの既定マジックバイト。
 pub const VAULT_MAGIC: [u8; 4] = *b"FVAU";
 
-/// Vaultヘッダーのバイト長(14バイト)。
+/// Vaultヘッダーのバイト長 (14バイト)。
 pub const VAULT_HEADER_LEN: usize = 14;
 
-/// Vaultバイナリフォーマットの固定長ヘッダー。
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// Vault バイナリフォーマットの固定長ヘッダー。
 ///
-/// マジックバイト, フォーマットバージョン, 暗号スイートID, および単調増加世代カウンター(`epoch_id`) を保持する。
+/// マジックバイト、フォーマットバージョン、暗号スイート ID、および単調増加世代カウンター (`epoch_id`) を保持する。
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "VaultHeader （14バイト固定長）" as Header {
+///     state "magic （4B: FVAU）" as Magic
+///     state "version （1B） ＆ suite_id （1B）" as Meta
+///     state "epoch_id （8B, BE: 単調増加世代）" as Epoch
+///   }
+///   Header --> AAD: associated_data （14Bそのまま結合）
+///   AAD --> VaultCipher: AEAD認証タグ計算にバインド （巻き戻し検知）
+/// ```
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct VaultHeader {
-    /// マジックバイト(4バイト)。
+    /// マジックバイト (4バイト)。
     pub magic: [u8; 4],
     /// フォーマットバージョン。
     pub version: u8,
     /// 暗号スイート識別子。
     pub suite_id: u8,
-    /// 単調増加世代カウンター(8バイト)。
+    /// 単調増加世代カウンター (8バイト)。
     pub epoch_id: u64,
 }
 
 impl VaultHeader {
-    /// 新しいVaultHeader構造体を生成する。
+    /// 新しい [`VaultHeader`] 構造体を生成する。
     #[must_use]
     pub const fn new(version: u8, suite_id: u8, epoch_id: u64) -> Self {
         Self {
@@ -70,10 +88,10 @@ impl VaultHeader {
         }
     }
 
-    /// AEAD暗号化・復号時にバインドする関連データ(Associated Data / AD)のバイト配列を生成する。
+    /// AEAD暗号化・復号時にバインドする関連データ (Associated Data / AD) のバイト配列を生成する。
     ///
     /// フォーマット: `magic(4B) | version(1B) | suite_id(1B) | epoch_id(8B, BE)` (計14バイト)。
-    /// これをAEADのADに投入することで、暗号化コンテナとヘッダー情報(世代カウンター含む)が
+    /// これをAEADのADに投入することで、暗号化コンテナとヘッダー情報 (世代カウンター含む) が
     /// 暗号学的に強固にバインドされ、スナップショット巻き戻し攻撃やヘッダー改変を検知・防御する。
     #[inline]
     #[must_use]
@@ -84,7 +102,6 @@ impl VaultHeader {
     /// 世代カウンター `epoch_id` をインクリメントした新しいヘッダーを生成する。
     ///
     /// # Errors
-    ///
     /// `epoch_id` が `u64::MAX` に達してオーバーフローする場合は、
     /// カウンター巻き戻しによる脆弱性を防ぐため `None` を返す。
     #[must_use]
@@ -101,18 +118,17 @@ impl VaultHeader {
         }
     }
 
-    /// 本ヘッダーの世代カウンターが、対象ヘッダーよりも進んでいるか(真に大きいか)を判定する。
+    /// 本ヘッダーの世代カウンターが、対象ヘッダーよりも進んでいるか (真に大きいか) を判定する。
     #[inline]
     #[must_use]
     pub const fn is_newer_than(&self, other: &Self) -> bool {
         self.epoch_id > other.epoch_id
     }
 
-    /// 現行の世代カウンター(`current_epoch`)に対して、本ヘッダーの世代カウンターが
+    /// 現行の世代カウンター (`current_epoch`) に対して、本ヘッダーの世代カウンターが
     /// 単調増加しているかを検証する。
     ///
     /// # Errors
-    ///
     /// 本ヘッダーの `epoch_id` が `current_epoch` 以下である場合、
     /// スナップショット巻き戻し攻撃と判定して [`VaultError::RollbackDetected`] を返す。
     pub fn verify_epoch_progression(&self, current_epoch: u64) -> Result<(), VaultError> {
@@ -126,13 +142,15 @@ impl VaultHeader {
 
 /// `VaultHeader` 単体の純粋関数型デシリアライザー。
 ///
-/// 入力バイト列からヘッダー情報 (マジックバイト, バージョン, 暗号スイートID, 世代カウンター) を安全に読み取り、
+/// 入力バイト列からヘッダー情報 (マジックバイト、バージョン、暗号スイートID、世代カウンター) を安全に読み取り、
 /// デシリアライズされた [`VaultHeader`] と残余バイトスライスを返す。
 ///
-/// # Errors
+/// 形式検証ツール (Charon / Aeneas) によるモデル抽出との互換性を維持するため、
+/// マジックバイトの照合は配列比較ではなく各バイト要素を展開して明示的に比較している。
 ///
-/// - 入力バイト列の長さがヘッダー長 ([`VAULT_HEADER_LEN`]) 未満の場合は [`TlvParseError::UnexpectedEof`] を返す。
-/// - マジックバイトが [`VAULT_MAGIC`] と一致しない場合は [`TlvParseError::InvalidMagic`] を返す。
+/// # Errors
+/// - 入力バイト列の長さがヘッダー長 ([`VAULT_HEADER_LEN`]) 未満の場合は [`TlvParseError::UnexpectedEof`]。
+/// - マジックバイトが [`VAULT_MAGIC`] と一致しない場合は [`TlvParseError::InvalidMagic`]。
 pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParseError> {
     if bytes.len() < VAULT_HEADER_LEN {
         return Err(TlvParseError::UnexpectedEof);
@@ -405,11 +423,20 @@ impl EntryPayload {
 #[cfg(feature = "alloc")]
 pub type TlvPayload = EntryPayload;
 
-/// ペイロード部のTLVレコードを表す代数的データ型(ADT)。
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ペイロード部の TLV レコードを表す代数的データ型 (ADT)。
 ///
-/// 暗号化エントリレコード([`TlvRecord::Entry`])または将来拡張用の未知タグレコード([`TlvRecord::Unknown`])を表現する。
+/// 暗号化エントリレコード ([`TlvRecord::Entry`]) または将来拡張用の未知タグレコード ([`TlvRecord::Unknown`]) を表現する。
 ///
-/// 既知タグ([`TAG_ENTRY`])の混入によるラウンドトリップ破壊を防止するため、
+/// ```mermaid
+/// flowchart LR
+///   Input["バイト列入力"] --> Check{"タグ判別"}
+///   Check -->|TAG_ENTRY （0x01）| EntryRec["Entry （平文暗号化 ＋ 16B認証タグ）"]
+///   Check -->|未知タグ （0x02〜0xFF）| UnknownRec["Unknown （生バイト列を無加工保持）"]
+///   UnknownRec -->|ラウンドトリップ| Output["元のバイナリを完全復元"]
+/// ```
+///
+/// 既知タグ ([`TAG_ENTRY`]) の混入によるラウンドトリップ破壊を防止するため、
 /// 未知タグレコードの生成にはスマートコンストラクタ [`TlvRecord::new_unknown`] の利用を推奨する。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
@@ -594,9 +621,22 @@ pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, TlvPa
     Ok(bytes)
 }
 
-/// Vault全体の集約型。
+/// Vault全体のバイナリ集約構造体。
 ///
-/// ヘッダー情報、KEKスロット定義テーブル、TLVレコード群を統括する。
+/// ヘッダー、KEKスロット定義テーブル、およびTLVレコード群を統括する。
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "Vault （コンテナ全体）" as Vault {
+///     state "VaultHeader （14B固定長）" as Header
+///     state "KekSlotEntry[] （KEKスロット群）" as Slots
+///     state "TlvRecord[] （ペイロード群）" as Records {
+///       state "Entry （暗号文 ＋ 16Bタグ）" as Entry
+///       state "Unknown （未知タグ生バイト列）" as Unknown
+///     }
+///   }
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
@@ -611,7 +651,7 @@ pub struct Vault {
 
 #[cfg(feature = "alloc")]
 impl Vault {
-    /// 新しいVault構造体を生成する。
+    /// 新しい [`Vault`] 構造体を生成する。
     #[must_use]
     pub fn new(
         header: VaultHeader,
@@ -632,11 +672,10 @@ impl Vault {
 /// 結合された [`Vault`] と残余バイトスライスを返す。
 ///
 /// # Errors
-///
-/// - 入力バイト列の長さが各フィールドの必要長に満たない場合は [`TlvParseError::UnexpectedEof`] を返す。
-/// - スロット数やレコード数に対して残余バイト列長が不足している場合は [`TlvParseError::UnexpectedEof`] を返す。
-/// - マジックバイトが不正な場合は [`TlvParseError::InvalidMagic`] を返す。
-/// - レコード長や認証タグ長が不正な場合は各 [`TlvParseError`] を返す。
+/// - 入力バイト列の長さが各フィールドの必要長に満たない場合は [`TlvParseError::UnexpectedEof`]。
+/// - スロット数やレコード数に対して残余バイト列長が不足している場合は [`TlvParseError::UnexpectedEof`]。
+/// - マジックバイトが不正な場合は [`TlvParseError::InvalidMagic`]。
+/// - レコード長や認証タグ長が不正な場合は各 [`TlvParseError`]。
 #[cfg(feature = "alloc")]
 pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
     let (header, mut rest) = deserialize_header(bytes)?;

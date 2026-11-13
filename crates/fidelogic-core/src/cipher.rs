@@ -14,33 +14,33 @@ use crate::zeroize::SecretBytes;
 #[cfg(feature = "alloc")]
 use crate::zeroize::SecretVec;
 
-/// 暗号鍵長(バイト単位: 256ビット = 32バイト)
+/// 暗号鍵長 (256ビット = 32バイト)。
 pub const KEY_LEN: usize = 32;
 
-/// XChaCha20-Poly1305 のノンス長(バイト単位: 192ビット = 24バイト)
+/// XChaCha20-Poly1305 のノンス長 (192ビット = 24バイト)。
 pub const XCHACHA20_POLY1305_NONCE_LEN: usize = 24;
 
-/// AES-256-GCM-SIV のノンス長(バイト単位: 96ビット = 12バイト)
+/// AES-256-GCM-SIV のノンス長 (96ビット = 12バイト)。
 pub const AES_256_GCM_SIV_NONCE_LEN: usize = 12;
 
-/// 共通認証タグ長(バイト単位: 128ビット = 16バイト)
+/// 共通認証タグ長 (128ビット = 16バイト)。
 pub const TAG_LEN: usize = 16;
 
-/// 暗号化可能な最大平文/暗号文ペイロード長(バイト単位)。
+/// 暗号化可能な最大平文/暗号文ペイロード長 (バイト単位)。
 ///
-/// 認証タグ(16バイト)付加時の加算オーバーフロー(`len + TAG_LEN`)を防止し、
-/// かつ 32-bit (Wasm) アーキテクチャおよび AEAD アルゴリズム規格(RFC 8439 / RFC 8452)の
+/// 認証タグ (16バイト) 付加時の加算オーバーフロー (`len + TAG_LEN`) を防止し、
+/// かつ 32-bit (Wasm) アーキテクチャおよび AEAD アルゴリズム規格 (RFC 8439 / RFC 8452) の
 /// アドレス空間制約を満たす安全上限値。
-/// RFC 8452(AES-GCM-SIV)における平文/暗号文上限(2^36 - 31 バイト)に合わせて、
+/// RFC 8452 (AES-GCM-SIV) における平文/暗号文上限 (2^36 - 31 バイト) に合わせて、
 /// 64-bit 環境では 68,719,476,705 バイトに制限する。
 #[cfg(target_pointer_width = "64")]
 pub const MAX_PAYLOAD_LEN: usize = 68_719_476_705;
 #[cfg(not(target_pointer_width = "64"))]
 pub const MAX_PAYLOAD_LEN: usize = usize::MAX - TAG_LEN;
 
-/// 関連データ(AAD: Associated Authenticated Data)の最大バイト長。
+/// 関連データ (AAD: Associated Authenticated Data) の最大バイト長。
 ///
-/// RFC 8452(AES-GCM-SIV)における AAD 上限(2^36 - 1 バイト)および
+/// RFC 8452 (AES-GCM-SIV) における AAD 上限 (2^36 - 1 バイト) および
 /// 32-bit 環境でのオーバーフローを防止する。
 #[cfg(target_pointer_width = "64")]
 pub const MAX_AAD_LEN: usize = 68_719_476_735;
@@ -56,7 +56,7 @@ pub fn validate_nonce_len(suite_id: CipherSuiteId, nonce: &[u8]) -> Result<(), C
     Ok(())
 }
 
-/// 認証タグ長が 16 バイト([`TAG_LEN`])と一致するかを事前検証する。
+/// 認証タグ長が 16 バイト ([`TAG_LEN`]) と一致するかを事前検証する。
 #[inline]
 pub fn validate_tag_len(tag: &[u8]) -> Result<(), CryptoError> {
     if tag.len() != TAG_LEN {
@@ -74,7 +74,7 @@ pub fn validate_payload_len(payload: &[u8]) -> Result<(), CryptoError> {
     Ok(())
 }
 
-/// 関連データ(AAD)スライス長が許容上限を満たすかを事前検証する。
+/// 関連データ (AAD) スライス長が許容上限を満たすかを事前検証する。
 #[inline]
 // 32-bit環境ではMAX_AAD_LENがusize::MAXとなり比較が恒偽になるが、環境非依存の単一コードパス維持のため許可する。
 #[allow(clippy::absurd_extreme_comparisons)]
@@ -87,7 +87,7 @@ pub fn validate_aad_len(aad: &[u8]) -> Result<(), CryptoError> {
 
 /// 暗号スイート識別子を表す列挙型。
 ///
-/// Vaultヘッダーの `suite_id` フィールド(1バイト)に対応し、
+/// Vaultヘッダーの `suite_id` フィールド (1バイト) に対応し、
 /// 暗号化アルゴリズムおよびノンス長を一意に決定する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -171,12 +171,21 @@ enum VaultCipherInner {
     Aes256GcmSiv(Aes256GcmSiv),
 }
 
-/// 暗号化コンテナで使用されるAEAD暗号スイートの安全破棄ラッパー。
+/// 暗号化コンテナで使用されるAEAD暗号スイートの静的ディスパッチ構造体。
 ///
-/// 内部の `XChaCha20Poly1305` および `Aes256GcmSiv` による鍵消去に加え、
-/// Drop 時に列挙型パディング領域を含む内部領域(`size_of::<VaultCipherInner>()`)を揮発性ゼロ書込みで消去する。
-/// `#[repr(transparent)]` により [`core::mem::ManuallyDrop<VaultCipherInner>`] のみを保持するため、
-/// `CipherSuiteId` 等の判別値に依存する validity invariant 違反を起こさずに構造体全体を安全にゼロ化できる。
+/// ヒープ確保なしの静的ディスパッチにより、ゼロアロケーションかつ高速な暗号化・復号を提供する。
+/// `Drop` 時には列挙型パディング領域を含む全バイトを揮発性ゼロ書込みで消去する。
+///
+/// ```mermaid
+/// flowchart TD
+///   Input["平文 / 暗号文バッファ"] --> Check{"引数検証 （ノンス長・AAD長）"}
+///   Check -->|エラー| Ret["バッファ非破壊で Err 返却"]
+///   Check -->|合格| Op["AEAD 暗号化 / 復号処理 （ADバインド）"]
+///   Op -->|成功| Success["暗号文 ＋ 認証タグ / 平文"]
+///   Op -->|失敗| Fail["volatile_zeroize （バッファ即時ゼロクリア）"]
+///   Fail --> RetErr["CryptoError 返却"]
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[repr(transparent)]
 pub struct VaultCipher {
     inner: core::mem::ManuallyDrop<VaultCipherInner>,
@@ -242,9 +251,12 @@ impl VaultCipher {
         key.consume_with(|k| Self::new(suite_id, k))
     }
 
-    /// 任意長スライスから鍵長(32バイト)を事前検証して暗号インスタンスを生成する。
+    /// 任意長スライスから鍵長 (32バイト) を事前検証して暗号インスタンスを生成する。
     ///
     /// 鍵長が 32 バイトでない場合はパニックさせず、直ちに [`CryptoError::InvalidKeySize`] を返却する。
+    ///
+    /// # Errors
+    /// `key` の長さが 32 バイトでない場合に [`CryptoError::InvalidKeySize`] を返す。
     #[inline]
     pub fn new_from_slice(suite_id: CipherSuiteId, key: &[u8]) -> Result<Self, CryptoError> {
         let key_arr: &[u8; KEY_LEN] = key.try_into().map_err(|_| CryptoError::InvalidKeySize)?;
@@ -261,31 +273,33 @@ impl VaultCipher {
         }
     }
 
-    /// 本暗号インスタンスで要求されるノンス長(バイト数)を返す。
+    /// 本暗号インスタンスで要求されるノンス長 (バイト数) を返す。
     #[inline]
     #[must_use]
     pub fn nonce_len(&self) -> usize {
         self.suite_id().nonce_len()
     }
 
-    /// 本暗号インスタンスで要求される認証タグ長(バイト数)を返す。
+    /// 本暗号インスタンスで要求される認証タグ長 (バイト数) を返す。
     #[inline]
     #[must_use]
     pub fn tag_len(&self) -> usize {
         self.suite_id().tag_len()
     }
 
-    /// インプレース分離暗号化(Detached Encryption)を実行し、16バイトの認証タグを返す。
+    /// インプレース分離暗号化 (Detached Encryption) を実行し、16バイトの認証タグを返す。
     ///
     /// `buffer` に平文を渡すと暗号文に上書きされ、計算された16バイトの認証タグが返される。
     ///
-    /// # パニックフリー性と安全検証
-    /// - ノンス長が暗号スイートの要求長と一致しない場合は [`CryptoError::InvalidNonceSize`] を返す。
-    /// - 平文バッファ長が [`MAX_PAYLOAD_LEN`] を超過またはタグ加算でオーバーフローする場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - 開始前の引数検証エラー時は呼び出し元バッファを変更せずにエラーを返却し、再試行を可能とする。
-    /// - 暗号化処理自体の失敗時は、部分的な書き換え残留を防ぐためバッファを直ちに [`crate::zeroize::volatile_zeroize`] で
-    ///   ゼロクリアし、[`CryptoError::AeadEncryptionFailed`] 等を返す。
+    /// # Behavior
+    /// - 事前検証エラー時は呼び出し元バッファを変更せず、再試行可能な状態でエラーを返す。
+    /// - 暗号化失敗時は部分的な書き換え残留を防ぐため、バッファを直ちに [`crate::zeroize::volatile_zeroize`] でゼロクリアする。
+    ///
+    /// # Errors
+    /// - ノンス長が暗号スイートの要求長と一致しない場合は [`CryptoError::InvalidNonceSize`]。
+    /// - 平文長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`]。
+    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`]。
+    /// - 暗号化処理に失敗した場合は [`CryptoError::AeadEncryptionFailed`]。
     pub fn encrypt_in_place_detached(
         &self,
         nonce: &[u8],
@@ -320,20 +334,21 @@ impl VaultCipher {
         Ok(tag.into())
     }
 
-    /// インプレース分離復号(Detached Decryption)を実行する。
+    /// インプレース分離復号 (Detached Decryption) を実行する。
     ///
     /// `buffer` に暗号文を渡し、`tag` に16バイトの認証タグを渡すと、認証成功時に平文へ上書きされる。
-    /// 内部的にはスライス長を一度だけ検証して固定長配列へ変換し、
-    /// [`Self::decrypt_in_place_detached_tag`] へ委譲する。
     ///
-    /// # パニックフリー性と安全検証
-    /// - 認証タグ長が 16 バイトでない場合は [`CryptoError::InvalidTagSize`] を返す。
-    /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
-    /// - 暗号文バッファ長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - 開始前の引数検証エラー時は呼び出し元バッファを変更せずにエラーを返却し、再試行を可能とする。
-    /// - 認証タグ不一致または復号処理自体の失敗時は、部分的な復号データの残留を防ぐためバッファを直ちに
-    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、[`CryptoError::AeadDecryptionFailed`] を返す。
+    /// # Behavior
+    /// - 事前検証エラー時は呼び出し元バッファを変更しない。
+    /// - 認証タグ不一致または復号失敗時は、部分的な復号データの残留を防ぐためバッファを直ちに
+    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアする。
+    ///
+    /// # Errors
+    /// - 認証タグ長が 16 バイトでない場合は [`CryptoError::InvalidTagSize`]。
+    /// - ノンス長が暗号スイートの要求長と一致しない場合は [`CryptoError::InvalidNonceSize`]。
+    /// - 暗号文長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`]。
+    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`]。
+    /// - 認証タグ照合または復号処理に失敗した場合は [`CryptoError::AeadDecryptionFailed`]。
     #[inline]
     pub fn decrypt_in_place_detached(
         &self,
@@ -350,15 +365,18 @@ impl VaultCipher {
     /// 固定長配列 `[u8; TAG_LEN]` の認証タグを用いてインプレース分離復号を実行する。
     ///
     /// コンパイル時の型システムによりタグ長が 16 バイトであることが保証され、
-    /// タグ長不一致によるランタイム検査・分岐および境界外アクセスを構造的に排除する。
+    /// タグ長不一致によるランタイム検査・分岐を排除する。
     ///
-    /// # パニックフリー性と安全検証
-    /// - ノンス長が不一致の場合は [`CryptoError::InvalidNonceSize`] を返す。
-    /// - 暗号文バッファ長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`] を返す。
-    /// - 開始前の引数検証エラー時は呼び出し元バッファを変更せずにエラーを返却し、再試行を可能とする。
-    /// - 認証タグ不一致または復号処理自体の失敗時は、部分的な復号データの残留を防ぐためバッファを直ちに
-    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアし、[`CryptoError::AeadDecryptionFailed`] を返す。
+    /// # Behavior
+    /// - 事前検証エラー時は呼び出し元バッファを変更しない。
+    /// - 認証タグ不一致または復号失敗時は、バッファを直ちに
+    ///   [`crate::zeroize::volatile_zeroize`] でゼロクリアする。
+    ///
+    /// # Errors
+    /// - ノンス長が暗号スイートの要求長と一致しない場合は [`CryptoError::InvalidNonceSize`]。
+    /// - 暗号文長が [`MAX_PAYLOAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`]。
+    /// - AAD長が [`MAX_AAD_LEN`] を超過する場合は [`CryptoError::InvalidSliceLength`]。
+    /// - 認証タグ照合または復号に失敗した場合は [`CryptoError::AeadDecryptionFailed`]。
     pub fn decrypt_in_place_detached_tag(
         &self,
         nonce: &[u8],
@@ -388,15 +406,13 @@ impl VaultCipher {
         })
     }
 
-    /// 平文全体を暗号化し、暗号文の末尾に16バイトの認証タグを付与したバイト列(Ciphertext || Tag)を返す。
+    /// 平文全体を暗号化し、暗号文の末尾に16バイトの認証タグを付与したバイト列 (Ciphertext || Tag) を返す。
     ///
-    /// ヒープ割り当てを伴わないゼロコストなメインストリームとして、
-    /// 通常は [`Self::encrypt_in_place_detached`] の利用を推奨する。
+    /// 通常はゼロアロケーションな [`Self::encrypt_in_place_detached`] の利用を推奨する。
     /// 本メソッドは `alloc` 環境向けの利便性補助APIである。
     ///
-    /// # パニックフリー性と安全検証
-    /// - ノンス長、平文長、および AAD 長を事前に検証し、加算オーバーフローや境界外スライシングを防止する。
-    /// - 暗号化失敗時は確保された一時バッファを直ちにゼロクリアし、秘密情報の残留を防ぐ。
+    /// # Errors
+    /// 事前検証または暗号化処理に失敗した場合は [`CryptoError`] を返す。
     #[cfg(feature = "alloc")]
     #[inline]
     pub fn encrypt(
@@ -464,18 +480,16 @@ impl VaultCipher {
         self.encrypt_with_detached_inner(nonce, plaintext, aad, encrypt_detached)
     }
 
-    /// 認証タグ付き暗号文(Ciphertext || Tag)を復号し、Drop時自動ゼロ消去が保証された [`SecretVec`] を返す。
+    /// 認証タグ付き暗号文 (Ciphertext || Tag) を復号し、Drop時自動ゼロ消去が保証された [`SecretVec`] を返す。
     ///
-    /// ヒープ割り当てや平文コピー自体を排除するゼロコストかつ安全なメインストリームとして、
-    /// 通常はインプレース復号([`Self::decrypt_in_place_detached`] または [`Self::decrypt_in_place_detached_tag`])の利用を推奨する。
+    /// 通常はゼロアロケーションなインプレース復号 ([`Self::decrypt_in_place_detached`] または [`Self::decrypt_in_place_detached_tag`]) の利用を推奨する。
     /// 本メソッドは `alloc` 環境向けの利便性補助APIであり、返却した平文バッファの破棄時に
     /// [`SecretVec`] によってメモリが自動的にゼロ消去される。
     ///
-    /// # パニックフリー性と安全検証
-    /// - 入力長がタグ長(`TAG_LEN = 16`)未満の場合はパニックせず直ちに [`CryptoError::InvalidTagSize`] を返す。
-    /// - スライス分割には `get()` による安全なインデックス参照を用い、境界外トラップを排除する。
-    /// - バッファ確保前にノンス長、暗号文長、AAD長を検証し、不正入力による無駄なヒープ割り当てを防ぐ。
-    /// - 復号失敗時は [`SecretVec`] 内の平文候補バッファを即座にゼロクリアした上でエラーを返す。
+    /// # Errors
+    /// - 入力長がタグ長 (`TAG_LEN = 16`) 未満の場合は [`CryptoError::InvalidTagSize`]。
+    /// - ノンス長、暗号文長、AAD長の検証に失敗した場合は各 [`CryptoError`]。
+    /// - 認証タグの照合または復号に失敗した場合は [`CryptoError::AeadDecryptionFailed`]。
     #[cfg(feature = "alloc")]
     pub fn decrypt(
         &self,

@@ -41,6 +41,7 @@ libc = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 subtle = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }
+aquamarine = { workspace = true }
 
 [dev-dependencies]
 fidelogic-core = { path = ".", features = ["test-hooks"] }

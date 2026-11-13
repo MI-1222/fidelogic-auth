@@ -1,7 +1,7 @@
-//! # 定数時間演算モジュール
+//! # 定数時間演算モジュール。
 //!
 //! タイミング攻撃を遮断するための定数時間等価判定および条件選択ヘルパーを提供する。
-//! `subtle` クレートを活用し、CPU条件分岐命令や早期リターン(Short-Circuiting)を排除した
+//! `subtle` クレートを活用し、CPU条件分岐命令や早期リターン (Short-Circuiting) を排除した
 //! 安全な暗号比較・選択処理を確立する。
 
 use subtle::{
@@ -10,18 +10,18 @@ use subtle::{
 
 /// 2つのバイトスライスが等価であるかを定数時間で判定する。
 ///
-/// 認証タグ、トークン、ハッシュ値等の比較において、早期リターン(Short-Circuiting)による
-/// サイドチャネル情報漏洩(タイミング攻撃)を防止する。
+/// 認証タグ、トークン、ハッシュ値等の比較において、早期リターン (Short-Circuiting) による
+/// サイドチャネル情報漏洩 (タイミング攻撃) を防止する。
 ///
 /// 入力スライスの長さが異なる場合であっても、即時に判定を返さず、
 /// 長い方の長さに合わせた定数時間走査を実行してタイミング差分を平滑化する。
 ///
-/// # 戻り値
-/// 両スライスの長さおよび内容が完全に一致する場合に `Choice::from(1)`(真)を返し、
-/// それ以外の場合は `Choice::from(0)`(偽)を返す。
+/// # Returns
+/// 両スライスの長さおよび内容が完全に一致する場合に `Choice::from(1)` (真) を返し、
+/// それ以外の場合は `Choice::from(0)` (偽) を返す。
 ///
-/// # 計算量
-/// `O(max(a.len(), b.len()))` の定数時間ループを実行し、内部条件分岐命令(`if` / `br_if`)を発生させない。
+/// # Complexity
+/// `O(max(a.len(), b.len()))` の定数時間ループを実行し、内部条件分岐命令 (`if` / `br_if`) を発生させない。
 #[inline]
 #[must_use]
 pub fn ct_eq_bytes(a: &[u8], b: &[u8]) -> Choice {
@@ -81,8 +81,8 @@ pub fn ct_eq_bytes_bool(a: &[u8], b: &[u8]) -> bool {
 
 /// 32バイト固定長バイト列の等価性を定数時間で判定する。
 ///
-/// 認証タグ(Poly1305、HMAC等)や256ビット暗号トークンの照合において、
-/// ループ継続判定を含む条件分岐命令(`br_if`, `if`, `br_table`)を完全に排除し、
+/// 認証タグ (Poly1305、HMAC等) や256ビット暗号トークンの照合において、
+/// ループ継続判定を含む条件分岐命令 (`br_if`, `if`, `br_table`) を完全に排除し、
 /// ストレートラインなビット演算によりタイミング攻撃耐性を確立する。
 #[inline]
 #[must_use]
@@ -123,7 +123,7 @@ pub fn ct_eq_32(a: &[u8; 32], b: &[u8; 32]) -> Choice {
     diff.ct_eq(&0u8)
 }
 
-/// 固定長バイト配列(`N` バイト)の等価性を定数時間で判定する。
+/// 固定長バイト配列 (`N` バイト) の等価性を定数時間で判定する。
 ///
 /// 型システムにより両配列の長さ `N` がコンパイル時に一致しているため、
 /// 可変長スライス向けの長さ比較や境界選択オーバーヘッドを排除した定数時間ループを実行する。
@@ -139,12 +139,12 @@ pub fn ct_eq_array<const N: usize>(a: &[u8; N], b: &[u8; N]) -> Choice {
 
 /// 条件 `condition` に応じて定数時間で値を選択するヘルパー。
 ///
-/// `condition` が真(`Choice(1)`)の場合は `true_val` を、
-/// 偽(`Choice(0)`)の場合は `false_val` を定数時間で返す。
+/// `condition` が真 (`Choice(1)`) の場合は `true_val` を、
+/// 偽 (`Choice(0)`) の場合は `false_val` を定数時間で返す。
 ///
-/// # ゼロコスト抽象化とサイドチャネル耐性
+/// # ゼロコスト抽象化とサイドチャネル耐性。
 /// 内部で [`subtle::ConditionallySelectable::conditional_select`] を呼び出し、
-/// CPUの条件分岐命令を排除してサイドチャネル攻撃(タイミング・キャッシュ攻撃)を防御する。
+/// CPUの条件分岐命令を排除してサイドチャネル攻撃 (タイミング・キャッシュ攻撃) を防御する。
 #[inline]
 #[must_use]
 pub fn ct_select<T: ConditionallySelectable>(condition: Choice, true_val: T, false_val: T) -> T {
@@ -153,10 +153,10 @@ pub fn ct_select<T: ConditionallySelectable>(condition: Choice, true_val: T, fal
 
 /// 条件 `condition` に応じてスライスの内容を定数時間で宛先 `dst` にコピーする。
 ///
-/// `condition` が真(`Choice(1)`)の場合は `true_src` を、
-/// 偽(`Choice(0)`)の場合は `false_src` を `dst` に定数時間で書き込む。
+/// `condition` が真 (`Choice(1)`) の場合は `true_src` を、
+/// 偽 (`Choice(0)`) の場合は `false_src` を `dst` に定数時間で書き込む。
 ///
-/// # パニック条件
+/// # Panics
 /// `dst`, `true_src`, `false_src` の長さが互いに異なる場合はパニックする。
 #[inline]
 pub fn ct_select_slice(condition: Choice, dst: &mut [u8], true_src: &[u8], false_src: &[u8]) {
@@ -178,10 +178,10 @@ pub fn ct_select_slice(condition: Choice, dst: &mut [u8], true_src: &[u8], false
 
 /// 条件 `condition` に応じてスライス `src` の内容を宛先 `dst` に定数時間で条件付き代入する。
 ///
-/// `condition` が真(`Choice(1)`)の場合は `src` の各バイトが `dst` に上書き代入され、
-/// 偽(`Choice(0)`)の場合は `dst` の元の値がそのまま維持される。
+/// `condition` が真 (`Choice(1)`) の場合は `src` の各バイトが `dst` に上書き代入され、
+/// 偽 (`Choice(0)`) の場合は `dst` の元の値がそのまま維持される。
 ///
-/// # パニック条件
+/// # Panics
 /// `dst` と `src` の長さが異なる場合はパニックする。
 #[inline]
 pub fn ct_assign_slice(condition: Choice, dst: &mut [u8], src: &[u8]) {

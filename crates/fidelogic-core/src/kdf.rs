@@ -22,25 +22,25 @@ pub const HKDF_SHA256_HASH_LEN: usize = 32;
 /// RFC 5869 規定における HKDF-SHA256 の最大出力長 (`255 * HashLen` = 8160バイト)。
 pub const HKDF_SHA256_MAX_OUTPUT_LEN: usize = 255 * HKDF_SHA256_HASH_LEN;
 
-/// Native環境における既定のメモリコスト(KiB単位: 64 MiB)
+/// Native環境における既定のメモリコスト (KiB単位: 64 MiB)。
 pub const DEFAULT_NATIVE_M_COST: u32 = 65536;
 
-/// Native環境における既定の時間コスト(反復回数)
+/// Native環境における既定の時間コスト (反復回数)。
 pub const DEFAULT_NATIVE_T_COST: u32 = 3;
 
-/// Native環境における既定の並列度(レーン数)
+/// Native環境における既定の並列度 (レーン数)。
 pub const DEFAULT_NATIVE_P_COST: u32 = 4;
 
-/// Wasmおよびシングルスレッド環境における既定のメモリコスト(KiB単位: 19 MiB)
+/// Wasmおよびシングルスレッド環境における既定のメモリコスト (KiB単位: 19 MiB)。
 pub const DEFAULT_WASM_M_COST: u32 = 19456;
 
-/// Wasmおよびシングルスレッド環境における既定の時間コスト(反復回数)
+/// Wasmおよびシングルスレッド環境における既定の時間コスト (反復回数)。
 pub const DEFAULT_WASM_T_COST: u32 = 2;
 
-/// Wasmおよびシングルスレッド環境における既定の並列度(シングルスレッド固定)
+/// Wasmおよびシングルスレッド環境における既定の並列度 (シングルスレッド固定)。
 pub const DEFAULT_WASM_P_COST: u32 = 1;
 
-/// 高速テスト用の極小メモリコスト(KiB単位: 64 KiB)
+/// 高速テスト用の極小メモリコスト (KiB単位: 64 KiB)。
 pub const FAST_TEST_M_COST: u32 = 64;
 
 /// 高速テスト用の極小時問コスト。
@@ -49,20 +49,31 @@ pub const FAST_TEST_T_COST: u32 = 1;
 /// 高速テスト用の極小並列度。
 pub const FAST_TEST_P_COST: u32 = 1;
 
-/// 既定の導出鍵長(32バイト = 256ビット)
+/// 既定の導出鍵長 (32バイト = 256ビット)。
 pub const DEFAULT_KEY_LEN: usize = 32;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Argon2id 鍵導出パラメータ抽象化構造体。
 ///
-/// Native環境でのマルチスレッド並列実行と、Wasm環境でのシングルスレッド制約を
-/// 透過的に切り替え可能にし、RFC 9106 準拠の鍵導出を安全に実行する。
+/// Native 環境でのマルチスレッド並列実行と、Wasm 環境でのシングルスレッド制約を
+/// 透過的に切り替え可能にし、RFC 9106 準拠の鍵導出を実行する。
+///
+/// ```mermaid
+/// flowchart TD
+///   Target{"ターゲット環境 （default_for_target）"}
+///   Target -->|wasm32 または parallel無効| Wasm["for_wasm （19 MiB, t=2, p=1）"]
+///   Target -->|Native かつ parallel有効| Native["for_native （64 MiB, t=3, p=4）"]
+///   Wasm --> Validate["validate （RFC 9106 最小メモリ検証）"]
+///   Native --> Validate
+///   Validate --> Derive["derive_key_32 / derive_key_vec （Secret領域へ出力）"]
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Argon2Params {
-    /// メモリコスト(KiB単位)RFC 9106規定により最低 `8 * p_cost` KiB 必要。
+    /// メモリコスト (KiB単位)。RFC 9106 規定により最低 `8 * p_cost` KiB 必要。
     m_cost: u32,
-    /// 時間コスト(反復回数)1以上である必要がある。
+    /// 時間コスト (反復回数)。1以上である必要がある。
     t_cost: u32,
-    /// 並列度(スレッド/レーン数)1以上である必要がある。
+    /// 並列度 (スレッド/レーン数)。1以上である必要がある。
     p_cost: u32,
     /// 導出される鍵のバイト長。
     output_len: usize,
@@ -105,7 +116,7 @@ impl Argon2Params {
     }
     /// Native環境向けの推奨マルチコア並列化パラメータを構築する。
     ///
-    /// メモリコスト 64 MiB(65536 KiB)、反復回数 3、並列度 4、鍵長 32 バイト(Argon2id v0x13)
+    /// メモリコスト 64 MiB (65536 KiB)、反復回数 3、並列度 4、鍵長 32 バイト (Argon2id v0x13)。
     #[must_use]
     pub const fn for_native() -> Self {
         Self {
@@ -120,7 +131,7 @@ impl Argon2Params {
 
     /// Wasmおよびシングルスレッド環境向けの推奨パラメータを構築する。
     ///
-    /// メモリコスト 19 MiB(19456 KiB)、反復回数 2、並列度 1、鍵長 32 バイト(Argon2id v0x13)
+    /// メモリコスト 19 MiB (19456 KiB)、反復回数 2、並列度 1、鍵長 32 バイト (Argon2id v0x13)。
     #[must_use]
     pub const fn for_wasm() -> Self {
         Self {
@@ -148,7 +159,7 @@ impl Argon2Params {
         }
     }
 
-    /// メモリコスト(KiB単位)を上書きした新しいパラメータを返す。
+    /// メモリコスト (KiB単位) を上書きした新しいパラメータを返す。
     ///
     /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
     #[must_use]
@@ -157,7 +168,7 @@ impl Argon2Params {
         self
     }
 
-    /// 時間コスト(反復回数)を上書きした新しいパラメータを返す。
+    /// 時間コスト (反復回数) を上書きした新しいパラメータを返す。
     ///
     /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
     #[must_use]
@@ -166,7 +177,7 @@ impl Argon2Params {
         self
     }
 
-    /// 並列度(スレッド/レーン数)を上書きした新しいパラメータを返す。
+    /// 並列度 (スレッド/レーン数) を上書きした新しいパラメータを返す。
     ///
     /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
     #[must_use]
@@ -175,7 +186,7 @@ impl Argon2Params {
         self
     }
 
-    /// 導出鍵長(バイト単位)を上書きした新しいパラメータを返す。
+    /// 導出鍵長 (バイト単位) を上書きした新しいパラメータを返す。
     ///
     /// 値の妥当性は [`Self::validate`] または [`Self::validated`] で検証すること。
     #[must_use]
@@ -186,8 +197,7 @@ impl Argon2Params {
 
     /// パラメータを検証し、妥当であれば自身を返す。
     ///
-    /// # エラー
-    ///
+    /// # Errors
     /// パラメータが RFC 9106 または `argon2` クレートの制約を満たさない場合に
     /// [`CryptoError::InvalidParameter`] を返す。
     pub fn validated(self) -> Result<Self, CryptoError> {
@@ -197,9 +207,8 @@ impl Argon2Params {
 
     /// カスタムパラメータを指定して検証済みの構造体を生成する。
     ///
-    /// # エラー
-    ///
-    /// パラメータが RFC 9106 または argon2 クレートの制約を満たさない場合に
+    /// # Errors
+    /// パラメータが RFC 9106 または `argon2` クレートの制約を満たさない場合に
     /// [`CryptoError::InvalidParameter`] を返す。
     pub fn custom(
         m_cost: u32,
@@ -239,7 +248,7 @@ impl Argon2Params {
         Ok(())
     }
 
-    /// Wasm環境(シングルスレッド実行)への適合性を判定する。
+    /// Wasm環境 (シングルスレッド実行) への適合性を判定する。
     ///
     /// 並列度 `p_cost` が 1 の場合に真を返す。
     #[must_use]
@@ -247,25 +256,25 @@ impl Argon2Params {
         self.p_cost == 1
     }
 
-    /// 設定されているメモリコスト(KiB単位)を返す。
+    /// 設定されているメモリコスト (KiB単位) を返す。
     #[must_use]
     pub const fn m_cost(&self) -> u32 {
         self.m_cost
     }
 
-    /// 設定されている時間コスト(反復回数)を返す。
+    /// 設定されている時間コスト (反復回数) を返す。
     #[must_use]
     pub const fn t_cost(&self) -> u32 {
         self.t_cost
     }
 
-    /// 設定されている並列度(レーン数)を返す。
+    /// 設定されている並列度 (レーン数) を返す。
     #[must_use]
     pub const fn p_cost(&self) -> u32 {
         self.p_cost
     }
 
-    /// 設定されている導出鍵長(バイト)を返す。
+    /// 設定されている導出鍵長 (バイト) を返す。
     #[must_use]
     pub const fn output_len(&self) -> usize {
         self.output_len
@@ -291,9 +300,8 @@ impl Argon2Params {
 
     /// 指定されたパスワードとソルトから鍵を導出し、バッファ `out` に格納する。
     ///
-    /// # エラー
-    ///
-    /// - `out` の長さが `self.output_len` と不一致、または短すぎる場合は [`CryptoError::InvalidKeySize`]。
+    /// # Errors
+    /// - `out` の長さが `self.output_len` と不一致の場合は [`CryptoError::InvalidKeySize`]。
     /// - パラメータが不正な場合は [`CryptoError::InvalidParameter`]。
     /// - 鍵導出処理中に障害が発生した場合は [`CryptoError::KeyDerivationFailed`]。
     pub fn derive_key(
@@ -305,7 +313,7 @@ impl Argon2Params {
         self.derive_key_with_secret(password, salt, &[], out)
     }
 
-    /// 指定されたペッパー(`secret`)と現在のパラメータから `Argon2` インスタンスを構築する。
+    /// 指定されたペッパー (`secret`) と現在のパラメータから `Argon2` インスタンスを構築する。
     fn build_argon2<'a>(&self, secret: &'a [u8]) -> Result<Argon2<'a>, CryptoError> {
         let params = self.to_argon2_params()?;
         if secret.is_empty() {
@@ -333,6 +341,10 @@ impl Argon2Params {
     /// パスワード、ソルト、および秘密ペッパーから鍵を導出し、バッファ `out` に格納する。
     ///
     /// 鍵導出処理が失敗した場合は、部分的な書き込み残留を防ぐため出力バッファ `out` を即座にゼロクリアする。
+    ///
+    /// # Errors
+    /// - `out` の長さが `self.output_len` と不一致の場合は [`CryptoError::InvalidKeySize`]。
+    /// - 鍵導出処理に失敗した場合は [`CryptoError::KeyDerivationFailed`]。
     pub fn derive_key_with_secret(
         &self,
         password: &[u8],
@@ -351,6 +363,9 @@ impl Argon2Params {
     /// 32バイト固定長の鍵を導出し、メモリゼロ消去が保証された [`SecretBytes<32>`] で返す。
     ///
     /// 本メソッドは `output_len == 32` のパラメータ設定を要求する。
+    ///
+    /// # Errors
+    /// `output_len` が 32 以外の場合、または鍵導出に失敗した場合に [`CryptoError`] を返す。
     pub fn derive_key_32(
         &self,
         password: &[u8],

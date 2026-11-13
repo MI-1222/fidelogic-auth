@@ -1,7 +1,15 @@
 //! # profile-vault モジュール。
 //!
-//! 完全なVault運用および高強度暗号処理を提供するプロファイル骨格。
-//! Argon2id、XChaCha20-Poly1305、AES-GCM-SIVなどの暗号スイートを統括する。
+//! 完全な暗号化ストレージ (Vault) 運用および高強度暗号処理を提供するフル機能プロファイル。
+//! ゼロコピー TLV レコードパース、Argon2id / HKDF 鍵導出、多重 AEAD 暗号スイート
+//! (XChaCha20-Poly1305 / AES-256-GCM-SIV)、およびマルチスロットエンベロープ状態機械を統括する。
+//!
+//! ## 適用対象と設計目標
+//!
+//! 本プロファイルは、機密データの永続化、認証情報ストレージ、および多要素認証基盤を必要とする
+//! ネイティブアプリケーションや完全機能 WebAssembly モジュールを対象とする。
+//! `profile-lite` で提供される PRECIS 正準化機能に加えて、ハードニングされた暗号ストレージの
+//! 全ライフサイクル管理 (作成・スロット更新・暗号化エントリ格納・安全なゼロ消去) を提供する。
 
 pub use crate::cipher::*;
 pub use crate::envelope::*;
@@ -11,16 +19,20 @@ pub use crate::profile_lite::*;
 pub use crate::slots::*;
 pub use crate::tlv::*;
 
-/// `profile-vault` の運用エンジンを表す構造体。
+/// `profile-vault` の運用状態およびエンジンコンテキストを表現する構造体。
+///
+/// 完全機能 Vault 環境におけるプロファイル識別と静的ディスパッチ境界をカプセル化する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VaultProfileEngine;
 
 impl VaultProfileEngine {
+    /// 新しい `VaultProfileEngine` インスタンスを構築する。
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
+    /// プロファイル名識別子 (`"profile-vault"`) を返す。
     #[must_use]
     pub const fn name(&self) -> &'static str {
         "profile-vault"

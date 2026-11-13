@@ -1,14 +1,14 @@
-//! # メモリゼロ消去モジュール
+//! # メモリゼロ消去モジュール。
 //!
-//! 秘密情報を保持するバッファの即時ゼロクリアと、スコープ離脱時の自動消去(RAII)を提供する。
-//! `zeroize` クレートの `Zeroize`, `ZeroizeOnDrop` を活用した基盤セキュアバッファ型を定義する。
+//! 秘密情報を保持するバッファの即時ゼロクリアと、スコープ離脱時の自動消去 (RAII) を提供する。
+//! `zeroize` クレートの [`Zeroize`], [`ZeroizeOnDrop`] を活用した基盤セキュアバッファ型を定義する。
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// 指定された生バイトスライスを即時ゼロクリアする局所プリミティブ。
 ///
 /// コンパイラ最適化による Dead Store Elimination (DSE) を抑止するため、
-/// [`zeroize::Zeroize::zeroize`] を呼び出した上でコンパイラフェンス([`core::sync::atomic::compiler_fence`])を実行し、
+/// [`zeroize::Zeroize::zeroize`] を呼び出した上でコンパイラフェンス ([`core::sync::atomic::compiler_fence`]) を実行し、
 /// メモリ消去命令の並べ替えや除去を確実に防止する。
 #[inline(never)]
 pub fn volatile_zeroize(buffer: &mut [u8]) {
@@ -19,7 +19,7 @@ pub fn volatile_zeroize(buffer: &mut [u8]) {
 /// 指定された 32-bit ワード列スライス (Unicode コードポイント等) を即時ゼロクリアする局所プリミティブ。
 ///
 /// コンパイラ最適化による Dead Store Elimination (DSE) を抑止するため、
-/// [`zeroize::Zeroize::zeroize`] を呼び出した上でコンパイラフェンス([`core::sync::atomic::compiler_fence`])を実行し、
+/// [`zeroize::Zeroize::zeroize`] を呼び出した上でコンパイラフェンス ([`core::sync::atomic::compiler_fence`]) を実行し、
 /// メモリ消去命令の並べ替えや除去を確実に防止する。
 #[inline(never)]
 pub fn volatile_zeroize_words(buffer: &mut [u32]) {
@@ -27,12 +27,12 @@ pub fn volatile_zeroize_words(buffer: &mut [u32]) {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
-/// 指定ポインタ先頭から `len` バイトの領域(未初期化パディング領域を含む)を揮発性ゼロ書込みで消去する。
+/// 指定ポインタ先頭から `len` バイトの領域 (未初期化パディング領域を含む) を揮発性ゼロ書込みで消去する。
 ///
 /// 列挙型やアラインメントパディング等の未初期化バイトを含みうる領域に対し、
 /// `&mut [u8]` 参照を生成せずにバイト単位で `0x00` を書き込み、Dead Store Elimination を抑止する。
 ///
-/// # 安全性
+/// # Safety
 /// `ptr` は少なくとも `len` バイトの書き込み可能な連続メモリ領域を指している必要がある。
 #[cfg_attr(not(feature = "profile-vault"), allow(dead_code))]
 #[inline(never)]
@@ -45,10 +45,23 @@ pub(crate) unsafe fn volatile_zeroize_raw(ptr: *mut u8, len: usize) {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
-/// 固定長バイト配列を保持し、スコープ離脱時(Drop時)にメモリを確実にゼロ消去するセキュアバッファ。
+/// 固定長バイト配列を保持し、スコープ離脱時 (Drop時) にメモリを確実にゼロ消去するセキュアバッファ。
 ///
-/// スタック上で管理される暗号鍵(DEK/KEK等)や認証タグの保持に適しており、
+/// スタック上で管理される暗号鍵 (DEK/KEK等) や認証タグの保持に適しており、
 /// [`zeroize::Zeroize`] および [`zeroize::ZeroizeOnDrop`] により自動消去される。
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "Active （平文保持中）" as Active
+///   state "Consumed （スコープ借用中）" as Consumed
+///   state "Zeroized （ゼロ消去済み）" as Zeroized
+///   [*] --> Active: new / zero
+///   Active --> Consumed: consume_with
+///   Consumed --> Zeroized: 正常終了 / パニック時 （RAII Guard）
+///   Active --> Zeroized: Drop （スコープ離脱）
+///   Zeroized --> [*]
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SecretBytes<const N: usize> {
     inner: [u8; N],
@@ -111,8 +124,8 @@ impl<const N: usize> SecretBytes<N> {
 
     /// 条件 `choice` に基づき、定数時間で `other` の内容を自身に上書きコピーする。
     ///
-    /// `choice` が真(`Choice(1)`)のときは `other` の内容がコピーされ、
-    /// 偽(`Choice(0)`)のときは自身の値がそのまま保持される。
+    /// `choice` が真 (`Choice(1)`) のときは `other` の内容がコピーされ、
+    /// 偽 (`Choice(0)`) のときは自身の値がそのまま保持される。
     #[inline]
     pub fn conditional_assign(&mut self, other: &Self, choice: subtle::Choice) {
         crate::constant_time::ct_assign_slice(choice, self.as_mut_slice(), other.as_slice());
@@ -201,10 +214,17 @@ impl<const N: usize> subtle::ConstantTimeEq for SecretBytes<N> {
     }
 }
 
-/// ヒープ上に可変長バイト列を保持し、スコープ離脱時(Drop時)にメモリを確実にゼロ消去するセキュアバッファ。
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ヒープ上に可変長バイト列を保持し、スコープ離脱時 (Drop時) にメモリを確実にゼロ消去するセキュアバッファ。
 ///
-/// 動的サイズの平文や暗号文、鍵導出中間バッファの保持に適しており、
-/// [`zeroize::Zeroize`] および [`zeroize::ZeroizeOnDrop`] により破棄時にゼロクリアされる。
+/// 容量拡張時の再割り当てにおいても、旧ヒープ領域をゼロ消去してから解放することで平文断片の残留を防ぐ。
+///
+/// ```mermaid
+/// flowchart LR
+///   OldBuf["旧ヒープ領域 （平文保持）"] -->|1. データ複製| NewBuf["新ヒープ領域 （拡張済み）"]
+///   OldBuf -->|2. volatile_zeroize_raw| Zeroed["旧領域を全バイトゼロ消去"]
+///   Zeroed -->|3. dealloc| Freed["アロケータへ安全に返却"]
+/// ```
 #[cfg(feature = "alloc")]
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SecretVec {
@@ -292,10 +312,13 @@ impl SecretVec {
 
     /// 追加で少なくとも `additional` バイトを格納できるよう容量を確保する。
     ///
-    /// キャパシティの拡張(再割り当て)が必要な場合、標準の `Vec::reserve` は
-    /// 旧ヒープ領域をゼロ消去せずに解放(`dealloc`)して平文断片を残留させる恐れがあるため、
-    /// 本メソッドでは自前で新バッファを確保した上で、旧バッファの全容量(`capacity`)を
-    /// [`volatile_zeroize_raw`] により確実に揮発性ゼロ消去してからアロケータへ解放する。
+    /// キャパシティの拡張 (再割り当て) が必要な場合、標準の `Vec::reserve` は
+    /// 旧ヒープ領域をゼロ消去せずに解放 (`dealloc`) して平文断片を残留させる恐れがあるため、
+    /// 本メソッドでは自前で新バッファを確保した上で、旧バッファの全容量 (`capacity`) を
+    /// `volatile_zeroize_raw` により確実に揮発性ゼロ消去してからアロケータへ解放する。
+    ///
+    /// # Panics
+    /// 容量計算が `usize` の表現範囲を超過した場合はパニックする。
     pub fn reserve(&mut self, additional: usize) {
         let needed = match self.inner.len().checked_add(additional) {
             Some(n) => n,
@@ -311,6 +334,9 @@ impl SecretVec {
     /// 追加で正確に `additional` バイトを格納できるよう容量を確保する。
     ///
     /// 拡張時は [`Self::reserve`] と同様に旧ヒープ領域をゼロ消去した上で解放する。
+    ///
+    /// # Panics
+    /// 容量計算が `usize` の表現範囲を超過した場合はパニックする。
     pub fn reserve_exact(&mut self, additional: usize) {
         let needed = match self.inner.len().checked_add(additional) {
             Some(n) => n,

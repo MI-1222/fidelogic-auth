@@ -1,7 +1,7 @@
-//! # 楕円曲線暗号モジュール(Curve25519 / Ristretto255)
+//! # 楕円曲線暗号モジュール (Curve25519 / Ristretto255)
 //!
 //! `curve25519-dalek` クレートを用いた、フットプリント最小化楕円曲線演算エンジンを提供する。
-//! `precomputed-tables` フィーチャーを明示的に除外(`default-features = false`)し、
+//! `precomputed-tables` フィーチャーを明示的に除外 (`default-features = false`) し、
 //! 約400KBの静的ルックアップテーブルをデータセクションから完全に排除した構成をとる。
 //! これにより、ベースポイント乗算は可変ベースポイント乗算アルゴリズムへ動的にフォールバックし、
 //! 極小のバイナリフットプリントを維持しつつ安全な楕円曲線演算を実現する。
@@ -18,9 +18,9 @@ use crate::constant_time::ct_eq_32;
 use crate::error::CryptoError;
 use crate::zeroize::SecretBytes;
 
-/// X25519(RFC 7748)の公開鍵(Montgomery u座標32バイト)を表すNewtype。
+/// X25519 (RFC 7748) の公開鍵 (Montgomery u座標32バイト) を表すNewtype。
 ///
-/// 素の `[u8; 32]` や秘密鍵([`SecretBytes<32>`])・共有秘密([`X25519SharedSecret`])と型レベルで区別し、
+/// 素の `[u8; 32]` や秘密鍵 ([`SecretBytes<32>`])・共有秘密 ([`X25519SharedSecret`]) と型レベルで区別し、
 /// 鍵種別の誤用や引数順序の取り違えをコンパイル時に防止する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
@@ -105,10 +105,10 @@ impl ConstantTimeEq for X25519PublicKey {
     }
 }
 
-/// X25519 Diffie-Hellman鍵共有により導出された共有秘密(32バイト)を表すNewtype。
+/// X25519 Diffie-Hellman鍵共有により導出された共有秘密 (32バイト) を表すNewtype。
 ///
 /// 内部に [`SecretBytes<32>`] を保持し、Drop時の自動ゼロ消去および `Debug` マスキングを保証する。
-/// 秘密鍵([`SecretBytes<32>`])や公開鍵([`X25519PublicKey`])と型レベルで区別することで、
+/// 秘密鍵 ([`SecretBytes<32>`]) や公開鍵 ([`X25519PublicKey`]) と型レベルで区別することで、
 /// 導出された共有秘密を別の鍵交換の秘密鍵へ誤って渡す事故をコンパイル時に防止する。
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 #[repr(transparent)]
@@ -169,7 +169,7 @@ impl ConstantTimeEq for X25519SharedSecret {
 
 /// Ed25519ベースポイントに対する可変ベースポイントスカラー倍算を実行する。
 ///
-/// 事前計算テーブルを除外した構成において、動的スカラー倍算(`ED25519_BASEPOINT_POINT * scalar`)にフォールバックする。
+/// 事前計算テーブルを除外した構成において、動的スカラー倍算 (`ED25519_BASEPOINT_POINT * scalar`) にフォールバックする。
 #[inline]
 #[must_use]
 pub fn edwards_basepoint_mul(scalar: &Scalar) -> EdwardsPoint {
@@ -178,7 +178,7 @@ pub fn edwards_basepoint_mul(scalar: &Scalar) -> EdwardsPoint {
 
 /// Ristretto255ベースポイントに対する可変ベースポイントスカラー倍算を実行する。
 ///
-/// 事前計算テーブルを除外した構成において、動的スカラー倍算(`RISTRETTO_BASEPOINT_POINT * scalar`)にフォールバックする。
+/// 事前計算テーブルを除外した構成において、動的スカラー倍算 (`RISTRETTO_BASEPOINT_POINT * scalar`) にフォールバックする。
 #[inline]
 #[must_use]
 pub fn ristretto_basepoint_mul(scalar: &Scalar) -> RistrettoPoint {
@@ -188,7 +188,7 @@ pub fn ristretto_basepoint_mul(scalar: &Scalar) -> RistrettoPoint {
 /// RFC 7748 X25519 ベースポイントスカラー倍算を実行する。
 ///
 /// [`SecretBytes<32>`] で保護された秘密鍵に対してクランプ処理を内部で行い、
-/// 可変ベースポイントフォールバックにより計算された公開鍵([`X25519PublicKey`])を返す。
+/// 可変ベースポイントフォールバックにより計算された公開鍵 ([`X25519PublicKey`]) を返す。
 #[inline]
 #[must_use]
 pub fn x25519_basepoint_mul(secret_key: &SecretBytes<32>) -> X25519PublicKey {
@@ -196,18 +196,27 @@ pub fn x25519_basepoint_mul(secret_key: &SecretBytes<32>) -> X25519PublicKey {
     X25519PublicKey::new(point.to_bytes())
 }
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// RFC 7748 X25519 Diffie-Hellman 鍵共有演算を実行する。
 ///
-/// [`SecretBytes<32>`] の秘密鍵とピアの公開鍵([`X25519PublicKey`])からクランプ乗算を行い、
-/// 共有秘密([`X25519SharedSecret`])を導出する。
+/// [`SecretBytes<32>`] の秘密鍵とピアの公開鍵 ([`X25519PublicKey`]) からクランプ乗算を行い、
+/// 共有秘密 ([`X25519SharedSecret`]) を導出する。
 /// 秘密鍵・公開鍵・共有秘密を型レベルで区別することで、引数順序の取り違えや鍵種別の誤用をコンパイル時に防止する。
 /// RFC 7748 Section 6.1 の規定に基づき、低位数点攻撃を防御するため、
-/// 導出された共有秘密が全ゼロ(All-zero output)であるかを定数時間で検証する。
+/// 導出された共有秘密が全ゼロ (All-zero output) であるかを定数時間で検証する。
 /// 全ゼロが検出された場合は処理を中断し、[`CryptoError::InvalidParameter`] を返却する。
 /// 正常に導出された共有秘密は、メモリ自動ゼロ消去が保証された [`X25519SharedSecret`] でラップして返却する。
 ///
-/// # エラー
-/// ピアの公開鍵が低位数点(位数 1, 2, 4, 8)等であり、計算された共有秘密が全ゼロとなる場合に
+/// ```mermaid
+/// flowchart LR
+///   Keys["秘密鍵 ＆ 公開鍵"] --> Mul["スカラー倍算 （mul_clamped）"]
+///   Mul --> ZeroCheck{"全ゼロ検査 （ct_eq_32）"}
+///   ZeroCheck -->|全ゼロ検知 （低位数点攻撃）| Err["InvalidParameter エラー"]
+///   ZeroCheck -->|非ゼロ合格| Shared["X25519SharedSecret （自動ゼロ消去）"]
+/// ```
+///
+/// # Errors
+/// ピアの公開鍵が低位数点 (位数 1, 2, 4, 8) 等であり、計算された共有秘密が全ゼロとなる場合に
 /// [`CryptoError::InvalidParameter`] を返す。
 #[inline]
 pub fn x25519_diffie_hellman(

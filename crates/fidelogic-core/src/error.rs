@@ -1,14 +1,14 @@
 //! # エラー型定義モジュール。
 //!
-//! Fidelogicにおける階層的エラーハンドリング体系を提供する。
-//! 形式検証と結合した [`TlvParseError`] を完全温存し、
+//! Fidelogic における階層的エラーハンドリング体系を提供する。
+//! 形式検証モデルと 1 対 1 で対応する [`TlvParseError`]、
 //! 暗号処理例外 [`CryptoError`]、システム例外 [`SystemError`]、
-//! PRECIS正準化例外 [`PrecisError`]、
+//! PRECIS 正準化例外 [`PrecisError`]、
 //! およびそれらを統合する包括的ドメインエラー [`VaultError`] を定義する。
 
-/// TLVおよびVaultパース処理で発生するフォーマット例外を表す列挙型。
+/// TLV および Vault パース処理で発生するフォーマット例外を表す列挙型。
 ///
-/// 形式検証(Rocq証明資産)と1対1で対応するバリアントを温存し、
+/// 形式検証モデル (Rocq 証明理論 `TlvTotality.v` / `TlvRoundtrip.v`) と 1 対 1 で対応するバリアントを保持し、
 /// パニックを完全に排除して境界外アクセスや不正フォーマットを純粋な値として通知する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TlvParseError {
@@ -26,37 +26,37 @@ pub enum TlvParseError {
     InvalidFormat,
 }
 
-/// 暗号処理(鍵導出・暗号化・復号・パラメータ検証)で発生する例外を表す列挙型。
+/// 暗号処理 (鍵導出・暗号化・復号・パラメータ検証) で発生する例外を表す列挙型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoError {
     /// AEAD復号または認証タグの照合に失敗。
     AeadDecryptionFailed,
     /// AEAD暗号化処理に失敗。
     AeadEncryptionFailed,
-    /// 鍵導出処理(Argon2id, HKDF等)に失敗。
+    /// 鍵導出処理 (Argon2id, HKDF等) に失敗。
     KeyDerivationFailed,
     /// 鍵のサイズが要求長と一致しない。
     InvalidKeySize,
-    /// ノンス(初期化ベクトル)のサイズが不正。
+    /// ノンス (初期化ベクトル) のサイズが不正。
     InvalidNonceSize,
     /// 認証タグのサイズが不正。
     InvalidTagSize,
     /// 入力スライス長が不正または許容上限を超過。
     InvalidSliceLength,
-    /// 暗号パラメータ(反復回数、メモリサイズ等)が不正。
+    /// 暗号パラメータ (反復回数、メモリサイズ等) が不正。
     InvalidParameter,
 }
 
 /// OSシステムコールまたはランタイム環境に起因する例外を表す列挙型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemError {
-    /// メモリロック(mlock, madvise等)の要求に失敗。
+    /// メモリロック (`mlock`, `madvise` 等) の要求に失敗。
     MemoryLockFailed,
-    /// 暗号論的エントロピー源(乱数生成器)の初期化または取得に失敗。
+    /// 暗号論的エントロピー源 (乱数生成器) の初期化または取得に失敗。
     EntropySourceFailed,
 }
 
-/// PRECIS文字列正準化(RFC 7564 / RFC 8265)で発生する例外を表す列挙型。
+/// PRECIS文字列正準化 (RFC 7564 / RFC 8265) で発生する例外を表す列挙型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrecisError {
     /// 入力文字列またはコードポイント列が空である。
@@ -68,7 +68,20 @@ pub enum PrecisError {
 /// Fidelogic Vaultにおける統括ドメインエラーを表す列挙型。
 ///
 /// TLVパース例外、暗号処理例外、システム例外、PRECIS例外を階層的に内包し、
-/// 外部境界向けの一様マスキングバリアントを提供する。
+/// 外部公開境界における一様マスキングバリアントを提供する。
+///
+/// ```mermaid
+/// flowchart LR
+///   Parse["TlvParseError （パース例外）"] --> Mask["mask_auth_error （一様化）"]
+///   Crypto["CryptoError （暗号処理例外）"] --> Mask
+///   System["SystemError （システム例外）"] --> Mask
+///   Precis["PrecisError （PRECIS例外）"] --> Mask
+///   Slot["SlotNotFound （スロット不在）"] --> Mask
+///   Mask --> AuthFailed["AuthenticationFailed （認証失敗）"]
+///   Invalid["InvalidState （状態契約違反）"] --> Keep1["そのまま保持"]
+///   Rollback["RollbackDetected （巻き戻し検知）"] --> Keep2["そのまま保持"]
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultError {
     /// TLVパースおよびフォーマット検証に起因する例外。
@@ -83,9 +96,9 @@ pub enum VaultError {
     SlotNotFound,
     /// 現在のVault状態に対して不正な状態遷移または操作が要求された。
     InvalidState,
-    /// 外部公開境界における一様認証失敗例外(オラクル排除・情報流非干渉性保証用)。
+    /// 外部公開境界における一様認証失敗例外 (オラクル排除・情報流非干渉性保証用)。
     AuthenticationFailed,
-    /// 世代カウンター(`epoch_id`)の巻き戻し・ロールバック攻撃を検知した例外。
+    /// 世代カウンター (`epoch_id`) の巻き戻し・ロールバック攻撃を検知した例外。
     RollbackDetected,
 }
 
@@ -93,9 +106,12 @@ impl VaultError {
     /// 外部公開API境界におけるオラクル排除のため、内部詳細エラーを
     /// 単一の [`VaultError::AuthenticationFailed`] へ一様マスキングする。
     ///
-    /// FSM の公開状態契約違反を表す [`VaultError::InvalidState`] および、
+    /// 形式仕様 (`NonInterference.v`) の情報流非干渉性モデルに準拠し、
+    /// 攻撃者に対するサイドチャネル・オラクル漏洩を防止する。
+    ///
+    /// FSMの公開状態契約違反を表す [`VaultError::InvalidState`] および、
     /// 世代巻き戻し検証結果を表す [`VaultError::RollbackDetected`] を除き、
-    /// スロット不在 ([`VaultError::SlotNotFound`])、MAC 不一致や鍵長不正 ([`VaultError::Crypto`])、
+    /// スロット不在 ([`VaultError::SlotNotFound`])、MAC不一致や鍵長不正 ([`VaultError::Crypto`])、
     /// スロット形式・重複・長さ異常 ([`VaultError::Parse`])、システム例外 ([`VaultError::System`])、
     /// PRECIS正準化例外 ([`VaultError::Precis`]) 等の
     /// 内部詳細エラーをすべて [`VaultError::AuthenticationFailed`] へ畳み込む。

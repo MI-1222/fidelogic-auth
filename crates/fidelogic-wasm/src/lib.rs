@@ -1,7 +1,22 @@
 //! # fidelogic-wasm
 //!
-//! WebAssembly環境向けの薄いC ABIインターフェースおよびバインディング層。
-//! `profile-lite`(認証用極小バイナリ), `profile-vault`(完全Vault展開用バイナリ)のビルドターゲット。
+//! WebAssembly (Wasm) 環境向けの軽量 C ABI インターフェースおよびバインディング層。
+//! ブラウザやエッジランタイムなどのホスト環境と安全に連携するための低レベル境界を提供する。
+//!
+//! ## アーキテクチャと実行モデル
+//!
+//! 本クレートは、ホスト環境 (JavaScript 等) と Wasm リニアメモリを直接共有するゼロコピーモデルを採用する。
+//! メモリ確保・解放および暗号パラメータの引き渡しはすべてポインタと長さのペアとして管理され、
+//! アドレス空間のラップアラウンドやバッファ重複 (overlap) は厳格に事前検証される。
+//!
+//! - **アロケータ戦略**: `dlmalloc` ([`dlmalloc::GlobalDlmalloc`]) をグローバルアロケータとして採用。
+//!   断片化耐性に優れ、長期稼働する暗号化ストレージや動的ワークスペースにおいて安定したメモリ回収を保証する。
+//! - **パニックハンドリング**: Wasm ターゲット (`no_std`) ではパニック発生時に即座に
+//!   `core::arch::wasm32::unreachable()` をトラップ発行する。パニック文字列のフォーマットコードを
+//!   排除することでバイナリフットプリントを極限まで削減し、例外発生時の機密情報漏洩を防止する。
+//! - **二重プロファイル構成**:
+//!   - `profile-lite`: PRECIS ユーザー名・パスワード正準化および X25519 鍵交換に特化した極小バイナリ。
+//!   - `profile-vault`: Argon2id、多重スロットエンベロープ暗号、AEAD 暗号スイートを統括するフル機能バイナリ。
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -14,33 +29,44 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
-/// Wasm環境(`target_arch = "wasm32"` かつ `not(feature = "std")`)向けのグローバルアロケータ。
+/// Wasm 環境 (`target_arch = "wasm32"` かつ `not(feature = "std")`) 向けのグローバルアロケータ。
 ///
-/// 断片化耐性に優れた `dlmalloc` へ一本化し、長期稼働Vaultや可変長ワークスペースでの安定したメモリ回収を保証する。
+/// 断片化耐性に優れた `dlmalloc` へ一本化し、長期稼働 Vault や可変長ワークスペースでの安定したメモリ回収を保証する。
 #[cfg(all(target_arch = "wasm32", not(feature = "std")))]
 #[global_allocator]
 static ALLOCATOR: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
 use fidelogic_core::active_profile;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Wasm C ABI 関数の処理結果を表すステータスコード。
 ///
-/// 外部 C ABI 関数の戻り値(`u32`)に対応し、成否とエラーの種類を型安全に表す。
+/// 外部 C ABI 関数の戻り値 (`u32`) に対応し、処理の成否および失敗原因を型安全に伝達する。
+///
+/// ```mermaid
+/// flowchart LR
+///   Host["ホスト環境 （JS / TS）"] -->|ポインタと長さ| Boundary["C ABI 境界検証 （NULL・重複・範囲）"]
+///   Boundary -->|検証失敗| ErrPtr["InvalidPointer （1）"]
+///   Boundary -->|検証合格| Core["fidelogic-core （暗号・TLV処理）"]
+///   Core -->|成功| Ok["Success （0）"]
+///   Core -->|パラメータ不正| ErrParam["InvalidParameter （2）"]
+///   Core -->|演算・復号失敗| ErrExec["ExecutionFailed （3）"]
+/// ```
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WasmStatusCode {
-    /// 処理が正常に完了。
+    /// 処理が正常に完了したことを表す。
     Success = 0,
-    /// 引数ポインタが NULL、またはバッファが必要な最小の長さを満たさない。
+    /// 引数ポインタが NULL であるか、アドレス空間を逸脱またはラップアラウンドしていることを表す。
     InvalidPointer = 1,
-    /// 指定された暗号スイートID・鍵長・入力パラメータが不正。
+    /// 指定された暗号スイート ID、鍵長、パラメータ値、または TLV 形式が不正であることを表す。
     InvalidParameter = 2,
-    /// 暗号演算・鍵導出・デシリアライズ処理に失敗。
+    /// 認証タグ不一致、暗号演算エラー、鍵導出失敗、またはデシリアライズ失敗を表す。
     ExecutionFailed = 3,
 }
 
 impl WasmStatusCode {
-    /// C ABI 戻り値向けの `u32` 値に変換する。
+    /// C ABI 戻り値向けの `u32` 整数値に変換する。
     #[inline]
     #[must_use]
     pub const fn as_u32(self) -> u32 {
@@ -58,7 +84,7 @@ impl From<WasmStatusCode> for u32 {
 /// 不正なスライスポインタまたはアドレス空間ラップアラウンドを検証し、安全に不変スライスを取得する。
 ///
 /// `len == 0` の場合はポインタが NULL であっても安全に空スライス `&[]` を返す。
-/// `len > 0` の場合は `ptr` が非NULLであり、かつ `(ptr as usize).checked_add(len)` による終端アドレスが
+/// `len > 0` の場合は `ptr` が非 NULL であり、かつ `(ptr as usize).checked_add(len)` による終端アドレスが
 /// アドレス空間をラップアラウンドせず `isize::MAX as usize` 以下であることを検証する。
 #[allow(dead_code)]
 #[inline]
@@ -89,7 +115,7 @@ unsafe fn slice_from_raw_parts_checked<'a>(
 /// 不正なスライスポインタまたはアドレス空間ラップアラウンドを検証し、安全に可変スライスを取得する。
 ///
 /// `len == 0` の場合はポインタが NULL であっても安全に空スライス `&mut []` を返す。
-/// `len > 0` の場合は `ptr` が非NULLであり、かつ `(ptr as usize).checked_add(len)` による終端アドレスが
+/// `len > 0` の場合は `ptr` が非 NULL であり、かつ `(ptr as usize).checked_add(len)` による終端アドレスが
 /// アドレス空間をラップアラウンドせず `isize::MAX as usize` 以下であることを検証する。
 #[allow(dead_code)]
 #[inline]
@@ -119,7 +145,7 @@ unsafe fn slice_from_raw_parts_mut_checked<'a>(
 
 /// 2つのメモリ領域 `[a_ptr, a_ptr + a_len)` と `[b_ptr, b_ptr + b_len)` が重複しているかを検証する。
 ///
-/// どちらかの長さが 0 の場合はアクセスが発生しないため重複なし(`false`)と判定する。
+/// どちらかの長さが 0 の場合はアクセスが発生しないため重複なし (`false`) と判定する。
 /// アドレス計算には [`usize::saturating_add`] を用い、オーバーフローによる未定義動作を抑止する。
 #[inline]
 fn ranges_overlap(a_ptr: *const u8, a_len: usize, b_ptr: *const u8, b_len: usize) -> bool {
@@ -133,10 +159,14 @@ fn ranges_overlap(a_ptr: *const u8, a_len: usize, b_ptr: *const u8, b_len: usize
     a_start < b_end && b_start < a_end
 }
 
-/// 現在リンクされているコアエンジンのプロファイルステータスコードを取得する。
+/// 現在リンクされているコアエンジンのプロファイル有効状態を取得する。
 ///
-/// 外部C ABIからも直接呼び出し可能なインターフェース骨格。
-/// プロファイルが有効な場合は `1`、未設定(`""` または `"none"`)の場合は `0` を返す。
+/// ホスト環境が Wasm モジュールを初期化した直後に、必要なプロファイルが組み込まれているかを検証するために用いる。
+///
+/// # Returns
+///
+/// - `1`: プロファイル (`profile-lite` または `profile-vault`) が有効化されている。
+/// - `0`: プロファイルが無効または未設定 (`"none"`)。
 #[unsafe(no_mangle)]
 pub extern "C" fn fidelogic_wasm_status() -> u32 {
     let profile = active_profile();
@@ -148,13 +178,19 @@ pub extern "C" fn fidelogic_wasm_status() -> u32 {
 }
 
 #[cfg(any(test, feature = "ci-inspection"))]
-/// Dead Store Elimination (DSE) 抑止検査用の外部C ABIエクスポート関数。
+/// Dead Store Elimination (DSE) 抑止検証用の外部 C ABI エクスポート関数。
 ///
-/// 指定されたメモリ領域に対して揮発性ゼロ書き込みを実施する。
-/// 内部で [`fidelogic_core::zeroize::volatile_zeroize`] を呼び出す。
+/// 指定されたメモリ領域に対して揮発性ゼロ書き込みを実施し、コンパイラ最適化による消去の省略を抑止する。
 ///
 /// # Safety
-/// 呼び出し元は `ptr` が有効であり、少なくとも `len` バイトの連続した書き込み可能メモリを指していることを保証しなければならない。
+///
+/// 呼び出し元は以下の条件を満たさなければならない。
+/// - `ptr` が非 NULL の場合、少なくとも `len` バイトの連続した書き込み可能メモリ領域を指していること。
+///
+/// # Args
+///
+/// - `ptr`: ゼロ消去対象のメモリ先頭ポインタ。
+/// - `len`: ゼロ消去対象のバイト長。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_zeroize_test(ptr: *mut u8, len: usize) {
     if let Ok(slice) = unsafe { slice_from_raw_parts_mut_checked(ptr, len) }
@@ -165,15 +201,26 @@ pub unsafe extern "C" fn fidelogic_wasm_zeroize_test(ptr: *mut u8, len: usize) {
 }
 
 #[cfg(any(test, feature = "ci-inspection"))]
-/// 定数時間暗号照合ブロック(32バイト認証タグ・トークン照合)の外部C ABIエクスポート関数。
+/// 定数時間 32 バイト配列照合の外部 C ABI エクスポート関数。
 ///
-/// 暗号照合ブロック内部にコンパイラ最適化による早期リターンや
-/// 条件分岐命令(`br_if`, `if`, `br_table`)が注入されていないかを機械的静的検査で検証するための対象関数。
-/// `a_ptr` または `b_ptr` が NULL の場合は分岐命令を発生させずに `0`(不一致)を返す。
+/// 認証タグやトークンの照合において、コンパイラ最適化による早期リターンや
+/// 条件分岐命令 (`br_if`, `if`, `br_table`) が注入されていないかを機械的静的解析で検証するための対象関数。
+/// いずれかのポインタが NULL の場合でも、分岐命令を発生させずに不一致 (`0`) を返す。
 ///
 /// # Safety
-/// 呼び出し元は非NULLの `a_ptr` および `b_ptr` について、それぞれ少なくとも32バイトの連続した
-/// 読み取り可能メモリ領域を指していることを保証しなければならない。
+///
+/// 呼び出し元は以下の条件を満たさなければならない。
+/// - 非 NULL の `a_ptr` および `b_ptr` は、それぞれ少なくとも 32 バイトの連続した読み取り可能メモリ領域を指していること。
+///
+/// # Args
+///
+/// - `a_ptr`: 比較対象配列 A (32 バイト) の先頭ポインタ。
+/// - `b_ptr`: 比較対象配列 B (32 バイト) の先頭ポインタ。
+///
+/// # Returns
+///
+/// - `1`: 両配列の内容が完全に一致し、かつ両ポインタが有効である。
+/// - `0`: 内容が不一致であるか、いずれかのポインタが NULL である。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
     a_ptr: *const u8,
@@ -191,13 +238,31 @@ pub unsafe extern "C" fn fidelogic_wasm_constant_time_eq_32(
     eq & valid
 }
 
-/// TLV Vault ヘッダーのデシリアライズを行う外部C ABIエクスポート関数。
+/// TLV Vault ヘッダーのデシリアライズを行う外部 C ABI エクスポート関数。
+///
+/// ホスト環境から渡されたバイナリ列の先頭から Vault ヘッダー (マジックナンバー、バージョン、
+/// スイート ID、エポック ID) を抽出し、指定の出力先ポインタへ書き込む。
 ///
 /// # Safety
-/// 呼び出し元は `header_bytes_ptr` が有効であり、少なくとも `len` バイトの
-/// 読み取り可能メモリ領域を指していることを保証しなければならない。
-/// また、`out_suite_id` および `out_epoch_id` は非NULLであり、それぞれ 1 バイトおよび
-/// 8 バイトの書き込み可能メモリ領域を指している必要がある(`out_epoch_id` は非アライン可)。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - `header_bytes_ptr` は少なくとも `len` バイトの連続した読み取り可能メモリ領域を指していること。
+/// - `out_suite_id` は 1 バイトの書き込み可能領域を指していること。
+/// - `out_epoch_id` は 8 バイト (`u64`) の書き込み可能領域を指していること (非アライン配置可)。
+/// - 入力バッファおよび各出力バッファは、互いにメモリ上で重複 (overlap) していないこと。
+///
+/// # Args
+///
+/// - `header_bytes_ptr`: Vault ヘッダーバイナリ列の先頭ポインタ。
+/// - `len`: 入力バッファのバイト長 ([`fidelogic_core::tlv::VAULT_HEADER_LEN`] 以上である必要がある)。
+/// - `out_suite_id`: 抽出された暗号スイート ID (1 バイト) の書き込み先ポインタ。
+/// - `out_epoch_id`: 抽出されたエポック番号 (8 バイト、リトル/ビッグエンディアンを問わず安全に書き込み) の書き込み先ポインタ。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): パース成功。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): ポインタが不正または重複。
+/// - `2` ([`WasmStatusCode::InvalidParameter`]): バッファ長不足またはマジックナンバー不正。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_header_parse(
     header_bytes_ptr: *const u8,
@@ -260,11 +325,29 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
 }
 
 #[cfg(any(feature = "profile-lite", feature = "profile-vault"))]
-/// RFC 7748 X25519 Diffie-Hellman 鍵共有演算の外部C ABIエクスポート関数。
+/// RFC 7748 X25519 Diffie-Hellman 鍵共有演算の外部 C ABI エクスポート関数。
+///
+/// 秘密鍵スカラーと相手方の公開鍵点から 32 バイトの共有秘密を導出する。
+/// 低位数点等の無効な入力により演算が失敗した場合は、出力先バッファを揮発性ゼロ消去して
+/// 不完全な中間データの漏洩を防止する。
 ///
 /// # Safety
-/// 呼び出し元は `secret_key_ptr`, `public_key_ptr`, `out_shared_ptr` が有効であり、
-/// それぞれ32バイトのメモリ領域を指していることを保証しなければならない。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - `secret_key_ptr`, `public_key_ptr`, `out_shared_ptr` はそれぞれ非 NULL であり、32 バイトの連続したメモリ領域を指していること。
+/// - `out_shared_ptr` は `secret_key_ptr` および `public_key_ptr` とメモリ上で重複していないこと。
+///
+/// # Args
+///
+/// - `secret_key_ptr`: 秘密鍵 (32 バイト) の先頭ポインタ。
+/// - `public_key_ptr`: 公開鍵 (32 バイト) の先頭ポインタ。
+/// - `out_shared_ptr`: 導出された共有秘密 (32 バイト) の書き込み先ポインタ。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): 共有秘密の導出に成功。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): いずれかのポインタが NULL または重複している。
+/// - `2` ([`WasmStatusCode::InvalidParameter`]): 低位数点検出などの暗号学的検証エラー。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
     secret_key_ptr: *const u8,
@@ -298,13 +381,30 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
 }
 
 #[cfg(feature = "profile-vault")]
-/// Argon2id 鍵導出の外部C ABIエクスポート関数。
+/// Argon2id 鍵導出の外部 C ABI エクスポート関数。
 ///
-/// Wasm環境向け本番パラメータ([`fidelogic_core::Argon2Params::for_wasm`]: 19 MiB, t=2, p=1)を適用し、
-/// 指定された出力長 `out_len` で鍵を導出する。
+/// Wasm 環境向け本番パラメータ ([`fidelogic_core::Argon2Params::for_wasm`]: 19 MiB, t=2, p=1) を適用し、
+/// パスワードおよびソルトから指定された出力長 (`out_len`) の鍵を導出する。
+/// パラメータ検証または計算処理でエラーが発生した場合は、出力バッファを直ちに揮発性ゼロ消去する。
 ///
 /// # Safety
-/// 呼び出し元は各ポインタが有効であり、指定された長さのメモリ領域を指していることを保証しなければならない。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - 各ポインタは指定された長さの有効なメモリ領域を指していること。
+/// - 出力バッファ `[out_ptr, out_ptr + out_len)` は、入力パスワードおよびソルトの領域と重複していないこと。
+///
+/// # Args
+///
+/// - `password_ptr`, `password_len`: 入力パスワードの先頭ポインタとバイト長。
+/// - `salt_ptr`, `salt_len`: 入力ソルトの先頭ポインタとバイト長。
+/// - `out_ptr`, `out_len`: 導出鍵の書き込み先ポインタと要求バイト長。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): 鍵導出に成功。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): 不正ポインタまたは領域重複。
+/// - `2` ([`WasmStatusCode::InvalidParameter`]): 出力長などのパラメータが不正。
+/// - `3` ([`WasmStatusCode::ExecutionFailed`]): 鍵導出処理の失敗。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     password_ptr: *const u8,
@@ -357,7 +457,7 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     }
 }
 
-/// Vault暗号化・復号C ABI関数の共通検証結果を表す構造体。
+/// Vault 暗号化・復号 C ABI 関数の共通検証結果を保持する内部構造体。
 #[cfg(feature = "profile-vault")]
 struct VaultOpParams<'a> {
     cipher: fidelogic_core::VaultCipher,
@@ -366,10 +466,11 @@ struct VaultOpParams<'a> {
     data: &'a mut [u8],
 }
 
-/// Vault暗号化・復号C ABI関数向けの共通引数検証およびスライス構築ヘルパー。
+/// Vault 暗号化・復号 C ABI 関数向けの共通引数検証およびスライス構築ヘルパー。
 ///
 /// # Safety
-/// 非NULLの各ポインタは指定された長さの有効なメモリ領域を指し、
+///
+/// 非 NULL の各ポインタは指定された長さの有効なメモリ領域を指し、
 /// 返却されるライフタイム `'a` の間は他の参照とエイリアシング規則に違反しないこと。
 #[cfg(feature = "profile-vault")]
 #[allow(clippy::too_many_arguments)]
@@ -410,10 +511,33 @@ unsafe fn parse_vault_params<'a>(
 }
 
 #[cfg(feature = "profile-vault")]
-/// Vault インプレース分離暗号化の外部C ABIエクスポート関数。
+/// Vault インプレース分離暗号化の外部 C ABI エクスポート関数。
+///
+/// 提供された平文バッファをその場で暗号化 (インプレース) し、生成された 16 バイトの認証タグを
+/// `tag_out_ptr` へ書き込む。
 ///
 /// # Safety
-/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - `key_ptr` は 32 バイト、`tag_out_ptr` は 16 バイトのメモリ領域を指していること。
+/// - `nonce_ptr`, `aad_ptr`, `data_ptr` はそれぞれ指定された長さの有効なメモリ領域を指していること。
+/// - 出力先バッファ (`data_ptr`, `tag_out_ptr`) は入力バッファおよび互いに重複していないこと。
+///
+/// # Args
+///
+/// - `suite_id`: 暗号スイート識別子 (`1`: XChaCha20-Poly1305, `2`: AES-256-GCM-SIV)。
+/// - `key_ptr`: 暗号鍵 (32 バイト) の先頭ポインタ。
+/// - `nonce_ptr`, `nonce_len`: ノンスの先頭ポインタとバイト長。
+/// - `aad_ptr`, `aad_len`: 追加認証データ (AAD) の先頭ポインタとバイト長。
+/// - `data_ptr`, `data_len`: 平文 (暗号化後は暗号文が上書き) の先頭ポインタとバイト長。
+/// - `tag_out_ptr`: 出力認証タグ (16 バイト) の書き込み先ポインタ。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): 暗号化成功。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): 不正ポインタまたは領域重複。
+/// - `2` ([`WasmStatusCode::InvalidParameter`]): スイート ID またはノンス長不正。
+/// - `3` ([`WasmStatusCode::ExecutionFailed`]): 暗号化処理の失敗。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
     suite_id: u8,
@@ -464,10 +588,34 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
 }
 
 #[cfg(feature = "profile-vault")]
-/// Vault インプレース分離復号の外部C ABIエクスポート関数。
+/// Vault インプレース分離復号の外部 C ABI エクスポート関数。
+///
+/// 提供された暗号文バッファと 16 バイトの認証タグを検証し、真正性が確認された場合に
+/// 暗号文をインプレースで平文へ復号する。
+/// 認証に失敗した場合は、平文バッファの内容を直ちに揮発性ゼロ消去する。
 ///
 /// # Safety
-/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - `key_ptr` は 32 バイト、`tag_ptr` は 16 バイトのメモリ領域を指していること。
+/// - `nonce_ptr`, `aad_ptr`, `data_ptr` はそれぞれ指定された長さの有効なメモリ領域を指していること。
+/// - `tag_ptr` は `data_ptr` とメモリ上で重複していないこと。
+///
+/// # Args
+///
+/// - `suite_id`: 暗号スイート識別子 (`1`: XChaCha20-Poly1305, `2`: AES-256-GCM-SIV)。
+/// - `key_ptr`: 暗号鍵 (32 バイト) の先頭ポインタ。
+/// - `nonce_ptr`, `nonce_len`: ノンスの先頭ポインタとバイト長。
+/// - `aad_ptr`, `aad_len`: 追加認証データ (AAD) の先頭ポインタとバイト長。
+/// - `data_ptr`, `data_len`: 暗号文 (復号成功時は平文が上書き) の先頭ポインタとバイト長。
+/// - `tag_ptr`: 検証対象認証タグ (16 バイト) の先頭ポインタ。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): 復号および認証タグ検証に成功。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): 不正ポインタまたは領域重複。
+/// - `2` ([`WasmStatusCode::InvalidParameter`]): スイート ID またはノンス長不正。
+/// - `3` ([`WasmStatusCode::ExecutionFailed`]): 認証タグ不一致等の復号失敗。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
     suite_id: u8,
@@ -506,10 +654,25 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
 }
 
 #[cfg(feature = "profile-vault")]
-/// Vault 全体のTLVデシリアライズ検証の外部C ABIエクスポート関数。
+/// Vault 全体のゼロコピー TLV デシリアライズ検証を行う外部 C ABI エクスポート関数。
+///
+/// 与えられたバイト列が完全で整合性のある Vault TLV バイナリであるかを検証する。
 ///
 /// # Safety
-/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - `bytes_ptr` は少なくとも `len` バイトの連続した読み取り可能メモリ領域を指していること。
+///
+/// # Args
+///
+/// - `bytes_ptr`: 検証対象 Vault バイト列の先頭ポインタ。
+/// - `len`: バイト列の長さ。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): 完全な Vault として正常にデシリアライズ完了。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): ポインタが NULL または長さ 0。
+/// - `3` ([`WasmStatusCode::ExecutionFailed`]): TLV 形式不正、マジック番号不一致、または余剰バイト存在。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, len: usize) -> u32 {
     let bytes = match unsafe { slice_from_raw_parts_checked(bytes_ptr, len) } {
@@ -523,13 +686,27 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, 
 }
 
 #[cfg(all(feature = "profile-vault", any(test, feature = "ci-inspection")))]
-/// サイズゲート計測用アンカー: LTOによる `tlv::serialize` のデッドコード除去を抑止する内部検証用スタブ。
+/// バイナリサイズ計測用アンカー: LTO による `tlv::serialize` の最適化除去 (DCE) を抑止する検証用スタブ。
 ///
-/// 本番API([`fidelogic_wasm_vault_deserialize`])から再シリアライズ副作用を分離するために独立させており、
-/// 通常運用からの呼び出しは想定しない。
+/// 本番 API ([`fidelogic_wasm_vault_deserialize`]) から再シリアライズ副作用を分離するために独立させており、
+/// 通常のアプリケーション運用からの呼び出しは想定しない。
 ///
 /// # Safety
-/// 各ポインタは指定された長さの有効なメモリ領域を指していること。
+///
+/// 呼び出し元は以下の事前条件を満たさなければならない。
+/// - `bytes_ptr` は少なくとも `len` バイトの連続した読み取り可能メモリ領域を指していること。
+///
+/// # Args
+///
+/// - `bytes_ptr`: 入力バイト列の先頭ポインタ。
+/// - `len`: 入力バイト長。
+///
+/// # Returns
+///
+/// - `0` ([`WasmStatusCode::Success`]): デシリアライズおよび再シリアライズに成功。
+/// - `1` ([`WasmStatusCode::InvalidPointer`]): ポインタが不正。
+/// - `2` ([`WasmStatusCode::InvalidParameter`]): 再シリアライズパラメータエラー。
+/// - `3` ([`WasmStatusCode::ExecutionFailed`]): デシリアライズ失敗。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_size_anchor(bytes_ptr: *const u8, len: usize) -> u32 {
     let bytes = match unsafe { slice_from_raw_parts_checked(bytes_ptr, len) } {
@@ -546,10 +723,24 @@ pub unsafe extern "C" fn fidelogic_wasm_size_anchor(bytes_ptr: *const u8, len: u
 }
 
 #[cfg(all(feature = "profile-vault", any(test, feature = "ci-inspection")))]
-/// CI 静的解析用エクスポート: ダミー暗号演算 (Argon2id, HKDF-SHA256, XChaCha20-Poly1305 AEAD) の DCE 抑止検証用スタブ。
+/// CI 静的解析用エクスポート: ダミー暗号演算のデッドコード除去 (DCE) 抑止検証用スタブ。
+///
+/// 未選択スロットのタイミング平滑化処理 (Argon2id, HKDF-SHA256, XChaCha20-Poly1305 AEAD) が
+/// コンパイラ最適化で消去されず確実にリンクされているかを検証する。
 ///
 /// # Safety
-/// 各ポインタは指定された長さの有効なメモリ領域を指していること (NULL または長さ 0 の場合は空 AAD として扱う)。
+///
+/// 呼び出し元は以下の条件を満たさなければならない。
+/// - `aad_ptr` が非 NULL の場合、少なくとも `aad_len` バイトのメモリ領域を指していること (NULL または長さ 0 の場合は空 AAD として安全にフォールバック)。
+///
+/// # Args
+///
+/// - `aad_ptr`: 追加認証データ (AAD) の先頭ポインタ。
+/// - `aad_len`: 追加認証データのバイト長。
+///
+/// # Returns
+///
+/// 実行されたダミー暗号演算の総回数 (最適化抑止用ブラックボックス)。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fidelogic_wasm_dummy_slot_eval_test(
     aad_ptr: *const u8,
