@@ -55,10 +55,11 @@ impl From<WasmStatusCode> for u32 {
     }
 }
 
-/// 不正なスライスポインタまたは `isize::MAX` を超える長さを検証し、安全に不変スライスを取得する。
+/// 不正なスライスポインタまたはアドレス空間ラップアラウンドを検証し、安全に不変スライスを取得する。
 ///
 /// `len == 0` の場合はポインタが NULL であっても安全に空スライス `&[]` を返す。
-/// `len > 0` の場合は `ptr` が非NULLかつ `len <= isize::MAX as usize` であることを検証する。
+/// `len > 0` の場合は `ptr` が非NULLであり、かつ `(ptr as usize).checked_add(len)` による終端アドレスが
+/// アドレス空間をラップアラウンドせず `isize::MAX as usize` 以下であることを検証する。
 #[allow(dead_code)]
 #[inline]
 unsafe fn slice_from_raw_parts_checked<'a>(
@@ -67,18 +68,29 @@ unsafe fn slice_from_raw_parts_checked<'a>(
 ) -> Result<&'a [u8], WasmStatusCode> {
     if len == 0 {
         Ok(&[])
-    } else if ptr.is_null() || len > isize::MAX as usize {
+    } else if ptr.is_null() {
         Err(WasmStatusCode::InvalidPointer)
     } else {
-        // SAFETY: 呼び出し元が `ptr` の有効性とエイリアシング契約を保証し、`len <= isize::MAX` かつ非NULL。
-        Ok(unsafe { core::slice::from_raw_parts(ptr, len) })
+        let is_valid = (ptr as usize)
+            .checked_add(len)
+            .filter(|&end| end <= isize::MAX as usize)
+            .is_some();
+        if !is_valid {
+            Err(WasmStatusCode::InvalidPointer)
+        } else {
+            // SAFETY: 事前検証により `ptr` は非NULLであり、`ptr + len` の終端アドレスが
+            // アドレス空間をラップアラウンドせず `isize::MAX` 以下に収まることが保証されている。
+            // 呼び出し元は `ptr` が指す有効なメモリ領域とエイリアシング契約を保証しなければならない。
+            Ok(unsafe { core::slice::from_raw_parts(ptr, len) })
+        }
     }
 }
 
-/// 不正なスライスポインタまたは `isize::MAX` を超える長さを検証し、安全に可変スライスを取得する。
+/// 不正なスライスポインタまたはアドレス空間ラップアラウンドを検証し、安全に可変スライスを取得する。
 ///
 /// `len == 0` の場合はポインタが NULL であっても安全に空スライス `&mut []` を返す。
-/// `len > 0` の場合は `ptr` が非NULLかつ `len <= isize::MAX as usize` であることを検証する。
+/// `len > 0` の場合は `ptr` が非NULLであり、かつ `(ptr as usize).checked_add(len)` による終端アドレスが
+/// アドレス空間をラップアラウンドせず `isize::MAX as usize` 以下であることを検証する。
 #[allow(dead_code)]
 #[inline]
 unsafe fn slice_from_raw_parts_mut_checked<'a>(
@@ -87,11 +99,21 @@ unsafe fn slice_from_raw_parts_mut_checked<'a>(
 ) -> Result<&'a mut [u8], WasmStatusCode> {
     if len == 0 {
         Ok(&mut [])
-    } else if ptr.is_null() || len > isize::MAX as usize {
+    } else if ptr.is_null() {
         Err(WasmStatusCode::InvalidPointer)
     } else {
-        // SAFETY: 呼び出し元が `ptr` の有効性と排他性を保証し、`len <= isize::MAX` かつ非NULL。
-        Ok(unsafe { core::slice::from_raw_parts_mut(ptr, len) })
+        let is_valid = (ptr as usize)
+            .checked_add(len)
+            .filter(|&end| end <= isize::MAX as usize)
+            .is_some();
+        if !is_valid {
+            Err(WasmStatusCode::InvalidPointer)
+        } else {
+            // SAFETY: 事前検証により `ptr` は非NULLであり、`ptr + len` の終端アドレスが
+            // アドレス空間をラップアラウンドせず `isize::MAX` 以下に収まることが保証されている。
+            // 呼び出し元は `ptr` が指す有効なメモリ領域と排他性契約を保証しなければならない。
+            Ok(unsafe { core::slice::from_raw_parts_mut(ptr, len) })
+        }
     }
 }
 
@@ -183,19 +205,47 @@ pub unsafe extern "C" fn fidelogic_wasm_header_parse(
     out_suite_id: *mut u8,
     out_epoch_id: *mut u64,
 ) -> u32 {
-    if header_bytes_ptr.is_null()
-        || out_suite_id.is_null()
-        || out_epoch_id.is_null()
-        || len < fidelogic_core::tlv::VAULT_HEADER_LEN
-        || len > isize::MAX as usize
+    let header_bytes = match unsafe { slice_from_raw_parts_checked(header_bytes_ptr, len) } {
+        Ok(s) => s,
+        Err(code) => return code.as_u32(),
+    };
+
+    let suite_valid = !out_suite_id.is_null()
+        && (out_suite_id as usize)
+            .checked_add(1)
+            .filter(|&end| end <= isize::MAX as usize)
+            .is_some();
+    let epoch_valid = !out_epoch_id.is_null()
+        && (out_epoch_id as usize)
+            .checked_add(core::mem::size_of::<u64>())
+            .filter(|&end| end <= isize::MAX as usize)
+            .is_some();
+    if !suite_valid || !epoch_valid {
+        return WasmStatusCode::InvalidPointer.as_u32();
+    }
+
+    if ranges_overlap(header_bytes_ptr, len, out_suite_id, 1)
+        || ranges_overlap(
+            header_bytes_ptr,
+            len,
+            out_epoch_id.cast::<u8>(),
+            core::mem::size_of::<u64>(),
+        )
+        || ranges_overlap(
+            out_suite_id,
+            1,
+            out_epoch_id.cast::<u8>(),
+            core::mem::size_of::<u64>(),
+        )
     {
         return WasmStatusCode::InvalidPointer.as_u32();
     }
-    // SAFETY: 事前検証により `header_bytes_ptr` は非NULLであり、少なくとも VAULT_HEADER_LEN バイトの
-    // 有効なメモリ領域を指している。先頭のヘッダー部分のみをスライス化することで安全性を担保する。
-    let slice = unsafe {
-        core::slice::from_raw_parts(header_bytes_ptr, fidelogic_core::tlv::VAULT_HEADER_LEN)
-    };
+
+    if header_bytes.len() < fidelogic_core::tlv::VAULT_HEADER_LEN {
+        return WasmStatusCode::InvalidParameter.as_u32();
+    }
+
+    let slice = &header_bytes[..fidelogic_core::tlv::VAULT_HEADER_LEN];
     match fidelogic_core::tlv::deserialize_header(slice) {
         Ok((header, _)) => {
             unsafe {
@@ -591,10 +641,13 @@ mod tests {
             assert_eq!(suite_id, 1, "暗号スイートIDの取得に成功。");
             assert_eq!(epoch_id, 42, "世代カウンターの取得に成功。");
 
-            // 長さ不足によるエラーの検証
+            // 長さ不足(切り詰め入力)によるパースエラーの検証
             let invalid_res =
                 fidelogic_wasm_header_parse(valid_header.as_ptr(), 5, &mut suite_id, &mut epoch_id);
-            assert_eq!(invalid_res, 1, "長さ不足時の検証エラーに成功。");
+            assert_eq!(
+                invalid_res, 2,
+                "長さ不足の切り詰め入力時はInvalidParameter(2)を返却。"
+            );
 
             // isize::MAX 超過によるエラーの検証
             let overflow_res = fidelogic_wasm_header_parse(
@@ -620,6 +673,79 @@ mod tests {
                 "先頭14バイトのみを参照したヘッダーパースに成功。"
             );
             assert_eq!(epoch_id, 42, "世代カウンターの取得に成功。");
+
+            // 出力ポインタ同士の重複(エイリアシング)によるエラーの検証
+            let mut overlap_buf = [0u8; 16];
+            let overlap_suite_ptr = overlap_buf.as_mut_ptr();
+            let overlap_epoch_ptr = overlap_buf.as_mut_ptr() as *mut u64;
+            let overlap_out_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                overlap_suite_ptr,
+                overlap_epoch_ptr,
+            );
+            assert_eq!(
+                overlap_out_res, 1,
+                "出力ポインタ同士が重複している場合はエラーコード1を返却。"
+            );
+
+            // 入力バッファと出力ポインタの重複によるエラーの検証
+            let mut mutable_header = valid_header;
+            let header_suite_overlap_res = fidelogic_wasm_header_parse(
+                mutable_header.as_ptr(),
+                mutable_header.len(),
+                mutable_header.as_mut_ptr(),
+                &mut epoch_id,
+            );
+            assert_eq!(
+                header_suite_overlap_res, 1,
+                "入力バッファとsuite_id出力領域が重複している場合はエラーコード1を返却。"
+            );
+
+            let header_epoch_overlap_res = fidelogic_wasm_header_parse(
+                mutable_header.as_ptr(),
+                mutable_header.len(),
+                &mut suite_id,
+                mutable_header.as_mut_ptr() as *mut u64,
+            );
+            assert_eq!(
+                header_epoch_overlap_res, 1,
+                "入力バッファとepoch_id出力領域が重複している場合はエラーコード1を返却。"
+            );
+
+            // アドレス空間ラップアラウンドによるエラーの検証
+            let wraparound_header_res = fidelogic_wasm_header_parse(
+                (usize::MAX - 5) as *const u8,
+                14,
+                &mut suite_id,
+                &mut epoch_id,
+            );
+            assert_eq!(
+                wraparound_header_res, 1,
+                "ヘッダーアドレスがラップアラウンドする場合はエラーコード1を返却。"
+            );
+
+            let wraparound_suite_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                (usize::MAX - 5) as *mut u8,
+                &mut epoch_id,
+            );
+            assert_eq!(
+                wraparound_suite_res, 1,
+                "suite_idポインタがラップアラウンドする場合はエラーコード1を返却。"
+            );
+
+            let wraparound_epoch_res = fidelogic_wasm_header_parse(
+                valid_header.as_ptr(),
+                valid_header.len(),
+                &mut suite_id,
+                (usize::MAX - 5) as *mut u64,
+            );
+            assert_eq!(
+                wraparound_epoch_res, 1,
+                "epoch_idポインタがラップアラウンドする場合はエラーコード1を返却。"
+            );
 
             // NULLポインタ引数に対するエラーの検証
             let null_header_res = fidelogic_wasm_header_parse(
@@ -676,6 +802,76 @@ mod tests {
                 core::ptr::read_unaligned(unaligned_epoch_ptr),
                 42,
                 "非アラインアドレスへの世代カウンター書き込みに成功。"
+            );
+        }
+    }
+
+    #[test]
+    fn test_slice_from_raw_parts_checked() {
+        let mut buf = [1u8, 2, 3, 4, 5];
+
+        unsafe {
+            // len == 0 の場合は NULL ポインタでも安全に空スライスを返却
+            let empty_res = slice_from_raw_parts_checked(core::ptr::null(), 0);
+            assert_eq!(empty_res, Ok(&[][..]), "len=0時は空スライスの取得に成功。");
+
+            let empty_mut_res = slice_from_raw_parts_mut_checked(core::ptr::null_mut(), 0);
+            assert_eq!(
+                empty_mut_res,
+                Ok(&mut [][..]),
+                "len=0時は可変空スライスの取得に成功。"
+            );
+
+            // len > 0 で NULL ポインタの場合はエラーコード1
+            let null_res = slice_from_raw_parts_checked(core::ptr::null(), 1);
+            assert_eq!(
+                null_res,
+                Err(WasmStatusCode::InvalidPointer),
+                "NULLポインタ時はInvalidPointerを返却。"
+            );
+
+            let null_mut_res = slice_from_raw_parts_mut_checked(core::ptr::null_mut(), 1);
+            assert_eq!(
+                null_mut_res,
+                Err(WasmStatusCode::InvalidPointer),
+                "NULL可変ポインタ時はInvalidPointerを返却。"
+            );
+
+            // アドレス空間ラップアラウンド (ptr + len が usize::MAX を超える)
+            let wrap_res = slice_from_raw_parts_checked((usize::MAX - 5) as *const u8, 10);
+            assert_eq!(
+                wrap_res,
+                Err(WasmStatusCode::InvalidPointer),
+                "アドレス空間ラップアラウンド時はInvalidPointerを返却。"
+            );
+
+            let wrap_mut_res = slice_from_raw_parts_mut_checked((usize::MAX - 5) as *mut u8, 10);
+            assert_eq!(
+                wrap_mut_res,
+                Err(WasmStatusCode::InvalidPointer),
+                "可変アドレス空間ラップアラウンド時はInvalidPointerを返却。"
+            );
+
+            // 終端アドレスが isize::MAX を超過する場合
+            let isize_overflow_res = slice_from_raw_parts_checked(
+                core::ptr::NonNull::<u8>::dangling().as_ptr(),
+                isize::MAX as usize,
+            );
+            assert_eq!(
+                isize_overflow_res,
+                Err(WasmStatusCode::InvalidPointer),
+                "isize::MAX超過時はInvalidPointerを返却。"
+            );
+
+            // 正常なバッファでのスライス取得
+            let ok_res = slice_from_raw_parts_checked(buf.as_ptr(), buf.len());
+            assert_eq!(ok_res, Ok(&buf[..]), "正常スライスの取得に成功。");
+
+            let ok_mut_res = slice_from_raw_parts_mut_checked(buf.as_mut_ptr(), buf.len());
+            assert_eq!(
+                ok_mut_res,
+                Ok(&mut [1u8, 2, 3, 4, 5][..]),
+                "正常可変スライスの取得に成功。"
             );
         }
     }
