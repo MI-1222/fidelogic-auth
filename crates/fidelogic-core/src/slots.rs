@@ -1782,8 +1782,8 @@ impl VaultEngine {
         let fallback_params = *self.dummy_argon2_params();
 
         match unwrap_fn(&fallback_params, slot_valid) {
-            Ok(dek) => {
-                if let Err(err) = self.complete_unlock(kind, dek) {
+            Ok(mut dek) => {
+                if let Err(err) = self.complete_unlock(kind, &mut dek) {
                     let _ = self.fail_unlock();
                     return Err(err.mask_auth_error());
                 }
@@ -2165,8 +2165,8 @@ impl VaultEngine {
 
         let header_aad = vault.header.associated_data();
         match self.eval_vault_credential_traced(vault, credential, &header_aad, trace) {
-            Ok(dek) => {
-                if let Err(err) = self.complete_unlock(kind, dek) {
+            Ok(mut dek) => {
+                if let Err(err) = self.complete_unlock(kind, &mut dek) {
                     let _ = self.fail_unlock();
                     return Err(err.mask_auth_error());
                 }
@@ -2229,7 +2229,7 @@ impl VaultEngine {
         }
 
         match matched {
-            Some((kind, dek)) => match self.complete_unlock(kind, dek) {
+            Some((kind, mut dek)) => match self.complete_unlock(kind, &mut dek) {
                 Ok(()) => (Ok(kind), trace),
                 Err(err) => {
                     let _ = self.fail_unlock();

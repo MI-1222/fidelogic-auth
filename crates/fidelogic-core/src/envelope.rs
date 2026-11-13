@@ -497,8 +497,8 @@ impl VaultEngine {
 
     /// 認証と復号の成功に伴い平文DEKをロードし、`Unlocking` から `Unlocked` へ遷移する (`StepUnlockSuccess`)。
     ///
-    /// 状態不正やスロット無効等により遷移が拒絶された場合でも、
-    /// 引数で受け取った `dek` は返却前に `volatile_zeroize` により即時消去される。
+    /// 呼び出し元の秘密情報バッファ `dek` は [`SecretBytes::consume_with`] により消費され、
+    /// 状態不正やスロット無効等により遷移が拒絶された場合も含め、返却前に確実に `volatile_zeroize` される。
     ///
     /// # Errors
     ///
@@ -507,21 +507,21 @@ impl VaultEngine {
     pub fn complete_unlock(
         &mut self,
         kind: SlotKind,
-        mut dek: SecretBytes<DEK_LEN>,
+        dek: &mut SecretBytes<DEK_LEN>,
     ) -> Result<(), VaultError> {
-        if self.state != VaultState::Unlocking {
-            volatile_zeroize(dek.as_mut_slice());
-            return Err(VaultError::InvalidState);
-        }
-        if !self.slots.is_kind_valid(kind) {
-            volatile_zeroize(dek.as_mut_slice());
-            return Err(VaultError::AuthenticationFailed);
-        }
+        dek.consume_with(|dek_bytes| {
+            if self.state != VaultState::Unlocking {
+                return Err(VaultError::InvalidState);
+            }
+            if !self.slots.is_kind_valid(kind) {
+                return Err(VaultError::AuthenticationFailed);
+            }
 
-        self.scrub_dek_in_place();
-        self.dek = ManuallyDrop::new(dek);
-        self.state = VaultState::Unlocked;
-        Ok(())
+            self.scrub_dek_in_place();
+            self.dek.as_mut_bytes().copy_from_slice(dek_bytes);
+            self.state = VaultState::Unlocked;
+            Ok(())
+        })
     }
 
     /// 認証または復号の失敗を通知し、`Unlocking` から `Locked` へ復帰する (`StepUnlockFail`)。
@@ -723,7 +723,7 @@ mod tests {
 
         assert!(engine.can_step(VaultEvent::UnlockSuccess(SlotKind::Argon2id)));
         assert_eq!(
-            engine.complete_unlock(SlotKind::Argon2id, sample_dek(0xA5)),
+            engine.complete_unlock(SlotKind::Argon2id, &mut sample_dek(0xA5)),
             Ok(())
         );
         assert_eq!(engine.state(), VaultState::Unlocked);
@@ -747,7 +747,7 @@ mod tests {
 
         assert_eq!(engine.start_unlock(SlotKind::Prf), Ok(()));
         assert_eq!(
-            engine.complete_unlock(SlotKind::Prf, sample_dek(0x5A)),
+            engine.complete_unlock(SlotKind::Prf, &mut sample_dek(0x5A)),
             Ok(())
         );
         assert!(engine.can_step(VaultEvent::Zeroize));
@@ -784,7 +784,10 @@ mod tests {
 
             let mut engine = VaultEngine::new(slots);
             assert_eq!(engine.start_unlock(valid_kind), Ok(()));
-            assert_eq!(engine.complete_unlock(valid_kind, sample_dek(0x33)), Ok(()));
+            assert_eq!(
+                engine.complete_unlock(valid_kind, &mut sample_dek(0x33)),
+                Ok(())
+            );
             assert_eq!(engine.state(), VaultState::Unlocked);
             assert!(engine.is_safe_state());
         }
@@ -795,7 +798,7 @@ mod tests {
         let mut engine = VaultEngine::new(all_valid_slots());
 
         assert_eq!(
-            engine.complete_unlock(SlotKind::Argon2id, sample_dek(0x11)),
+            engine.complete_unlock(SlotKind::Argon2id, &mut sample_dek(0x11)),
             Err(VaultError::InvalidState),
             "LockedからUnlockedへの直接遷移拒絶に成功。"
         );
@@ -830,7 +833,7 @@ mod tests {
 
         assert_eq!(engine.start_unlock(SlotKind::Argon2id), Ok(()));
         assert_eq!(
-            engine.complete_unlock(SlotKind::Argon2id, sample_dek(0x77)),
+            engine.complete_unlock(SlotKind::Argon2id, &mut sample_dek(0x77)),
             Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(engine.state(), VaultState::Unlocking);
@@ -840,7 +843,7 @@ mod tests {
 
         assert_eq!(engine.start_unlock(SlotKind::Prf), Ok(()));
         assert_eq!(
-            engine.complete_unlock(SlotKind::Prf, sample_dek(0x88)),
+            engine.complete_unlock(SlotKind::Prf, &mut sample_dek(0x88)),
             Err(VaultError::AuthenticationFailed)
         );
         assert_eq!(engine.fail_unlock(), Ok(()));
@@ -887,7 +890,7 @@ mod tests {
 
         // 復号完了してUnlockedへ遷移: スロット更新が可能。
         assert_eq!(
-            engine.complete_unlock(SlotKind::Argon2id, sample_dek(0x42)),
+            engine.complete_unlock(SlotKind::Argon2id, &mut sample_dek(0x42)),
             Ok(())
         );
         assert_eq!(engine.state(), VaultState::Unlocked);
@@ -914,7 +917,7 @@ mod tests {
         let mut engine = VaultEngine::new(all_valid_slots());
         engine.start_unlock(SlotKind::Recovery).unwrap();
         engine
-            .complete_unlock(SlotKind::Recovery, sample_dek(0xCC))
+            .complete_unlock(SlotKind::Recovery, &mut sample_dek(0xCC))
             .unwrap();
         engine.zeroize_key().unwrap();
 
@@ -923,7 +926,7 @@ mod tests {
             Err(VaultError::InvalidState)
         );
         assert_eq!(
-            engine.complete_unlock(SlotKind::Argon2id, sample_dek(0xDD)),
+            engine.complete_unlock(SlotKind::Argon2id, &mut sample_dek(0xDD)),
             Err(VaultError::InvalidState)
         );
         assert_eq!(engine.fail_unlock(), Err(VaultError::InvalidState));
@@ -953,7 +956,7 @@ mod tests {
                 VaultState::Unlocked => {
                     engine.start_unlock(SlotKind::Argon2id).unwrap();
                     engine
-                        .complete_unlock(SlotKind::Argon2id, sample_dek(0xEE))
+                        .complete_unlock(SlotKind::Argon2id, &mut sample_dek(0xEE))
                         .unwrap();
                     let debug_str = format!("{engine:?}");
                     assert!(
@@ -973,7 +976,7 @@ mod tests {
         let mut engine_trait = VaultEngine::new(all_valid_slots());
         engine_trait.start_unlock(SlotKind::Prf).unwrap();
         engine_trait
-            .complete_unlock(SlotKind::Prf, sample_dek(0xFE))
+            .complete_unlock(SlotKind::Prf, &mut sample_dek(0xFE))
             .unwrap();
         Zeroize::zeroize(&mut engine_trait);
         assert_eq!(engine_trait.state(), VaultState::Zeroized);
@@ -986,7 +989,7 @@ mod tests {
         let mut engine = VaultEngine::new(all_valid_slots());
         engine.start_unlock(SlotKind::Argon2id).unwrap();
         engine
-            .complete_unlock(SlotKind::Argon2id, sample_dek(0x99))
+            .complete_unlock(SlotKind::Argon2id, &mut sample_dek(0x99))
             .unwrap();
 
         let dek_ptr = engine
@@ -1071,7 +1074,8 @@ mod tests {
                 let res = match ev {
                     VaultEvent::StartUnlock(id) => engine.start_unlock(id),
                     VaultEvent::UnlockSuccess(id) => {
-                        let r = engine.complete_unlock(id, sample_dek(dek_seed));
+                        let mut dek = sample_dek(dek_seed);
+                        let r = engine.complete_unlock(id, &mut dek);
                         if r.is_ok() {
                             saw_valid_unlock = true;
                         }
@@ -1115,7 +1119,10 @@ mod tests {
             for ev in events {
                 let _ = match ev {
                     VaultEvent::StartUnlock(id) => engine.start_unlock(id),
-                    VaultEvent::UnlockSuccess(id) => engine.complete_unlock(id, sample_dek(dek_seed)),
+                    VaultEvent::UnlockSuccess(id) => {
+                        let mut dek = sample_dek(dek_seed);
+                        engine.complete_unlock(id, &mut dek)
+                    }
                     VaultEvent::UnlockFail => engine.fail_unlock(),
                     VaultEvent::Lock => engine.lock(),
                     VaultEvent::Zeroize => engine.zeroize_key(),

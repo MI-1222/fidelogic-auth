@@ -1205,20 +1205,25 @@ mod vault_memory_hygiene_tests {
                 engine
                     .start_unlock(SlotKind::Argon2id)
                     .expect("start_unlock に成功。");
+                let mut dek_recovery = SecretBytes::new(DEK_SENTINEL);
                 assert_eq!(
-                    engine.complete_unlock(SlotKind::Recovery, SecretBytes::new(DEK_SENTINEL)),
+                    engine.complete_unlock(SlotKind::Recovery, &mut dek_recovery),
                     Err(VaultError::AuthenticationFailed)
                 );
+                assert_eq!(dek_recovery.as_bytes(), &[0u8; 32]);
                 assert!(engine.observe_dek().is_none());
                 assert!(engine.is_safe_state());
+
+                let mut dek_prf = SecretBytes::new(DEK_SENTINEL);
+                assert_eq!(engine.complete_unlock(SlotKind::Prf, &mut dek_prf), Ok(()));
+                assert_eq!(dek_prf.as_bytes(), &[0u8; 32]);
+
+                let mut dek_argon = SecretBytes::new(DEK_SENTINEL);
                 assert_eq!(
-                    engine.complete_unlock(SlotKind::Prf, SecretBytes::new(DEK_SENTINEL)),
-                    Ok(())
-                );
-                assert_eq!(
-                    engine.complete_unlock(SlotKind::Argon2id, SecretBytes::new(DEK_SENTINEL)),
+                    engine.complete_unlock(SlotKind::Argon2id, &mut dek_argon),
                     Err(VaultError::InvalidState)
                 );
+                assert_eq!(dek_argon.as_bytes(), &[0u8; 32]);
                 drop(engine);
             });
         };

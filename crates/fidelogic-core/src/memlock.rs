@@ -78,38 +78,35 @@ impl<const N: usize> LockedBuffer<N> {
     /// 標準エラー出力へ警告を出力した上でアンロック状態のセキュアバッファとしてフォールバック生成する。
     #[must_use]
     pub fn from_consumed_secret(secret: &mut SecretBytes<N>) -> Self {
-        if N == 0 {
-            volatile_zeroize(secret.as_mut_slice());
-            return Self {
-                storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new([0u8; N]))),
-                locked: false,
-            };
-        }
+        secret.consume_with(|bytes| {
+            if N == 0 {
+                return Self {
+                    storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new([0u8; N]))),
+                    locked: false,
+                };
+            }
 
-        match Self::try_allocate_page_locked(secret.as_bytes()) {
-            Ok(storage) => {
-                volatile_zeroize(secret.as_mut_slice());
-                Self {
+            match Self::try_allocate_page_locked(bytes) {
+                Ok(storage) => Self {
                     storage,
                     locked: true,
-                }
-            }
-            Err(errno) => {
-                #[cfg(feature = "std")]
-                std::eprintln!(
-                    "[WARN] fidelogic-core: mlock failed with errno {errno}. Falling back to unlocked secure buffer."
-                );
-                #[cfg(not(feature = "std"))]
-                let _ = errno;
+                },
+                Err(errno) => {
+                    #[cfg(feature = "std")]
+                    std::eprintln!(
+                        "[WARN] fidelogic-core: mlock failed with errno {errno}. Falling back to unlocked secure buffer."
+                    );
+                    #[cfg(not(feature = "std"))]
+                    let _ = errno;
 
-                let inner = Box::new(SecretBytes::new(*secret.as_bytes()));
-                volatile_zeroize(secret.as_mut_slice());
-                Self {
-                    storage: BufferStorage::HeapFallback(inner),
-                    locked: false,
+                    let inner = Box::new(SecretBytes::new(*bytes));
+                    Self {
+                        storage: BufferStorage::HeapFallback(inner),
+                        locked: false,
+                    }
                 }
             }
-        }
+        })
     }
 
     /// 厳格なセキュリティポリシーのもとで新しい [`LockedBuffer`] を生成する。
@@ -137,24 +134,22 @@ impl<const N: usize> LockedBuffer<N> {
     /// # エラー
     /// OSシステムコール(`mmap`, `mlock` 等)が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
     pub fn try_from_consumed_secret(secret: &mut SecretBytes<N>) -> Result<Self, SystemError> {
-        if N == 0 {
-            volatile_zeroize(secret.as_mut_slice());
-            return Ok(Self {
-                storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new([0u8; N]))),
-                locked: false,
-            });
-        }
+        secret.consume_with(|bytes| {
+            if N == 0 {
+                return Ok(Self {
+                    storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new([0u8; N]))),
+                    locked: false,
+                });
+            }
 
-        let res = Self::try_allocate_page_locked(secret.as_bytes());
-        volatile_zeroize(secret.as_mut_slice());
-
-        match res {
-            Ok(storage) => Ok(Self {
-                storage,
-                locked: true,
-            }),
-            Err(_errno) => Err(SystemError::MemoryLockFailed),
-        }
+            match Self::try_allocate_page_locked(bytes) {
+                Ok(storage) => Ok(Self {
+                    storage,
+                    locked: true,
+                }),
+                Err(_errno) => Err(SystemError::MemoryLockFailed),
+            }
+        })
     }
 
     /// ゼロ埋めされた新しい [`LockedBuffer`] を生成する(非特権環境フォールバック付き)。

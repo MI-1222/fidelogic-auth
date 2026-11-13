@@ -239,9 +239,7 @@ impl VaultCipher {
     #[inline]
     #[must_use]
     pub fn from_consumed_secret(suite_id: CipherSuiteId, key: &mut SecretBytes<KEY_LEN>) -> Self {
-        let cipher = Self::new_from_secret(suite_id, key);
-        crate::zeroize::volatile_zeroize(key.as_mut_slice());
-        cipher
+        key.consume_with(|k| Self::new(suite_id, k))
     }
 
     /// 任意長スライスから鍵長(32バイト)を事前検証して暗号インスタンスを生成する。

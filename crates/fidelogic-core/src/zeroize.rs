@@ -117,6 +117,28 @@ impl<const N: usize> SecretBytes<N> {
     pub fn conditional_assign(&mut self, other: &Self, choice: subtle::Choice) {
         crate::constant_time::ct_assign_slice(choice, self.as_mut_slice(), other.as_slice());
     }
+
+    /// 保持するバイト配列の不変参照を受け取るクロージャを実行し、完了直後に自身をゼロ消去する。
+    ///
+    /// クロージャの実行が正常終了した場合はもちろん、早期脱出やパニックが発生した場合でも、
+    /// RAII ガードにより確実に [`volatile_zeroize`] が実行されることを保証する。
+    #[inline]
+    pub fn consume_with<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&[u8; N]) -> R,
+    {
+        struct ConsumeGuard<'a, const M: usize>(&'a mut [u8; M]);
+
+        impl<'a, const M: usize> Drop for ConsumeGuard<'a, M> {
+            #[inline]
+            fn drop(&mut self) {
+                volatile_zeroize(self.0);
+            }
+        }
+
+        let guard = ConsumeGuard(&mut self.inner);
+        f(&*guard.0)
+    }
 }
 
 impl<const N: usize> Default for SecretBytes<N> {
@@ -503,5 +525,34 @@ mod tests {
         let mut svec2 = SecretVec::from_slice(&[0x88; 16]);
         svec2.zeroize();
         assert_eq!(svec2.len(), 0);
+    }
+
+    #[test]
+    fn test_secret_bytes_consume_with() {
+        let mut secret = SecretBytes::new([0x37u8; 16]);
+        let read_val = secret.consume_with(|bytes| {
+            assert_eq!(bytes, &[0x37u8; 16], "クロージャ内での秘密配列参照に成功。");
+            bytes[0]
+        });
+        assert_eq!(read_val, 0x37);
+        assert_eq!(secret.as_bytes(), &[0u8; 16], "消費後のゼロ消去に成功。");
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_secret_bytes_consume_with_panic_safety() {
+        let mut secret = SecretBytes::new([0x55u8; 16]);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            secret.consume_with(|bytes| {
+                assert_eq!(bytes[0], 0x55);
+                panic!("意図的なパニックテスト");
+            });
+        }));
+        assert!(res.is_err(), "パニックの捕捉に成功。");
+        assert_eq!(
+            secret.as_bytes(),
+            &[0u8; 16],
+            "パニック発生時でもRAIIガードによるゼロ消去に成功。"
+        );
     }
 }
