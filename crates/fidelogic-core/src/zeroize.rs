@@ -290,15 +290,74 @@ impl SecretVec {
         self.inner.capacity()
     }
 
+    /// 追加で少なくとも `additional` バイトを格納できるよう容量を確保する。
+    ///
+    /// キャパシティの拡張(再割り当て)が必要な場合、標準の `Vec::reserve` は
+    /// 旧ヒープ領域をゼロ消去せずに解放(`dealloc`)して平文断片を残留させる恐れがあるため、
+    /// 本メソッドでは自前で新バッファを確保した上で、旧バッファの全容量(`capacity`)を
+    /// [`volatile_zeroize_raw`] により確実に揮発性ゼロ消去してからアロケータへ解放する。
+    pub fn reserve(&mut self, additional: usize) {
+        let needed = match self.inner.len().checked_add(additional) {
+            Some(n) => n,
+            None => panic!("SecretVec capacity overflow"),
+        };
+        if needed > self.inner.capacity() {
+            // アロケーション頻度低減のため 2 倍成長を採用する。
+            let new_cap = needed.max(self.inner.capacity().saturating_mul(2)).max(8);
+            self.reallocate_and_zeroize_old(new_cap);
+        }
+    }
+
+    /// 追加で正確に `additional` バイトを格納できるよう容量を確保する。
+    ///
+    /// 拡張時は [`Self::reserve`] と同様に旧ヒープ領域をゼロ消去した上で解放する。
+    pub fn reserve_exact(&mut self, additional: usize) {
+        let needed = match self.inner.len().checked_add(additional) {
+            Some(n) => n,
+            None => panic!("SecretVec capacity overflow"),
+        };
+        if needed > self.inner.capacity() {
+            self.reallocate_and_zeroize_old(needed);
+        }
+    }
+
+    fn reallocate_and_zeroize_old(&mut self, new_cap: usize) {
+        let mut new_vec = alloc::vec::Vec::with_capacity(new_cap);
+        new_vec.extend_from_slice(&self.inner);
+
+        let mut old_vec = core::mem::replace(&mut self.inner, new_vec);
+        let old_cap = old_vec.capacity();
+        if old_cap > 0 {
+            // SAFETY: old_vec は直前まで有効な Vec であり、old_cap バイトの書き込み可能な領域を持つ。
+            unsafe {
+                volatile_zeroize_raw(old_vec.as_mut_ptr(), old_cap);
+            }
+        }
+        // old_vec はここで解放されるが、領域全体が事前にゼロクリアされている。
+    }
+
     /// バッファの末尾にバイトを追加する。
+    ///
+    /// キャパシティ不足時の再割り当てでは、旧領域のメモリを確実にゼロ消去した上で
+    /// 新領域へ移行する。
     #[inline]
     pub fn push(&mut self, value: u8) {
+        if self.inner.len() == self.inner.capacity() {
+            self.reserve(1);
+        }
         self.inner.push(value);
     }
 
     /// バッファの末尾にバイトスライスを追加する。
+    ///
+    /// キャパシティ不足時の再割り当てでは、旧領域のメモリを確実にゼロ消去した上で
+    /// 新領域へ移行する。
     #[inline]
     pub fn extend_from_slice(&mut self, slice: &[u8]) {
+        let remaining = self.inner.capacity().saturating_sub(self.inner.len());
+        if slice.len() > remaining {
+            self.reserve(slice.len());
+        }
         self.inner.extend_from_slice(slice);
     }
 
@@ -525,6 +584,26 @@ mod tests {
         let mut svec2 = SecretVec::from_slice(&[0x88; 16]);
         svec2.zeroize();
         assert_eq!(svec2.len(), 0);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn test_secret_vec_reserve_and_growth() {
+        let mut svec = SecretVec::new();
+        assert_eq!(svec.capacity(), 0);
+
+        svec.reserve(10);
+        assert!(svec.capacity() >= 10);
+        let cap_before = svec.capacity();
+
+        svec.extend_from_slice(&[1, 2, 3]);
+        assert_eq!(svec.as_slice(), &[1, 2, 3]);
+        assert_eq!(svec.capacity(), cap_before);
+
+        // 既存キャパシティを超える拡張
+        svec.reserve_exact(cap_before + 20);
+        assert!(svec.capacity() >= svec.len() + cap_before + 20);
+        assert_eq!(svec.as_slice(), &[1, 2, 3]);
     }
 
     #[test]

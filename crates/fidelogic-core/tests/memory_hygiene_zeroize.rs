@@ -331,6 +331,34 @@ fn test_secret_vec_hygiene_on_clear_and_drop() {
 
 #[cfg(feature = "alloc")]
 #[test]
+fn test_secret_vec_reallocation_hygiene() {
+    use fidelogic_core::SecretVec;
+
+    let prefix_sentinel = &PLAINTEXT_SENTINEL[..8];
+
+    // push の連続実行による再割り当て時に旧ヒープ領域がゼロ化され、解放時に平文断片が残留しないことを検証。
+    // cap=0 -> 8 -> 16 -> 32 と再割り当てされ、旧領域2回 + Drop時1回の計3回 dealloc される。
+    run_with_heap_leak_check(&[&PLAINTEXT_SENTINEL, prefix_sentinel], 3, || {
+        let mut svec = SecretVec::new();
+        for &b in &PLAINTEXT_SENTINEL {
+            svec.push(b);
+        }
+        assert_eq!(svec.as_slice(), &PLAINTEXT_SENTINEL);
+    });
+
+    // extend_from_slice による再割り当て時に旧ヒープ領域がゼロ化され、解放時に平文断片が残留しないことを検証。
+    // cap=8 -> 拡張時旧領域1回 + Drop時1回の計2回 dealloc される。
+    run_with_heap_leak_check(&[&PLAINTEXT_SENTINEL, prefix_sentinel], 2, || {
+        let mut svec = SecretVec::with_capacity(8);
+        svec.extend_from_slice(&PLAINTEXT_SENTINEL[..8]);
+        // ここでキャパシティ不足による拡張・再割り当てが発生する。
+        svec.extend_from_slice(&PLAINTEXT_SENTINEL[8..]);
+        assert_eq!(svec.as_slice(), &PLAINTEXT_SENTINEL);
+    });
+}
+
+#[cfg(feature = "alloc")]
+#[test]
 fn test_opaque_string_memory_hygiene_success_and_error() {
     use fidelogic_core::{
         PrecisError, PrecisProfile, enforce_opaque_string_cps, opaque_string, opaque_string_secret,
