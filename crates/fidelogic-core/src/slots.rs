@@ -2202,7 +2202,8 @@ impl VaultEngine {
         }
 
         let header_aad = vault.header.associated_data();
-        let mut matched: Option<(SlotKind, SecretBytes<DEK_LEN>)> = None;
+        let mut matched_kind: Option<SlotKind> = None;
+        let mut matched_dek = SecretBytes::<DEK_LEN>::zero();
         let mut seen_kinds = [false; SlotKind::COUNT];
 
         // 先行スロットの成否や対象スロットの有無に関わらず、全候補に対して実演算またはダミー演算を1回実行する。
@@ -2210,12 +2211,14 @@ impl VaultEngine {
         for &credential in credentials {
             let kind_idx = credential.slot_kind().as_slot_id() as usize;
             seen_kinds[kind_idx] = true;
-            if matched.is_some() {
+            if matched_kind.is_some() {
                 self.run_dummy_for_credential_traced(vault, credential, &header_aad, &mut trace);
-            } else if let Ok(dek) =
+            } else if let Ok(mut dek) =
                 self.eval_vault_credential_traced(vault, credential, &header_aad, &mut trace)
             {
-                matched = Some((credential.slot_kind(), dek));
+                matched_kind = Some(credential.slot_kind());
+                matched_dek.conditional_assign(&dek, subtle::Choice::from(1u8));
+                volatile_zeroize(dek.as_mut_slice());
             }
         }
 
@@ -2228,19 +2231,22 @@ impl VaultEngine {
             }
         }
 
-        match matched {
-            Some((kind, mut dek)) => match self.complete_unlock(kind, &mut dek) {
-                Ok(()) => (Ok(kind), trace),
+        let unlock_result = match matched_kind {
+            Some(kind) => match self.complete_unlock(kind, &mut matched_dek) {
+                Ok(()) => Ok(kind),
                 Err(err) => {
                     let _ = self.fail_unlock();
-                    (Err(err.mask_auth_error()), trace)
+                    Err(err.mask_auth_error())
                 }
             },
             None => {
                 let _ = self.fail_unlock();
-                (Err(VaultError::AuthenticationFailed), trace)
+                volatile_zeroize(matched_dek.as_mut_slice());
+                Err(VaultError::AuthenticationFailed)
             }
-        }
+        };
+
+        (unlock_result, trace)
     }
 
     /// 提示された複数の [`SlotCredential`] を順次評価し、いずれか 1 スロットで解錠可能な多重化解錠を実行する。
