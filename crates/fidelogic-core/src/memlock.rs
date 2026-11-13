@@ -58,18 +58,37 @@ impl<const N: usize> LockedBuffer<N> {
     ///
     /// 非特権環境やリソース制限によりメモリロックに失敗した場合は、
     /// 標準エラー出力へ警告を出力した上でアンロック状態のセキュアバッファとしてフォールバック生成する。
+    ///
+    /// # 注意
+    /// 値渡しされた引数配列の内部バッファは生成処理完了時にゼロ消去されるが、
+    /// 呼び出し元スタックフレーム上の元の配列がコピーされている場合、呼び出し元側のスタック残留は防げない。
+    /// 呼び出し元バッファを確実に消費・消去するには [`Self::from_consumed_secret`] の使用を推奨する。
     #[must_use]
     pub fn new(mut bytes: [u8; N]) -> Self {
+        let mut secret = SecretBytes::new(bytes);
+        volatile_zeroize(&mut bytes);
+        Self::from_consumed_secret(&mut secret)
+    }
+
+    /// 呼び出し元の [`SecretBytes<N>`] からデータをコピーして [`LockedBuffer`] を生成し、
+    /// コピー完了後に呼び出し元の秘密バッファを即座にゼロ消去する。
+    ///
+    /// 呼び出し元のスタック上に平文秘密情報が残留することを構造的に防止する。
+    /// 非特権環境やリソース制限によりメモリロックに失敗した場合は、
+    /// 標準エラー出力へ警告を出力した上でアンロック状態のセキュアバッファとしてフォールバック生成する。
+    #[must_use]
+    pub fn from_consumed_secret(secret: &mut SecretBytes<N>) -> Self {
         if N == 0 {
+            volatile_zeroize(secret.as_mut_slice());
             return Self {
-                storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new(bytes))),
+                storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new([0u8; N]))),
                 locked: false,
             };
         }
 
-        match Self::try_allocate_page_locked(&bytes) {
+        match Self::try_allocate_page_locked(secret.as_bytes()) {
             Ok(storage) => {
-                volatile_zeroize(&mut bytes);
+                volatile_zeroize(secret.as_mut_slice());
                 Self {
                     storage,
                     locked: true,
@@ -83,8 +102,8 @@ impl<const N: usize> LockedBuffer<N> {
                 #[cfg(not(feature = "std"))]
                 let _ = errno;
 
-                let inner = Box::new(SecretBytes::new(bytes));
-                volatile_zeroize(&mut bytes);
+                let inner = Box::new(SecretBytes::new(*secret.as_bytes()));
+                volatile_zeroize(secret.as_mut_slice());
                 Self {
                     storage: BufferStorage::HeapFallback(inner),
                     locked: false,
@@ -98,18 +117,36 @@ impl<const N: usize> LockedBuffer<N> {
     /// メモリロックまたはダンプ抑止の適用に失敗した場合はフォールバックを行わず、
     /// 即座に [`SystemError::MemoryLockFailed`] を返却する。
     ///
+    /// # 注意
+    /// 呼び出し元バッファを確実に消費・消去するには [`Self::try_from_consumed_secret`] の使用を推奨する。
+    ///
     /// # エラー
     /// OSシステムコール(`mmap`, `mlock` 等)が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
     pub fn new_strict(mut bytes: [u8; N]) -> Result<Self, SystemError> {
+        let mut secret = SecretBytes::new(bytes);
+        volatile_zeroize(&mut bytes);
+        Self::try_from_consumed_secret(&mut secret)
+    }
+
+    /// 厳格なセキュリティポリシーのもとで呼び出し元の [`SecretBytes<N>`] からデータをコピーし、
+    /// コピー完了後に呼び出し元の秘密バッファを即座にゼロ消去する。
+    ///
+    /// メモリロックまたはダンプ抑止の適用に失敗した場合はフォールバックを行わず、
+    /// 即座に [`SystemError::MemoryLockFailed`] を返却する(その場合も呼び出し元の秘密バッファは確実にゼロ消去される)。
+    ///
+    /// # エラー
+    /// OSシステムコール(`mmap`, `mlock` 等)が失敗した場合に [`SystemError::MemoryLockFailed`] を返す。
+    pub fn try_from_consumed_secret(secret: &mut SecretBytes<N>) -> Result<Self, SystemError> {
         if N == 0 {
+            volatile_zeroize(secret.as_mut_slice());
             return Ok(Self {
-                storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new(bytes))),
+                storage: BufferStorage::HeapFallback(Box::new(SecretBytes::new([0u8; N]))),
                 locked: false,
             });
         }
 
-        let res = Self::try_allocate_page_locked(&bytes);
-        volatile_zeroize(&mut bytes);
+        let res = Self::try_allocate_page_locked(secret.as_bytes());
+        volatile_zeroize(secret.as_mut_slice());
 
         match res {
             Ok(storage) => Ok(Self {
@@ -703,5 +740,60 @@ mod tests {
                 "データ領域とパディング領域を含むページ全体のゼロ消去に成功。"
             );
         }
+    }
+
+    #[test]
+    fn test_locked_buffer_from_consumed_secret() {
+        let mut secret = SecretBytes::new([0x42u8; 32]);
+        let buf = LockedBuffer::from_consumed_secret(&mut secret);
+        assert_eq!(buf.len(), 32, "生成されたLockedBufferの長さ照合に成功。");
+        assert_eq!(
+            buf.as_slice(),
+            &[0x42u8; 32],
+            "LockedBufferへのデータ移管に成功。"
+        );
+        assert_eq!(
+            secret.as_slice(),
+            &[0u8; 32],
+            "呼び出し元SecretBytesの消費後ゼロ消去に成功。"
+        );
+    }
+
+    #[test]
+    fn test_locked_buffer_try_from_consumed_secret() {
+        let mut secret = SecretBytes::new([0x5au8; 32]);
+        let res = LockedBuffer::try_from_consumed_secret(&mut secret);
+        assert_eq!(
+            secret.as_slice(),
+            &[0u8; 32],
+            "呼び出し元SecretBytesの消費後ゼロ消去に成功。"
+        );
+        match res {
+            Ok(buf) => {
+                assert_eq!(
+                    buf.as_slice(),
+                    &[0x5au8; 32],
+                    "厳格モードでのデータ照合に成功。"
+                );
+            }
+            Err(SystemError::MemoryLockFailed) => {
+                // 非特権環境等でロック失敗した場合のエラーハンドリング検証
+            }
+            Err(_) => panic!("想定外のエラーが発生しました。"),
+        }
+    }
+
+    #[test]
+    fn test_locked_buffer_consumed_secret_zero_length() {
+        let mut secret = SecretBytes::new([]);
+        let buf = LockedBuffer::<0>::from_consumed_secret(&mut secret);
+        assert_eq!(buf.len(), 0, "ゼロ長バッファの生成に成功。");
+        assert_eq!(secret.as_slice(), &[], "ゼロ長秘密情報の消費に成功。");
+
+        let mut strict_secret = SecretBytes::new([]);
+        let strict_buf = LockedBuffer::<0>::try_from_consumed_secret(&mut strict_secret)
+            .expect("ゼロ長バッファの厳格生成に成功。");
+        assert_eq!(strict_buf.len(), 0);
+        assert_eq!(strict_secret.as_slice(), &[]);
     }
 }
