@@ -1668,6 +1668,9 @@ fn eval_hkdf_slot_or_dummy(
 }
 
 /// Slot 2 (整形済みリカバリーコード) の正準化と復号を試行し、失敗時もダミー暗号演算で補完する。
+///
+/// スロット有効性に関わらず提示されたリカバリーコードの正準化処理を常に実行し、
+/// 演算時間やアロケーションパターンの差異によるスロット有無のサイドチャネル漏洩を防止する。
 fn eval_slot2_code_or_dummy(
     entry: Option<&KekSlotEntry>,
     is_slot_valid: bool,
@@ -1675,11 +1678,6 @@ fn eval_slot2_code_or_dummy(
     vault_aad: &[u8],
     trace: &mut SlotEvalTrace,
 ) -> Result<SecretBytes<DEK_LEN>, VaultError> {
-    if !is_slot_valid {
-        dummy_unwrap_slot2_code_traced(vault_aad, trace);
-        return Err(VaultError::AuthenticationFailed);
-    }
-
     let mut normalized = match normalize_recovery_code(recovery_code) {
         Ok(norm) => norm,
         Err(err) => {
@@ -2075,7 +2073,7 @@ impl VaultEngine {
                 dummy_unwrap_slot0_traced(&params, header_aad, trace);
             }
             SlotKind::Prf => dummy_unwrap_hkdf_slot_traced(&SLOT1_SPEC, header_aad, trace),
-            SlotKind::Recovery => dummy_unwrap_hkdf_slot_traced(&SLOT2_SPEC, header_aad, trace),
+            SlotKind::Recovery => dummy_unwrap_slot2_code_traced(header_aad, trace),
         }
     }
 
@@ -4021,6 +4019,51 @@ mod tests {
             engine.unlock_with_entry(&entry, SlotCredential::password(b"pw"), b"aad"),
             Err(VaultError::AuthenticationFailed)
         );
+    }
+
+    #[test]
+    fn test_eval_slot2_code_or_dummy_uniform_path_and_trace() {
+        let mut trace_invalid = SlotEvalTrace::default();
+        let res_invalid = eval_slot2_code_or_dummy(
+            None,
+            false,
+            TEST_RECOVERY_CODE,
+            b"test_aad",
+            &mut trace_invalid,
+        );
+        assert_eq!(res_invalid.err(), Some(VaultError::AuthenticationFailed));
+        assert_eq!(trace_invalid.dummy_hkdf_ops, 1);
+        assert_eq!(trace_invalid.dummy_aead_ops, 1);
+        assert_eq!(trace_invalid.real_hkdf_ops, 0);
+        assert_eq!(trace_invalid.real_aead_ops, 0);
+
+        let mut trace_malformed = SlotEvalTrace::default();
+        let res_malformed = eval_slot2_code_or_dummy(
+            None,
+            false,
+            b"MALFORMED_CODE_WITH_INVALID_CHAR!",
+            b"test_aad",
+            &mut trace_malformed,
+        );
+        assert_eq!(
+            res_malformed.err(),
+            Some(VaultError::Crypto(CryptoError::InvalidParameter))
+        );
+        assert_eq!(trace_malformed.dummy_hkdf_ops, 1);
+        assert_eq!(trace_malformed.dummy_aead_ops, 1);
+
+        // run_dummy_for_slot_kind_traced で SlotKind::Recovery を指定した場合もダミー演算が実行される。
+        let dummy_vault = Vault::new(test_header(), vec![], vec![]);
+        let engine = VaultEngine::from_slot_entries(&[]);
+        let mut trace_kind = SlotEvalTrace::default();
+        engine.run_dummy_for_slot_kind_traced(
+            &dummy_vault,
+            SlotKind::Recovery,
+            b"test_aad",
+            &mut trace_kind,
+        );
+        assert_eq!(trace_kind.dummy_hkdf_ops, 1);
+        assert_eq!(trace_kind.dummy_aead_ops, 1);
     }
 
     #[test]
