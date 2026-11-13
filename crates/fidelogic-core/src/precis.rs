@@ -12,7 +12,7 @@ use crate::error::PrecisError;
 #[cfg(feature = "alloc")]
 use crate::zeroize::{SecretVec, volatile_zeroize};
 #[cfg(feature = "alloc")]
-use zeroize::Zeroizing;
+pub use zeroize::Zeroizing;
 
 /// Unicode コードポイントの最大有効値 (`U+10FFFF`)。
 pub const UNICODE_MAX_CODE_POINT: u32 = 0x10_FFFF;
@@ -363,8 +363,9 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
 /// コードポイント列のイテレータをラップし、最大 3 要素のスライド窓 (`queue: [u32; 3]`) を用いて
 /// [`compose_pair`] に基づくハングル `L + V + T` および Latin 基底 + ダイアクリティカルマークの合成を行う。
 /// 中間ヒープアロケーションを行わず、スタック上の固定長配列のみで先読み合成を実現する。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct PrecisNfcIter<I> {
+    #[zeroize(skip)]
     iter: I,
     queue: [u32; 3],
     len: usize,
@@ -479,9 +480,12 @@ pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
     core::mem::take(&mut *out)
 }
 
-/// UTF-8 文字列に対して PRECIS プロファイル正準化を適用し、中間ヒープアロケーションなしで [`String`] を生成する。
+/// UTF-8 文字列に対して PRECIS プロファイル正準化を適用し、中間ヒープアロケーションなしで [`Zeroizing<String>`] を生成する。
 #[cfg(feature = "alloc")]
-fn enforce_str_to_string(profile: PrecisProfile, input: &str) -> Result<String, PrecisError> {
+fn enforce_str_to_string(
+    profile: PrecisProfile,
+    input: &str,
+) -> Result<Zeroizing<String>, PrecisError> {
     if input.is_empty() {
         return Err(PrecisError::EmptyInput);
     }
@@ -498,7 +502,7 @@ fn enforce_str_to_string(profile: PrecisProfile, input: &str) -> Result<String, 
         out.push(ch);
     }
 
-    Ok(core::mem::take(&mut *out))
+    Ok(out)
 }
 
 /// UTF-8 文字列に対して PRECIS プロファイル正準化を適用し、中間ヒープアロケーションなしで [`SecretVec`] を生成する。
@@ -584,13 +588,13 @@ pub fn precis_username_case_mapped(cps: &[u32]) -> Option<Vec<u32>> {
 
 /// UTF-8 文字列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用する。
 ///
-/// 中間コードポイント列のヒープアロケーションを行わず、イテレータパイプラインから直接 [`String`] を生成する。
+/// 中間コードポイント列のヒープアロケーションを行わず、イテレータパイプラインから直接 [`Zeroizing<String>`] を生成する。
 ///
 /// # Errors
 ///
 /// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
-pub fn username_case_mapped(input: &str) -> Result<String, PrecisError> {
+pub fn username_case_mapped(input: &str) -> Result<Zeroizing<String>, PrecisError> {
     enforce_str_to_string(PrecisProfile::UsernameCaseMapped, input)
 }
 
@@ -636,13 +640,13 @@ pub fn precis_opaque_string(cps: &[u32]) -> Option<Vec<u32>> {
 ///
 /// 大文字・小文字の区別を保持し、非 ASCII 空白 (Unicode `Zs` カテゴリ) を ASCII 空白 (`0x20`) へマッピングしたうえで
 /// Unicode NFC 正規化を適用し、制御文字・サロゲート・私用領域・非文字等の禁止コードポイントを拒絶する。
-/// 中間コードポイント列のヒープアロケーションを行わず、イテレータパイプラインから直接 [`String`] を生成する。
+/// 中間コードポイント列のヒープアロケーションを行わず、イテレータパイプラインから直接 [`Zeroizing<String>`] を生成する。
 ///
 /// # Errors
 ///
 /// 入力が空文字列であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
-pub fn opaque_string(input: &str) -> Result<String, PrecisError> {
+pub fn opaque_string(input: &str) -> Result<Zeroizing<String>, PrecisError> {
     enforce_str_to_string(PrecisProfile::OpaqueString, input)
 }
 
@@ -743,7 +747,7 @@ impl PrecisProfile {
     /// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
     #[cfg(feature = "alloc")]
     #[inline]
-    pub fn enforce_str(self, input: &str) -> Result<String, PrecisError> {
+    pub fn enforce_str(self, input: &str) -> Result<Zeroizing<String>, PrecisError> {
         enforce_str_to_string(self, input)
     }
 
@@ -913,15 +917,33 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_username_case_mapped_str_api() {
-        assert_eq!(username_case_mapped("User"), Ok(String::from("user")));
-        assert_eq!(username_case_mapped("USER"), Ok(String::from("user")));
-        assert_eq!(username_case_mapped("ΟΣ"), Ok(String::from("οσ")));
-        assert_eq!(username_case_mapped("Иван"), Ok(String::from("иван")));
-        assert_eq!(username_case_mapped("É"), Ok(String::from("é")));
-        assert_eq!(username_case_mapped("A\u{0308}"), Ok(String::from("ä")));
+        assert_eq!(
+            username_case_mapped("User"),
+            Ok(Zeroizing::new(String::from("user")))
+        );
+        assert_eq!(
+            username_case_mapped("USER"),
+            Ok(Zeroizing::new(String::from("user")))
+        );
+        assert_eq!(
+            username_case_mapped("ΟΣ"),
+            Ok(Zeroizing::new(String::from("οσ")))
+        );
+        assert_eq!(
+            username_case_mapped("Иван"),
+            Ok(Zeroizing::new(String::from("иван")))
+        );
+        assert_eq!(
+            username_case_mapped("É"),
+            Ok(Zeroizing::new(String::from("é")))
+        );
+        assert_eq!(
+            username_case_mapped("A\u{0308}"),
+            Ok(Zeroizing::new(String::from("ä")))
+        );
         assert_eq!(
             username_case_mapped("\u{1100}\u{1161}\u{11A8}"),
-            Ok(String::from("각"))
+            Ok(Zeroizing::new(String::from("각")))
         );
 
         assert_eq!(username_case_mapped(""), Err(PrecisError::EmptyInput));
@@ -1197,28 +1219,58 @@ mod tests {
     #[test]
     fn test_opaque_string_str_api() {
         // 大文字小文字と ASCII 空白 (0x20) の保持。
-        assert_eq!(opaque_string("PassWord"), Ok(String::from("PassWord")));
-        assert_eq!(opaque_string("USER"), Ok(String::from("USER")));
-        assert_eq!(opaque_string("ΟΣ"), Ok(String::from("ΟΣ")));
-        assert_eq!(opaque_string("Иван"), Ok(String::from("Иван")));
-        assert_eq!(opaque_string("É"), Ok(String::from("É")));
-        assert_eq!(opaque_string("pass word"), Ok(String::from("pass word")));
-        assert_eq!(opaque_string("user name"), Ok(String::from("user name")));
+        assert_eq!(
+            opaque_string("PassWord"),
+            Ok(Zeroizing::new(String::from("PassWord")))
+        );
+        assert_eq!(
+            opaque_string("USER"),
+            Ok(Zeroizing::new(String::from("USER")))
+        );
+        assert_eq!(opaque_string("ΟΣ"), Ok(Zeroizing::new(String::from("ΟΣ"))));
+        assert_eq!(
+            opaque_string("Иван"),
+            Ok(Zeroizing::new(String::from("Иван")))
+        );
+        assert_eq!(opaque_string("É"), Ok(Zeroizing::new(String::from("É"))));
+        assert_eq!(
+            opaque_string("pass word"),
+            Ok(Zeroizing::new(String::from("pass word")))
+        );
+        assert_eq!(
+            opaque_string("user name"),
+            Ok(Zeroizing::new(String::from("user name")))
+        );
         assert_eq!(
             opaque_string("  leading and trailing  "),
-            Ok(String::from("  leading and trailing  "))
+            Ok(Zeroizing::new(String::from("  leading and trailing  ")))
         );
 
         // Unicode NFC 正規化 (大文字保持のまま結合文字を合成)。
-        assert_eq!(opaque_string("e\u{0301}"), Ok(String::from("é")));
-        assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
-        assert_eq!(opaque_string("c\u{0327}"), Ok(String::from("ç")));
-        assert_eq!(opaque_string("\u{1100}\u{1161}"), Ok(String::from("가")));
+        assert_eq!(
+            opaque_string("e\u{0301}"),
+            Ok(Zeroizing::new(String::from("é")))
+        );
+        assert_eq!(
+            opaque_string("A\u{0308}"),
+            Ok(Zeroizing::new(String::from("Ä")))
+        );
+        assert_eq!(
+            opaque_string("c\u{0327}"),
+            Ok(Zeroizing::new(String::from("ç")))
+        );
+        assert_eq!(
+            opaque_string("\u{1100}\u{1161}"),
+            Ok(Zeroizing::new(String::from("가")))
+        );
         assert_eq!(
             opaque_string("\u{1100}\u{1161}\u{11A8}"),
-            Ok(String::from("각"))
+            Ok(Zeroizing::new(String::from("각")))
         );
-        assert_eq!(opaque_string("\u{AC00}\u{11A8}"), Ok(String::from("각")));
+        assert_eq!(
+            opaque_string("\u{AC00}\u{11A8}"),
+            Ok(Zeroizing::new(String::from("각")))
+        );
 
         // 空入力および禁止コードポイントの拒絶。
         assert_eq!(opaque_string(""), Err(PrecisError::EmptyInput));
@@ -1269,9 +1321,18 @@ mod tests {
             username_case_mapped("user name"),
             Err(PrecisError::DisallowedCodePoint(0x0020))
         );
-        assert_eq!(opaque_string("user name"), Ok(String::from("user name")));
-        assert_eq!(username_case_mapped("A\u{0308}"), Ok(String::from("ä")));
-        assert_eq!(opaque_string("A\u{0308}"), Ok(String::from("Ä")));
+        assert_eq!(
+            opaque_string("user name"),
+            Ok(Zeroizing::new(String::from("user name")))
+        );
+        assert_eq!(
+            username_case_mapped("A\u{0308}"),
+            Ok(Zeroizing::new(String::from("ä")))
+        );
+        assert_eq!(
+            opaque_string("A\u{0308}"),
+            Ok(Zeroizing::new(String::from("Ä")))
+        );
     }
 
     #[cfg(feature = "alloc")]
@@ -1357,17 +1418,17 @@ mod tests {
             // ノーブレークスペース (U+00A0)。
             assert_eq!(
                 opaque_string("pass\u{00A0}word"),
-                Ok(String::from("pass word"))
+                Ok(Zeroizing::new(String::from("pass word")))
             );
             // 全角スペース (U+3000)。
             assert_eq!(
                 opaque_string("パスワード\u{3000}秘密"),
-                Ok(String::from("パスワード 秘密"))
+                Ok(Zeroizing::new(String::from("パスワード 秘密")))
             );
             // 複数種 Zs スペースの混在。
             assert_eq!(
                 opaque_string("a\u{1680}b\u{2000}c\u{200A}d\u{202F}e\u{205F}f"),
-                Ok(String::from("a b c d e f"))
+                Ok(Zeroizing::new(String::from("a b c d e f")))
             );
 
             // RFC 8265 Section 4.2.2 参照ベクタ (rfc8265_sec4_2_non_ascii_space_nbsp)。
@@ -1455,15 +1516,15 @@ mod tests {
             );
             assert_eq!(
                 opaque_prof.enforce_str("user name"),
-                Ok(alloc::string::String::from("user name"))
+                Ok(Zeroizing::new(alloc::string::String::from("user name")))
             );
             assert_eq!(
                 opaque_prof.enforce_str("user\u{00A0}name"),
-                Ok(alloc::string::String::from("user name"))
+                Ok(Zeroizing::new(alloc::string::String::from("user name")))
             );
             assert_eq!(
                 opaque_prof.enforce_str("user\u{3000}name"),
-                Ok(alloc::string::String::from("user name"))
+                Ok(Zeroizing::new(alloc::string::String::from("user name")))
             );
 
             assert_eq!(

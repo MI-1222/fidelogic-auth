@@ -376,15 +376,18 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0000));
     });
 
-    // 3. opaque_string (String 返却 API) の衛生:
-    // 中間 Vec<u32> を生成せず直接 String へ書き込み、戻り値 String の Drop を検証。
-    run_with_heap_leak_check(&[cps_bytes], 1, || {
-        let s = opaque_string(password_raw).expect("opaque_string 正常系に成功。");
-        assert_eq!(s, password_canonical);
-        // 注: s (String) 自体は標準型のため Drop でゼロ消去されないが、
-        // 中間コードポイント Vec<u32> は完全にゼロ消去されることを cps_bytes で検証。
-        drop(s);
-    });
+    // 3. opaque_string (Zeroizing<String> 返却 API) の衛生:
+    // 中間 Vec<u32> を生成せず直接 Zeroizing<String> へ書き込み、戻り値 Zeroizing<String> の Drop 後に
+    // 平文およびコードポイント列がヒープ上に残留しないことを検証。
+    run_with_heap_leak_check(
+        &[pattern_pw_raw, pattern_pw_canonical, cps_bytes],
+        1,
+        || {
+            let s = opaque_string(password_raw).expect("opaque_string 正常系に成功。");
+            assert_eq!(s.as_str(), password_canonical);
+            drop(s);
+        },
+    );
 
     // 4. enforce_opaque_string_cps エラー返却時のメモリ衛生:
     // スライス入力時でも中間 Vec<u32> を生成せず、失敗時の中間データ残留がないことを検証。
@@ -468,6 +471,15 @@ fn test_username_case_mapped_memory_hygiene_success_and_error() {
             .expect("enforce_str_secret (UsernameCaseMapped) 正常系に成功。");
         assert_eq!(secret.as_slice(), valid_user_canonical.as_bytes());
         drop(secret);
+    });
+
+    // 6. username_case_mapped (Zeroizing<String> 返却 API) のメモリ衛生:
+    // 中間コードポイント Vec<u32> を生成せず直接 Zeroizing<String> へ書き込み、
+    // Drop 後に平文および正準化済み文字列がヒープ上に残留しないことを検証。
+    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 1, || {
+        let s = username_case_mapped(valid_user_raw).expect("username_case_mapped 正常系に成功。");
+        assert_eq!(s.as_str(), valid_user_canonical);
+        drop(s);
     });
 }
 

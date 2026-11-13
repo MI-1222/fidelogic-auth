@@ -715,13 +715,13 @@ fn verify_profile_expectation(vec: &GoldenVector, profile: ProfileKind, exp: &Pr
 
             if let Some(ref input_str) = vec.input_utf8 {
                 assert_eq!(
-                    profile.enforce_str(input_str).as_ref(),
+                    profile.enforce_str(input_str).as_deref(),
                     Ok(expected_utf8),
                     "[{}: {label}] UTF-8 文字列 API の結果が期待値と一致しません。",
                     vec.id
                 );
                 assert_eq!(
-                    profile.enforce_str(expected_utf8).as_ref(),
+                    profile.enforce_str(expected_utf8).as_deref(),
                     Ok(expected_utf8),
                     "[{}: {label}] UTF-8 文字列 API が冪等ではありません。",
                     vec.id

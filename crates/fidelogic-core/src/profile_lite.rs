@@ -31,7 +31,7 @@ mod tests {
     fn test_precis_reexport() {
         assert_eq!(
             username_case_mapped("Alice"),
-            Ok(alloc::string::String::from("alice")),
+            Ok(Zeroizing::new(alloc::string::String::from("alice"))),
             "profile_lite経由のusername_case_mapped呼び出しに成功。"
         );
         assert_eq!(
@@ -41,7 +41,7 @@ mod tests {
         );
         assert_eq!(
             opaque_string("Pass Word"),
-            Ok(alloc::string::String::from("Pass Word")),
+            Ok(Zeroizing::new(alloc::string::String::from("Pass Word"))),
             "profile_lite経由のopaque_string呼び出しに成功。"
         );
         assert_eq!(
