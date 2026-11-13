@@ -454,84 +454,76 @@ fn decode_profile_expectation(val: &JsonValue) -> Result<ProfileExpectation, Str
 }
 
 /// `tests/vectors/precis_golden_vectors.json` を読み込み構造化する。
-fn load_golden_suite() -> GoldenSuite {
+fn load_golden_suite() -> Result<GoldenSuite, String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/vectors/precis_golden_vectors.json");
-    let raw = fs::read_to_string(&path).unwrap_or_else(|err| {
-        panic!("ゴールデンベクタ JSON の読み込みに失敗しました ({path:?}): {err}")
-    });
+    let raw = fs::read_to_string(&path).map_err(|err| {
+        format!("ゴールデンベクタ JSON の読み込みに失敗しました ({path:?}): {err}")
+    })?;
     let root = parse_json(&raw)
-        .unwrap_or_else(|err| panic!("ゴールデンベクタ JSON のパースに失敗しました: {err}"));
+        .map_err(|err| format!("ゴールデンベクタ JSON のパースに失敗しました: {err}"))?;
 
-    let schema_version = root
-        .get("schema_version")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
-    let formal_model = root
-        .get("formal_model")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
-    let rust_implementation = root
-        .get("rust_implementation")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_string();
-    let vector_count = root.get("vector_count").unwrap().as_usize().unwrap();
-    let raw_vectors = root.get("vectors").unwrap().as_array().unwrap();
+    let schema_version = root.get("schema_version")?.as_str()?.to_string();
+    let formal_model = root.get("formal_model")?.as_str()?.to_string();
+    let rust_implementation = root.get("rust_implementation")?.as_str()?.to_string();
+    let vector_count = root.get("vector_count")?.as_usize()?;
+    let raw_vectors = root.get("vectors")?.as_array()?;
     let rfc_extended_count = root
-        .get("rfc_extended_reference_vectors")
-        .unwrap()
-        .as_array()
-        .unwrap()
+        .get("rfc_extended_reference_vectors")?
+        .as_array()?
         .len();
 
     let mut vectors = Vec::with_capacity(raw_vectors.len());
-    for entry in raw_vectors {
-        let id = entry.get("id").unwrap().as_str().unwrap().to_string();
-        let category = entry.get("category").unwrap().as_str().unwrap().to_string();
-        let source = entry.get("source").unwrap().as_str().unwrap().to_string();
-        let input_obj = entry.get("input").unwrap();
-        let input_codepoints = decode_u32_array(input_obj.get("codepoints").unwrap()).unwrap();
-        let input_utf8 = input_obj
-            .get("utf8")
-            .unwrap()
-            .as_opt_str()
-            .unwrap()
-            .map(str::to_string);
-        let username_case_mapped =
-            decode_profile_expectation(entry.get("username_case_mapped").unwrap()).unwrap();
-        let opaque_string =
-            decode_profile_expectation(entry.get("opaque_string").unwrap()).unwrap();
-        let rocq_suite_index = entry
-            .get_opt("rocq_suite_index")
-            .unwrap()
-            .map(|v| v.as_usize().unwrap());
+    for (idx, entry) in raw_vectors.iter().enumerate() {
+        let decode_entry = || -> Result<GoldenVector, String> {
+            let id = entry.get("id")?.as_str()?.to_string();
+            let category = entry.get("category")?.as_str()?.to_string();
+            let source = entry.get("source")?.as_str()?.to_string();
+            let input_obj = entry.get("input")?;
+            let input_codepoints = decode_u32_array(input_obj.get("codepoints")?)
+                .map_err(|err| format!("input.codepoints のデコードに失敗: {err}"))?;
+            let input_utf8 = input_obj.get("utf8")?.as_opt_str()?.map(str::to_string);
+            let username_case_mapped =
+                decode_profile_expectation(entry.get("username_case_mapped")?)
+                    .map_err(|err| format!("username_case_mapped のデコードに失敗: {err}"))?;
+            let opaque_string = decode_profile_expectation(entry.get("opaque_string")?)
+                .map_err(|err| format!("opaque_string のデコードに失敗: {err}"))?;
+            let rocq_suite_index = entry
+                .get_opt("rocq_suite_index")?
+                .map(|v| v.as_usize())
+                .transpose()
+                .map_err(|err| format!("rocq_suite_index のデコードに失敗: {err}"))?;
 
-        vectors.push(GoldenVector {
-            id,
-            category,
-            source,
-            input_codepoints,
-            input_utf8,
-            username_case_mapped,
-            opaque_string,
-            rocq_suite_index,
-        });
+            Ok(GoldenVector {
+                id,
+                category,
+                source,
+                input_codepoints,
+                input_utf8,
+                username_case_mapped,
+                opaque_string,
+                rocq_suite_index,
+            })
+        };
+
+        let vec = decode_entry().map_err(|err| {
+            let id_hint = entry
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            format!("ベクタ #{idx} (id='{id_hint}') の解析に失敗しました: {err}")
+        })?;
+        vectors.push(vec);
     }
 
-    GoldenSuite {
+    Ok(GoldenSuite {
         schema_version,
         formal_model,
         rust_implementation,
         vector_count,
         vectors,
         rfc_extended_count,
-    }
+    })
 }
 
 /// コードポイント列を UTF-8 文字列へ変換する。
@@ -578,49 +570,53 @@ fn parse_rocq_option_list(raw: &str) -> Result<Option<Vec<u32>>, String> {
 }
 
 /// `proofs/Theories/PrecisProfile.v` から `precis_golden_suite` 全レコードを抽出する。
-fn load_rocq_golden_suite() -> Vec<RocqTestCase> {
+fn load_rocq_golden_suite() -> Result<Vec<RocqTestCase>, String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../proofs/Theories/PrecisProfile.v");
     let source = fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("PrecisProfile.v の読み込みに失敗しました ({path:?}): {err}"));
+        .map_err(|err| format!("PrecisProfile.v の読み込みに失敗しました ({path:?}): {err}"))?;
 
-    assert!(
-        source.contains("Theorem precis_golden_suite_conformance"),
-        "PrecisProfile.v に precis_golden_suite_conformance 定理が存在することを確認。"
-    );
+    if !source.contains("Theorem precis_golden_suite_conformance") {
+        return Err(
+            "PrecisProfile.v に precis_golden_suite_conformance 定理が存在しません。".to_string(),
+        );
+    }
 
     let marker = "Definition precis_golden_suite : list PrecisTestCase := [";
     let start = source
         .find(marker)
-        .expect("PrecisProfile.v に precis_golden_suite 定義が存在することを確認。")
+        .ok_or_else(|| "PrecisProfile.v に precis_golden_suite 定義が存在しません。".to_string())?
         + marker.len();
     let body_and_tail = &source[start..];
     let end = body_and_tail
         .find("\n].")
-        .expect("precis_golden_suite 定義の終端 '].' が存在することを確認。");
+        .ok_or_else(|| "precis_golden_suite 定義の終端 '].' が存在しません。".to_string())?;
     let body = &body_and_tail[..end];
 
     let mut cases = Vec::new();
     let mut cursor = body;
+    let mut case_idx = 0usize;
     while let Some(rec_start) = cursor.find("{|") {
         let after_start = &cursor[rec_start + 2..];
-        let rec_end = after_start
-            .find("|}")
-            .expect("PrecisTestCase レコードの終端 '|}' が存在することを確認。");
+        let rec_end = after_start.find("|}").ok_or_else(|| {
+            format!("レコード #{case_idx} に PrecisTestCase の終端 '|}}' が存在しません。")
+        })?;
         let rec = &after_start[..rec_end];
         cursor = &after_start[rec_end + 2..];
 
         // セミコロンはリストリテラル内部にも出現するため、フィールド名で分割する。
-        let user_pos = rec
-            .find("tc_expected_user :=")
-            .expect("tc_expected_user フィールドの存在を確認。");
-        let opaque_pos = rec
-            .find("tc_expected_opaque :=")
-            .expect("tc_expected_opaque フィールドの存在を確認。");
-        let input_pos = rec
-            .find("tc_input :=")
-            .expect("tc_input フィールドの存在を確認。");
+        let user_pos = rec.find("tc_expected_user :=").ok_or_else(|| {
+            format!("レコード #{case_idx} に tc_expected_user フィールドが存在しません。")
+        })?;
+        let opaque_pos = rec.find("tc_expected_opaque :=").ok_or_else(|| {
+            format!("レコード #{case_idx} に tc_expected_opaque フィールドが存在しません。")
+        })?;
+        let input_pos = rec.find("tc_input :=").ok_or_else(|| {
+            format!("レコード #{case_idx} に tc_input フィールドが存在しません。")
+        })?;
 
-        assert!(input_pos < user_pos && user_pos < opaque_pos);
+        if !(input_pos < user_pos && user_pos < opaque_pos) {
+            return Err(format!("レコード #{case_idx} のフィールド順序が不正です。"));
+        }
 
         let input_raw = rec[input_pos + "tc_input :=".len()..user_pos]
             .trim()
@@ -630,14 +626,24 @@ fn load_rocq_golden_suite() -> Vec<RocqTestCase> {
             .trim_end_matches(';');
         let opaque_raw = rec[opaque_pos + "tc_expected_opaque :=".len()..].trim();
 
+        let input = parse_rocq_u32_list(input_raw)
+            .map_err(|err| format!("レコード #{case_idx} の tc_input パースに失敗: {err}"))?;
+        let expected_user = parse_rocq_option_list(user_raw).map_err(|err| {
+            format!("レコード #{case_idx} の tc_expected_user パースに失敗: {err}")
+        })?;
+        let expected_opaque = parse_rocq_option_list(opaque_raw).map_err(|err| {
+            format!("レコード #{case_idx} の tc_expected_opaque パースに失敗: {err}")
+        })?;
+
         cases.push(RocqTestCase {
-            input: parse_rocq_u32_list(input_raw).unwrap(),
-            expected_user: parse_rocq_option_list(user_raw).unwrap(),
-            expected_opaque: parse_rocq_option_list(opaque_raw).unwrap(),
+            input,
+            expected_user,
+            expected_opaque,
         });
+        case_idx += 1;
     }
 
-    cases
+    Ok(cases)
 }
 
 /// 期待エラー定義を [`PrecisError`] へ変換する。
@@ -807,7 +813,7 @@ fn test_json_parser_roundtrip_and_escapes() {
 
 #[test]
 fn test_json_golden_suite_all_124_vectors() {
-    let suite = load_golden_suite();
+    let suite = load_golden_suite().expect("ゴールデンテストベクタの読み込みと解析に成功。");
 
     assert_eq!(suite.schema_version, "1.0.0");
     assert_eq!(suite.formal_model, "proofs/Theories/PrecisProfile.v");
@@ -892,8 +898,10 @@ fn test_json_golden_suite_all_124_vectors() {
 
 #[test]
 fn test_rocq_precis_golden_suite_semantic_equivalence() {
-    let json_suite = load_golden_suite();
-    let rocq_cases = load_rocq_golden_suite();
+    let json_suite =
+        load_golden_suite().expect("JSON ゴールデンテストベクタの読み込みと解析に成功。");
+    let rocq_cases =
+        load_rocq_golden_suite().expect("Rocq ゴールデンテストスイートの読み込みと解析に成功。");
 
     assert_eq!(
         rocq_cases.len(),
@@ -947,7 +955,7 @@ fn test_rocq_precis_golden_suite_semantic_equivalence() {
 
 #[test]
 fn test_disallowed_codepoint_mutation_rejection() {
-    let suite = load_golden_suite();
+    let suite = load_golden_suite().expect("ゴールデンテストベクタの読み込みと解析に成功。");
 
     // IdentifierClass / FreeformClass 双方で禁止される全領域の境界変異コードポイント群。
     let common_disallowed_cps: &[u32] = &[
@@ -1086,7 +1094,7 @@ fn test_disallowed_codepoint_mutation_rejection() {
 fn test_profile_lite_precis_golden_reexports() {
     use fidelogic_core::profile_lite;
 
-    let suite = load_golden_suite();
+    let suite = load_golden_suite().expect("ゴールデンテストベクタの読み込みと解析に成功。");
     for vec in suite.vectors.iter().take(20) {
         assert_eq!(
             profile_lite::precis_username_case_mapped(&vec.input_codepoints),
@@ -1108,7 +1116,7 @@ fn test_profile_lite_precis_golden_reexports() {
 fn test_profile_vault_precis_golden_reexports() {
     use fidelogic_core::profile_vault;
 
-    let suite = load_golden_suite();
+    let suite = load_golden_suite().expect("ゴールデンテストベクタの読み込みと解析に成功。");
     for vec in suite.vectors.iter().take(20) {
         assert_eq!(
             profile_vault::precis_username_case_mapped(&vec.input_codepoints),
