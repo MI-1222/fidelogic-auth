@@ -354,11 +354,11 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
     let cps_bytes = unsafe { core::slice::from_raw_parts(cps_slice.as_ptr().cast::<u8>(), 16) };
 
     // 1. opaque_string_secret 正常終了後:
-    // 中間 Vec<u32> (cps, mapped, normalized) および戻り値 SecretVec の Drop 後に
+    // 中間コードポイント列のアロケーションをゼロ化しつつ、戻り値 SecretVec の Drop 後に
     // 平文およびコードポイント列がヒープ上に残留しないことを検証。
     run_with_heap_leak_check(
         &[pattern_pw_raw, pattern_pw_canonical, cps_bytes],
-        3,
+        1,
         || {
             let secret =
                 opaque_string_secret(password_raw).expect("opaque_string_secret 正常系に成功。");
@@ -368,16 +368,17 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
     );
 
     // 2. opaque_string_secret エラー返却後:
-    // 禁止文字混入による失敗時、中間バッファが確実にゼロ消去されて解放されることを検証。
-    run_with_heap_leak_check(&[pattern_pw_raw, pattern_bad, cps_bytes], 1, || {
+    // 禁止文字混入による失敗時、中間アロケーションなしで即座にエラーを返し、
+    // 残留データが存在しないことを検証。
+    run_with_heap_leak_check(&[pattern_pw_raw, pattern_bad, cps_bytes], 0, || {
         let err = opaque_string_secret(bad_password)
             .expect_err("禁止コードポイントにより失敗することを検証。");
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0000));
     });
 
-    // 3. opaque_string (String 返却 API) の中間バッファ衛生:
-    // 中間 Vec<u32> (cps, mapped, normalized) が確実にゼロ消去されて解放されることを検証。
-    run_with_heap_leak_check(&[cps_bytes], 2, || {
+    // 3. opaque_string (String 返却 API) の衛生:
+    // 中間 Vec<u32> を生成せず直接 String へ書き込み、戻り値 String の Drop を検証。
+    run_with_heap_leak_check(&[cps_bytes], 1, || {
         let s = opaque_string(password_raw).expect("opaque_string 正常系に成功。");
         assert_eq!(s, password_canonical);
         // 注: s (String) 自体は標準型のため Drop でゼロ消去されないが、
@@ -386,10 +387,9 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
     });
 
     // 4. enforce_opaque_string_cps エラー返却時のメモリ衛生:
-    // 禁止文字が含まれるコードポイント列の正規化途中で失敗した場合でも、
-    // 中間 Vec<u32> がゼロクリアされて解放されることを検証。
+    // スライス入力時でも中間 Vec<u32> を生成せず、失敗時の中間データ残留がないことを検証。
     let bad_cps: Vec<u32> = bad_password.chars().map(|c| c as u32).collect();
-    run_with_heap_leak_check(&[cps_bytes], 1, || {
+    run_with_heap_leak_check(&[cps_bytes], 0, || {
         let err = enforce_opaque_string_cps(&bad_cps)
             .expect_err("enforce_opaque_string_cps 失敗を検証。");
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0000));
@@ -398,7 +398,7 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
     // 5. PrecisProfile::OpaqueString.enforce_str_secret のメモリ衛生。
     run_with_heap_leak_check(
         &[pattern_pw_raw, pattern_pw_canonical, cps_bytes],
-        3,
+        1,
         || {
             let prof = PrecisProfile::OpaqueString;
             let secret = prof
@@ -428,24 +428,24 @@ fn test_username_case_mapped_memory_hygiene_success_and_error() {
     let cps_bytes = unsafe { core::slice::from_raw_parts(cps_slice.as_ptr().cast::<u8>(), 12) };
 
     // 1. username_case_mapped 禁止文字 (0x0020 空白) によるエラー時:
-    // 中間 Vec<u32> (cps, folded, normalized) が Zeroizing により確実にゼロ消去されて解放されることを検証。
-    run_with_heap_leak_check(&[cps_bytes], 1, || {
+    // 中間 Vec<u32> アロケーションを行わずに即座にエラー返却し、データ残留がないことを検証。
+    run_with_heap_leak_check(&[cps_bytes], 0, || {
         let err =
             username_case_mapped(user_raw).expect_err("空白文字が含まれるため失敗することを検証。");
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
     });
 
     // 2. enforce_username_case_mapped_cps エラー返却時のメモリ衛生:
-    run_with_heap_leak_check(&[cps_bytes], 1, || {
+    run_with_heap_leak_check(&[cps_bytes], 0, || {
         let err = enforce_username_case_mapped_cps(&bad_cps)
             .expect_err("enforce_username_case_mapped_cps 失敗を検証。");
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
     });
 
     // 3. username_case_mapped_secret 正常終了後:
-    // 中間 Vec<u32> および戻り値 SecretVec の Drop 後に
-    // 平文および正準化済み文字列がヒープ上に残留しないことを検証。
-    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 2, || {
+    // 中間 Vec<u32> アロケーションなしで直接 SecretVec へ書き込まれ、
+    // SecretVec の Drop 後に平文および正準化済み文字列がヒープ上に残留しないことを検証。
+    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 1, || {
         let secret = username_case_mapped_secret(valid_user_raw)
             .expect("username_case_mapped_secret 正常系に成功。");
         assert_eq!(secret.as_slice(), valid_user_canonical.as_bytes());
@@ -453,7 +453,7 @@ fn test_username_case_mapped_memory_hygiene_success_and_error() {
     });
 
     // 4. username_case_mapped_secret エラー返却時のメモリ衛生:
-    run_with_heap_leak_check(&[pattern_user_raw], 1, || {
+    run_with_heap_leak_check(&[pattern_user_raw], 0, || {
         let err = username_case_mapped_secret(user_raw)
             .expect_err("禁止コードポイントにより失敗することを検証。");
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
@@ -461,7 +461,7 @@ fn test_username_case_mapped_memory_hygiene_success_and_error() {
 
     // 5. PrecisProfile::UsernameCaseMapped.enforce_str_secret のメモリ衛生:
     // 平文 String を経由せずに直接 SecretVec へ書き出され、Drop 後に平文がヒープ残留しないことを検証。
-    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 2, || {
+    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 1, || {
         let prof = PrecisProfile::UsernameCaseMapped;
         let secret = prof
             .enforce_str_secret(valid_user_raw)

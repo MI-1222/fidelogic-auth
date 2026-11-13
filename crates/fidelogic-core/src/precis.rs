@@ -358,6 +358,113 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
     }
 }
 
+/// PRECIS 用の Unicode 正準合成 (NFC) を適用するイテレータアダプタ。
+///
+/// コードポイント列のイテレータをラップし、最大 3 要素のスライド窓 (`queue: [u32; 3]`) を用いて
+/// [`compose_pair`] に基づくハングル `L + V + T` および Latin 基底 + ダイアクリティカルマークの合成を行う。
+/// 中間ヒープアロケーションを行わず、スタック上の固定長配列のみで先読み合成を実現する。
+#[derive(Debug, Clone)]
+pub struct PrecisNfcIter<I> {
+    iter: I,
+    queue: [u32; 3],
+    len: usize,
+}
+
+impl<I> PrecisNfcIter<I>
+where
+    I: Iterator<Item = u32>,
+{
+    /// 指定されたコードポイントイテレータから NFC 合成イテレータを構築する。
+    #[inline]
+    #[must_use]
+    pub const fn new(iter: I) -> Self {
+        Self {
+            iter,
+            queue: [0; 3],
+            len: 0,
+        }
+    }
+}
+
+impl<I> Iterator for PrecisNfcIter<I>
+where
+    I: Iterator<Item = u32>,
+{
+    type Item = u32;
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lower, upper) = self.iter.size_hint();
+        let min = (self.len + lower).div_ceil(3);
+        let max = upper.map(|u| u.saturating_add(self.len));
+        (min, max)
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // 先読み判定のため、キューが最低 2 コードポイントになるまで補充する。
+        while self.len < 2 {
+            if let Some(cp) = self.iter.next() {
+                self.queue[self.len] = cp;
+                self.len += 1;
+            } else {
+                break;
+            }
+        }
+
+        // キューが空なら終端。
+        if self.len == 0 {
+            return None;
+        }
+
+        // 1 要素のみの場合は合成相手が存在しないため、そのまま出力。
+        if self.len == 1 {
+            self.len = 0;
+            return Some(self.queue[0]);
+        }
+
+        // 2 要素以上ある場合、先頭 2 コードポイントの合成を試行。
+        let c1 = self.queue[0];
+        let c2 = self.queue[1];
+
+        if let Some(composed) = compose_pair(c1, c2) {
+            // 合成に成功した場合、3 番目のコードポイントとの再合成 (例: ハングル LV + T -> LVT) を試みる。
+            if self.len < 3
+                && let Some(cp) = self.iter.next()
+            {
+                self.queue[self.len] = cp;
+                self.len += 1;
+            }
+
+            if self.len == 3 {
+                let c3 = self.queue[2];
+                if let Some(composed_with_trailing) = compose_pair(composed, c3) {
+                    // 3 要素すべてが合成された場合。
+                    self.len = 0;
+                    return Some(composed_with_trailing);
+                }
+                // 3 番目の要素とは合成できなかった場合。
+                // c1, c2 を消費して composed を出力し、c3 を先頭にシフト。
+                self.queue[0] = c3;
+                self.len = 1;
+                return Some(composed);
+            }
+
+            // 3 番目の要素が存在しない場合、c1 と c2 の合成結果を出力。
+            self.len = 0;
+            Some(composed)
+        } else {
+            // c1 と c2 が合成できない場合、c1 を消費して出力。
+            // キュー内の要素を左シフトする。
+            self.queue[0] = self.queue[1];
+            if self.len == 3 {
+                self.queue[1] = self.queue[2];
+            }
+            self.len -= 1;
+            Some(c1)
+        }
+    }
+}
+
 /// コードポイント列に対して Unicode 正準合成 (NFC) を適用する。
 ///
 /// `PrecisProfile.v` (`precis_nfc_normalize`) に一致する。
@@ -368,33 +475,85 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
 #[must_use]
 pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
     let mut out = Zeroizing::new(Vec::with_capacity(cps.len()));
-    let mut idx = 0;
+    out.extend(PrecisNfcIter::new(cps.iter().copied()));
+    core::mem::take(&mut *out)
+}
 
-    while idx < cps.len() {
-        let c1 = cps[idx];
-        if idx + 1 >= cps.len() {
-            out.push(c1);
-            break;
-        }
-
-        let c2 = cps[idx + 1];
-        if let Some(composed) = compose_pair(c1, c2) {
-            if idx + 2 < cps.len()
-                && let Some(composed_with_trailing) = compose_pair(composed, cps[idx + 2])
-            {
-                out.push(composed_with_trailing);
-                idx += 3;
-                continue;
-            }
-            out.push(composed);
-            idx += 2;
-        } else {
-            out.push(c1);
-            idx += 1;
-        }
+/// UTF-8 文字列に対して PRECIS プロファイル正準化を適用し、中間ヒープアロケーションなしで [`String`] を生成する。
+#[cfg(feature = "alloc")]
+fn enforce_str_to_string(profile: PrecisProfile, input: &str) -> Result<String, PrecisError> {
+    if input.is_empty() {
+        return Err(PrecisError::EmptyInput);
     }
 
-    core::mem::take(&mut *out)
+    let mapped = input.chars().map(|ch| profile.map_cp(ch as u32));
+    let nfc = PrecisNfcIter::new(mapped);
+
+    let mut out = Zeroizing::new(String::with_capacity(input.len()));
+    for cp in nfc {
+        if profile.is_disallowed_cp(cp) {
+            return Err(PrecisError::DisallowedCodePoint(cp));
+        }
+        let ch = char::from_u32(cp).ok_or(PrecisError::DisallowedCodePoint(cp))?;
+        out.push(ch);
+    }
+
+    Ok(core::mem::take(&mut *out))
+}
+
+/// UTF-8 文字列に対して PRECIS プロファイル正準化を適用し、中間ヒープアロケーションなしで [`SecretVec`] を生成する。
+#[cfg(feature = "alloc")]
+fn enforce_str_to_secret(profile: PrecisProfile, input: &str) -> Result<SecretVec, PrecisError> {
+    if input.is_empty() {
+        return Err(PrecisError::EmptyInput);
+    }
+
+    let mapped = input.chars().map(|ch| profile.map_cp(ch as u32));
+    let nfc = PrecisNfcIter::new(mapped);
+
+    let mut secret_out = SecretVec::with_capacity(input.len());
+    let mut utf8_buf = [0u8; 4];
+    for cp in nfc {
+        if profile.is_disallowed_cp(cp) {
+            secret_out.clear();
+            volatile_zeroize(&mut utf8_buf);
+            return Err(PrecisError::DisallowedCodePoint(cp));
+        }
+        let ch = match char::from_u32(cp) {
+            Some(ch) => ch,
+            None => {
+                secret_out.clear();
+                volatile_zeroize(&mut utf8_buf);
+                return Err(PrecisError::DisallowedCodePoint(cp));
+            }
+        };
+        let encoded = ch.encode_utf8(&mut utf8_buf);
+        secret_out.extend_from_slice(encoded.as_bytes());
+    }
+    volatile_zeroize(&mut utf8_buf);
+
+    Ok(secret_out)
+}
+
+/// コードポイント列に対して PRECIS プロファイル正準化を適用し、中間ヒープアロケーションなしで [`Vec<u32>`] を生成する。
+#[cfg(feature = "alloc")]
+fn enforce_cps_to_vec(profile: PrecisProfile, cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
+    if cps.is_empty() {
+        return Err(PrecisError::EmptyInput);
+    }
+
+    let mapped = cps.iter().copied().map(|cp| profile.map_cp(cp));
+    let nfc = PrecisNfcIter::new(mapped);
+
+    let mut out = Zeroizing::new(Vec::with_capacity(cps.len()));
+    for cp in nfc {
+        if profile.is_disallowed_cp(cp) {
+            return Err(PrecisError::DisallowedCodePoint(cp));
+        }
+        out.push(cp);
+    }
+
+    Ok(core::mem::take(&mut *out))
 }
 
 /// コードポイント列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3 形式モデル) を適用する。
@@ -404,26 +563,16 @@ pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
 ///
 /// 処理手順を以下に示す。
 /// 1. 空入力を拒絶 ([`PrecisError::EmptyInput`])。
-/// 2. Case Folding (`precis_fold_string`) を適用。
-/// 3. Unicode NFC 正規化 (`precis_nfc_normalize`) を適用。
-/// 4. 禁止コードポイント検査 (`find_disallowed_cp`) を実施し、違反時は [`PrecisError::DisallowedCodePoint`] を返却。
+/// 2. Case Folding (`precis_fold_cp`) を適用。
+/// 3. Unicode NFC 正規化 (`PrecisNfcIter`) を適用。
+/// 4. 禁止コードポイント検査 (`is_disallowed_cp`) を実施し、違反時は [`PrecisError::DisallowedCodePoint`] を返却。
 ///
 /// # Errors
 ///
 /// 入力が空であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn enforce_username_case_mapped_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
-    if cps.is_empty() {
-        return Err(PrecisError::EmptyInput);
-    }
-
-    let folded = Zeroizing::new(precis_fold_string(cps));
-    let mut normalized = Zeroizing::new(precis_nfc_normalize(&folded));
-    if let Some(disallowed) = find_disallowed_cp(&normalized) {
-        return Err(PrecisError::DisallowedCodePoint(disallowed));
-    }
-
-    Ok(core::mem::take(&mut *normalized))
+    enforce_cps_to_vec(PrecisProfile::UsernameCaseMapped, cps)
 }
 
 /// `PrecisProfile.v` (`precis_username_case_mapped`) に対応する `Option` 返却ラッパー。
@@ -433,93 +582,38 @@ pub fn precis_username_case_mapped(cps: &[u32]) -> Option<Vec<u32>> {
     enforce_username_case_mapped_cps(cps).ok()
 }
 
-/// UTF-8 文字列をコードポイント列へ変換してプロファイル正準化を適用し、UTF-8 文字列へ再構築する共通ヘルパー。
-#[cfg(feature = "alloc")]
-fn apply_str_profile<F>(input: &str, enforce_cps: F) -> Result<String, PrecisError>
-where
-    F: FnOnce(&[u32]) -> Result<Vec<u32>, PrecisError>,
-{
-    if input.is_empty() {
-        return Err(PrecisError::EmptyInput);
-    }
-
-    let char_count = input.chars().count();
-    let mut cps = Zeroizing::new(Vec::with_capacity(char_count));
-    cps.extend(input.chars().map(|ch| ch as u32));
-    let normalized = Zeroizing::new(enforce_cps(&cps)?);
-
-    let mut out = Zeroizing::new(String::with_capacity(input.len()));
-    for &cp in normalized.iter() {
-        let ch = char::from_u32(cp).ok_or(PrecisError::DisallowedCodePoint(cp))?;
-        out.push(ch);
-    }
-
-    Ok(core::mem::take(&mut *out))
-}
-
-/// UTF-8 文字列をコードポイント列へ変換してプロファイル正準化を適用し、
-/// メモリ残留を防ぐセキュアバッファ [`SecretVec`] として正準化済み UTF-8 バイト列を返却する共通ヘルパー。
-#[cfg(feature = "alloc")]
-fn apply_str_profile_secret<F>(input: &str, enforce_cps: F) -> Result<SecretVec, PrecisError>
-where
-    F: FnOnce(&[u32]) -> Result<Vec<u32>, PrecisError>,
-{
-    if input.is_empty() {
-        return Err(PrecisError::EmptyInput);
-    }
-
-    let char_count = input.chars().count();
-    let mut cps = Zeroizing::new(Vec::with_capacity(char_count));
-    cps.extend(input.chars().map(|ch| ch as u32));
-    let normalized = Zeroizing::new(enforce_cps(&cps)?);
-
-    let mut secret_out = SecretVec::with_capacity(input.len());
-    let mut utf8_buf = [0u8; 4];
-    for &cp in normalized.iter() {
-        let ch = char::from_u32(cp).ok_or_else(|| {
-            secret_out.clear();
-            volatile_zeroize(&mut utf8_buf);
-            PrecisError::DisallowedCodePoint(cp)
-        })?;
-        let encoded = ch.encode_utf8(&mut utf8_buf);
-        secret_out.extend_from_slice(encoded.as_bytes());
-    }
-    volatile_zeroize(&mut utf8_buf);
-
-    Ok(secret_out)
-}
-
 /// UTF-8 文字列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用する。
+///
+/// 中間コードポイント列のヒープアロケーションを行わず、イテレータパイプラインから直接 [`String`] を生成する。
 ///
 /// # Errors
 ///
 /// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn username_case_mapped(input: &str) -> Result<String, PrecisError> {
-    apply_str_profile(input, enforce_username_case_mapped_cps)
+    enforce_str_to_string(PrecisProfile::UsernameCaseMapped, input)
 }
 
 /// UTF-8 文字列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3) を適用し、
 /// メモリ残留を防ぐセキュアバッファ [`SecretVec`] として正準化済み UTF-8 バイト列を返却する。
 ///
-/// 中間コードポイントバッファ (`Vec<u32>`) および戻り値バッファは、
-/// 正常終了・エラー返却時を問わず確実にゼロ消去され、平文のヒープ残留を防止する。
+/// 中間コードポイント列のアロケーションを行わず、直接セキュアバッファへ書き込むことでヒープ残留を防止する。
 ///
 /// # Errors
 ///
 /// 入力が空文字列であるか、正規化後に禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn username_case_mapped_secret(input: &str) -> Result<SecretVec, PrecisError> {
-    apply_str_profile_secret(input, enforce_username_case_mapped_cps)
+    enforce_str_to_secret(PrecisProfile::UsernameCaseMapped, input)
 }
 
 /// コードポイント列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2) を適用する。
 ///
 /// 処理手順を以下に示す。
 /// 1. 空入力を拒絶 ([`PrecisError::EmptyInput`])。
-/// 2. RFC 8265 Section 4.2.2 に従い、Unicode `Zs` カテゴリ文字を ASCII 空白 (`0x0020`) にマッピング。
-/// 3. Case Folding を行わずに Unicode NFC 正規化 (`precis_nfc_normalize`) を適用。
-/// 4. `FreeformClass` 禁止コードポイント検査 (`find_opaque_disallowed_cp`) を実施し、
+/// 2. RFC 8265 Section 4.2.2 に従い、Unicode `Zs` カテゴリ文字を ASCII 空白 (`0x0020`) にマッピング (`map_zs_to_space`)。
+/// 3. Case Folding を行わずに Unicode NFC 正規化 (`PrecisNfcIter`) を適用。
+/// 4. `FreeformClass` 禁止コードポイント検査 (`is_opaque_disallowed_cp`) を実施し、
 ///    ASCII 空白 (`0x20`) を許可しつつ制御文字・サロゲート・私用領域・非文字等を
 ///    [`PrecisError::DisallowedCodePoint`] として拒絶する。
 ///
@@ -528,26 +622,7 @@ pub fn username_case_mapped_secret(input: &str) -> Result<SecretVec, PrecisError
 /// 入力が空であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn enforce_opaque_string_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
-    if cps.is_empty() {
-        return Err(PrecisError::EmptyInput);
-    }
-
-    // RFC 8265 Section 4.2.2: 非 ASCII 空白文字 (Unicode Zs カテゴリ) が含まれる場合のみ
-    // マッピング済みバッファを生成し、通常時は不要なアロケーションを回避する。
-    let has_non_ascii_zs = cps.iter().any(|&cp| cp != 0x0020 && is_zs_space(cp));
-    let mut normalized = Zeroizing::new(if has_non_ascii_zs {
-        let mut mapped = Zeroizing::new(Vec::with_capacity(cps.len()));
-        mapped.extend(cps.iter().copied().map(map_zs_to_space));
-        precis_nfc_normalize(&mapped)
-    } else {
-        precis_nfc_normalize(cps)
-    });
-
-    if let Some(disallowed) = find_opaque_disallowed_cp(&normalized) {
-        return Err(PrecisError::DisallowedCodePoint(disallowed));
-    }
-
-    Ok(core::mem::take(&mut *normalized))
+    enforce_cps_to_vec(PrecisProfile::OpaqueString, cps)
 }
 
 /// `PrecisProfile.v` (`precis_opaque_string`) に対応する `Option` 返却ラッパー。
@@ -561,27 +636,27 @@ pub fn precis_opaque_string(cps: &[u32]) -> Option<Vec<u32>> {
 ///
 /// 大文字・小文字の区別を保持し、非 ASCII 空白 (Unicode `Zs` カテゴリ) を ASCII 空白 (`0x20`) へマッピングしたうえで
 /// Unicode NFC 正規化を適用し、制御文字・サロゲート・私用領域・非文字等の禁止コードポイントを拒絶する。
+/// 中間コードポイント列のヒープアロケーションを行わず、イテレータパイプラインから直接 [`String`] を生成する。
 ///
 /// # Errors
 ///
 /// 入力が空文字列であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn opaque_string(input: &str) -> Result<String, PrecisError> {
-    apply_str_profile(input, enforce_opaque_string_cps)
+    enforce_str_to_string(PrecisProfile::OpaqueString, input)
 }
 
 /// UTF-8 文字列に対して `OpaqueString` プロファイル正準化 (RFC 8265 Section 4.2) を適用し、
 /// メモリ残留を防ぐセキュアバッファ [`SecretVec`] として正準化済み UTF-8 バイト列を返却する。
 ///
-/// 中間コードポイントバッファ (`Vec<u32>`) および戻り値バッファは、
-/// 正常終了・エラー返却時を問わず確実にゼロ消去され、平文のヒープ残留を防止する。
+/// 中間コードポイント列のアロケーションを行わず、直接セキュアバッファへ書き込むことでヒープ残留を防止する。
 ///
 /// # Errors
 ///
 /// 入力が空文字列であるか、正規化後に `FreeformClass` の禁止コードポイントが含まれる場合は [`PrecisError`] を返す。
 #[cfg(feature = "alloc")]
 pub fn opaque_string_secret(input: &str) -> Result<SecretVec, PrecisError> {
-    apply_str_profile_secret(input, enforce_opaque_string_cps)
+    enforce_str_to_secret(PrecisProfile::OpaqueString, input)
 }
 
 /// PRECIS プロファイル正準化の種別を表す列挙型。
@@ -618,6 +693,16 @@ impl PrecisProfile {
         }
     }
 
+    /// 対象プロファイルの前処理(Case Folding または空白マッピング)をコードポイントに適用する。
+    #[inline]
+    #[must_use]
+    pub const fn map_cp(self, cp: u32) -> u32 {
+        match self {
+            Self::UsernameCaseMapped => precis_fold_cp(cp),
+            Self::OpaqueString => map_zs_to_space(cp),
+        }
+    }
+
     /// コードポイント列のすべての要素が対象プロファイルで許可されているかを判定する。
     #[inline]
     #[must_use]
@@ -640,10 +725,7 @@ impl PrecisProfile {
     #[cfg(feature = "alloc")]
     #[inline]
     pub fn enforce_cps(self, cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
-        match self {
-            Self::UsernameCaseMapped => enforce_username_case_mapped_cps(cps),
-            Self::OpaqueString => enforce_opaque_string_cps(cps),
-        }
+        enforce_cps_to_vec(self, cps)
     }
 
     /// `proofs/Theories/PrecisProfile.v` の仕様に対応する `Option` 返却ラッパー。
@@ -662,10 +744,7 @@ impl PrecisProfile {
     #[cfg(feature = "alloc")]
     #[inline]
     pub fn enforce_str(self, input: &str) -> Result<String, PrecisError> {
-        match self {
-            Self::UsernameCaseMapped => username_case_mapped(input),
-            Self::OpaqueString => opaque_string(input),
-        }
+        enforce_str_to_string(self, input)
     }
 
     /// UTF-8 文字列に対して対象プロファイルの正準化を適用し、秘密情報保護型 [`SecretVec`] として返却する。
@@ -676,10 +755,7 @@ impl PrecisProfile {
     #[cfg(feature = "alloc")]
     #[inline]
     pub fn enforce_str_secret(self, input: &str) -> Result<SecretVec, PrecisError> {
-        match self {
-            Self::UsernameCaseMapped => username_case_mapped_secret(input),
-            Self::OpaqueString => opaque_string_secret(input),
-        }
+        enforce_str_to_secret(self, input)
     }
 }
 
@@ -967,6 +1043,40 @@ mod tests {
             opaque_string("Español Ýýÿ"),
             opaque_string("Espan\u{0303}ol Y\u{0301}y\u{0301}y\u{0308}")
         );
+    }
+
+    #[test]
+    fn test_precis_nfc_iter_boundaries_and_sliding_window() {
+        // 空イテレータの検証。
+        let mut empty = PrecisNfcIter::new([].into_iter());
+        assert_eq!(empty.next(), None);
+        assert_eq!(empty.size_hint(), (0, Some(0)));
+
+        // 1 要素 (非合成) の検証。
+        let single: Vec<u32> = PrecisNfcIter::new([b'A' as u32].into_iter()).collect();
+        assert_eq!(single, [b'A' as u32]);
+
+        // 2 要素 (非合成ペア) の検証。
+        let no_compose: Vec<u32> =
+            PrecisNfcIter::new([b'A' as u32, b'B' as u32].into_iter()).collect();
+        assert_eq!(no_compose, [b'A' as u32, b'B' as u32]);
+
+        // 2 要素 (合成ペア: 'A' + Combining Diaeresis -> 'Ä') の検証。
+        let composed_pair: Vec<u32> = PrecisNfcIter::new([0x0041, 0x0308].into_iter()).collect();
+        assert_eq!(composed_pair, [0x00C4]);
+
+        // 3 要素 (ハングル L + V + T 3段階合成) の検証。
+        let hangul_lvt: Vec<u32> = PrecisNfcIter::new([4352, 4449, 4520].into_iter()).collect();
+        assert_eq!(hangul_lvt, [44033]);
+
+        // 3 要素 (ハングル L + V + 非T: 2文字合成 + 1文字残余) の検証。
+        let hangul_lv_plus: Vec<u32> =
+            PrecisNfcIter::new([4352, 4449, b'z' as u32].into_iter()).collect();
+        assert_eq!(hangul_lv_plus, [44032, b'z' as u32]);
+
+        // 3 要素 (合成ペア + 非合成マーク: 1文字合成 + 1文字残余) の検証。
+        let dia_plus: Vec<u32> = PrecisNfcIter::new([0x0041, 0x0308, 0x0301].into_iter()).collect();
+        assert_eq!(dia_plus, [0x00C4, 0x0301]);
     }
 
     #[test]
