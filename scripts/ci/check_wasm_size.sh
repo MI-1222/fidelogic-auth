@@ -38,12 +38,17 @@ RAW_VAULT_BIN="${TARGET_DIR}/vault_build/wasm32-unknown-unknown/release/fidelogi
 OPT_VAULT_BIN="${TARGET_DIR}/fidelogic_vault_opt.wasm"
 
 # 最適化 (`wasm-opt`) の適用。
+# Rust の wasm32-unknown-unknown ターゲット標準機能セット
+# (bulk-memory, sign-ext, nontrapping-float-to-int)
+# の検証エラーを防ぐため、対応する feature flag を明示指定。
 if command -v wasm-opt >/dev/null 2>&1; then
   echo "==> Applying wasm-opt -Oz to Lite profile..."
-  wasm-opt -Oz --strip-debug --strip-producers --vacuum "${RAW_LITE_BIN}" -o "${OPT_LITE_BIN}"
+  wasm-opt -Oz --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
+    --strip-debug --strip-producers --vacuum "${RAW_LITE_BIN}" -o "${OPT_LITE_BIN}"
 
   echo "==> Applying wasm-opt -Oz to Vault profile..."
-  wasm-opt -Oz --strip-debug --strip-producers --vacuum "${RAW_VAULT_BIN}" -o "${OPT_VAULT_BIN}"
+  wasm-opt -Oz --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
+    --strip-debug --strip-producers --vacuum "${RAW_VAULT_BIN}" -o "${OPT_VAULT_BIN}"
 else
   if [ -n "${CI:-}" ]; then
     echo "Error: CI環境では 'wasm-opt' (binaryen) が必須です。" >&2
