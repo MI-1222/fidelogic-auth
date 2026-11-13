@@ -159,11 +159,11 @@ pub const fn is_opaque_disallowed_cp(cp: u32) -> bool {
 ///
 /// `proofs/Theories/PrecisProfile.v` のモデルに対応し、
 /// RFC 7564 (RFC 8264) Section 4.2.3 および RFC 8265 Section 3.3 に基づき、
-/// `FreeformClass` の禁止文字に加えて ASCII 空白 (`0x20`) を禁止する。
+/// `FreeformClass` の禁止文字に加えて Unicode `Zs` カテゴリの空白文字全般 (`is_zs_space`) を禁止する。
 #[inline]
 #[must_use]
 pub const fn is_disallowed_cp(cp: u32) -> bool {
-    is_opaque_disallowed_cp(cp) || is_space(cp)
+    is_opaque_disallowed_cp(cp) || is_zs_space(cp)
 }
 
 /// コードポイント列のすべての要素が `IdentifierClass` で許可されているかを判定する。
@@ -821,6 +821,12 @@ mod tests {
         // 総合判定。
         assert!(is_disallowed_cp(0x00));
         assert!(is_disallowed_cp(0x20));
+        assert!(is_disallowed_cp(0x00A0)); // NO-BREAK SPACE (Zs)。
+        assert!(is_disallowed_cp(0x1680)); // OGHAM SPACE MARK (Zs)。
+        assert!(is_disallowed_cp(0x2000)); // EN QUAD (Zs)。
+        assert!(is_disallowed_cp(0x202F)); // NARROW NO-BREAK SPACE (Zs)。
+        assert!(is_disallowed_cp(0x205F)); // MEDIUM MATHEMATICAL SPACE (Zs)。
+        assert!(is_disallowed_cp(0x3000)); // 全角空白 (Zs)。
         assert!(is_disallowed_cp(0x7F));
         assert!(is_disallowed_cp(0x80));
         assert!(is_disallowed_cp(0xD800));
@@ -1394,6 +1400,10 @@ mod tests {
         // is_disallowed_cp
         assert!(user_prof.is_disallowed_cp(0x20));
         assert!(!opaque_prof.is_disallowed_cp(0x20));
+        assert!(user_prof.is_disallowed_cp(0x00A0));
+        assert!(!opaque_prof.is_disallowed_cp(0x00A0));
+        assert!(user_prof.is_disallowed_cp(0x3000));
+        assert!(!opaque_prof.is_disallowed_cp(0x3000));
         assert!(user_prof.is_disallowed_cp(0x00));
         assert!(opaque_prof.is_disallowed_cp(0x00));
 
@@ -1432,7 +1442,27 @@ mod tests {
                 Err(PrecisError::DisallowedCodePoint(0x0020))
             );
             assert_eq!(
+                user_prof.enforce_str("user\u{00A0}name"),
+                Err(PrecisError::DisallowedCodePoint(0x00A0))
+            );
+            assert_eq!(
+                user_prof.enforce_str("user\u{3000}name"),
+                Err(PrecisError::DisallowedCodePoint(0x3000))
+            );
+            assert_eq!(
+                user_prof.enforce_str("admin\u{00A0}"),
+                Err(PrecisError::DisallowedCodePoint(0x00A0))
+            );
+            assert_eq!(
                 opaque_prof.enforce_str("user name"),
+                Ok(alloc::string::String::from("user name"))
+            );
+            assert_eq!(
+                opaque_prof.enforce_str("user\u{00A0}name"),
+                Ok(alloc::string::String::from("user name"))
+            );
+            assert_eq!(
+                opaque_prof.enforce_str("user\u{3000}name"),
                 Ok(alloc::string::String::from("user name"))
             );
 
@@ -1473,7 +1503,7 @@ mod tests {
             if is_opaque_disallowed_cp(cp) {
                 prop_assert!(is_disallowed_cp(cp));
             }
-            if cp == 0x20 {
+            if is_zs_space(cp) {
                 prop_assert!(!is_opaque_disallowed_cp(cp));
                 prop_assert!(is_disallowed_cp(cp));
             }

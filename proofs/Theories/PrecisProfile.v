@@ -77,6 +77,29 @@ Definition is_space (cp : CodePoint) : bool :=
   cp =? 32.
 
 (** [MODEL]
+    Unicode Zs (Space_Separator) カテゴリ文字判定関数 (RFC 8265 Section 4.2.2)。
+    対象コードポイント:
+    - 0x0020 (SPACE)
+    - 0x00A0 (NO-BREAK SPACE)
+    - 0x1680 (OGHAM SPACE MARK)
+    - 0x2000..0x200A (EN QUAD .. HAIR SPACE)
+    - 0x202F (NARROW NO-BREAK SPACE)
+    - 0x205F (MEDIUM MATHEMATICAL SPACE)
+    - 0x3000 (IDEOGRAPHIC SPACE) *)
+Definition is_zs_space (cp : CodePoint) : bool :=
+  (cp =? 32) || (cp =? 160) || (cp =? 5760) ||
+  in_range 8192 8202 cp ||
+  (cp =? 8239) || (cp =? 8287) || (cp =? 12288).
+
+(** [SPEC]
+    ASCII 空白文字に対する Zs 判定の真値性補題。 *)
+Lemma space_is_zs :
+  is_zs_space 32 = true.
+Proof.
+  reflexivity.
+Qed.
+
+(** [MODEL]
     Unicode サロゲートコードポイント (0xD800..0xDFFF) の判定関数。 *)
 Definition is_surrogate (cp : CodePoint) : bool :=
   (55296 <=? cp) && (cp <=? 57343).
@@ -105,12 +128,12 @@ Definition is_out_of_bounds (cp : CodePoint) : bool :=
 (** [MODEL]
     総合禁止コードポイント判定関数 (IdentifierClass 向けモデル)。
     RFC 7564 (RFC 8264) Section 4.2.3 および RFC 8265 Section 3.3 に基づき、
-    制御文字、空白、サロゲート、私用領域、非文字、および範囲外文字を禁止とする。 *)
+    制御文字、Unicode Zs 空白、サロゲート、私用領域、非文字、および範囲外文字を禁止とする。 *)
 Definition is_disallowed_cp (cp : CodePoint) : bool :=
   is_out_of_bounds cp ||
   is_ascii_control cp ||
   is_non_ascii_control cp ||
-  is_space cp ||
+  is_zs_space cp ||
   is_surrogate cp ||
   is_private_use cp ||
   is_noncharacter cp.
@@ -121,7 +144,7 @@ Definition disallowed_cp (cp : CodePoint) : Prop :=
   is_out_of_bounds cp = true \/
   is_ascii_control cp = true \/
   is_non_ascii_control cp = true \/
-  is_space cp = true \/
+  is_zs_space cp = true \/
   is_surrogate cp = true \/
   is_private_use cp = true \/
   is_noncharacter cp = true.
@@ -242,7 +265,7 @@ Proof.
   assert (Hnonchar : is_noncharacter cp = false).
   { apply small_noncharacter_false. lia. }
   rewrite Hnonchar.
-  unfold is_out_of_bounds, is_ascii_control, is_non_ascii_control, is_space,
+  unfold is_out_of_bounds, is_ascii_control, is_non_ascii_control, is_zs_space, in_range,
          is_surrogate, is_private_use.
   repeat (
     match goal with
@@ -358,21 +381,6 @@ Qed.
 (******************************************************************************)
 
 (** [MODEL]
-    Unicode Zs (Space_Separator) カテゴリ文字判定関数 (RFC 8265 Section 4.2.2)。
-    対象コードポイント:
-    - 0x0020 (SPACE)
-    - 0x00A0 (NO-BREAK SPACE)
-    - 0x1680 (OGHAM SPACE MARK)
-    - 0x2000..0x200A (EN QUAD .. HAIR SPACE)
-    - 0x202F (NARROW NO-BREAK SPACE)
-    - 0x205F (MEDIUM MATHEMATICAL SPACE)
-    - 0x3000 (IDEOGRAPHIC SPACE) *)
-Definition is_zs_space (cp : CodePoint) : bool :=
-  (cp =? 32) || (cp =? 160) || (cp =? 5760) ||
-  in_range 8192 8202 cp ||
-  (cp =? 8239) || (cp =? 8287) || (cp =? 12288).
-
-(** [MODEL]
     Unicode Zs カテゴリ文字を ASCII 空白 (0x20) へマッピングする純粋関数 (RFC 8265 Section 4.2.2)。
     対象外のコードポイントは変更せずそのまま返す。 *)
 Definition map_zs_to_space (cp : CodePoint) : CodePoint :=
@@ -382,14 +390,6 @@ Definition map_zs_to_space (cp : CodePoint) : CodePoint :=
     文字列全体の Unicode Zs カテゴリ文字を ASCII 空白 (0x20) へマッピングする。 *)
 Definition precis_map_zs (s : PrecisString) : PrecisString :=
   map map_zs_to_space s.
-
-(** [SPEC]
-    ASCII 空白文字に対する Zs 判定の真値性補題。 *)
-Lemma space_is_zs :
-  is_zs_space 32 = true.
-Proof.
-  reflexivity.
-Qed.
 
 (** [SPEC]
     ASCII 空白文字に対する Zs マッピングの恒等性補題。 *)
@@ -486,6 +486,21 @@ Proof.
   unfold is_disallowed_cp, is_opaque_disallowed_cp in *.
   repeat rewrite Bool.orb_true_iff in *.
   tauto.
+Qed.
+
+(** [SPEC]
+    Unicode Zs 空白文字に対する IdentifierClass での禁止性補題 (RFC 8264 Section 4.2.3)。 *)
+Lemma zs_space_disallowed : forall (cp : CodePoint),
+  is_zs_space cp = true ->
+  is_disallowed_cp cp = true.
+Proof.
+  intros cp H.
+  unfold is_disallowed_cp.
+  rewrite H.
+  destruct (is_out_of_bounds cp); [reflexivity |].
+  destruct (is_ascii_control cp); [reflexivity |].
+  destruct (is_non_ascii_control cp); [reflexivity |].
+  reflexivity.
 Qed.
 
 (** [MODEL]
@@ -1254,10 +1269,34 @@ Proof.
   destruct Hopaque as [[[[[H1 H2] H3] H4] H5] H6].
   repeat rewrite Bool.orb_false_iff.
   repeat split; try assumption.
-  unfold is_space.
+  unfold is_zs_space, in_range.
   apply compose_pair_range in Hcomp as [Hlatin | Hhangul].
-  - destruct (c' =? 32) eqn:E; [apply Z.eqb_eq in E; lia | reflexivity].
-  - destruct (c' =? 32) eqn:E; [apply Z.eqb_eq in E; lia | reflexivity].
+  - repeat (
+      match goal with
+      | |- context [?l <=? c'] =>
+          let E := fresh "E" in
+          destruct (l <=? c') eqn:E; [apply Z.leb_le in E; try lia |]
+      | |- context [c' <=? ?h] =>
+          let E := fresh "E" in
+          destruct (c' <=? h) eqn:E; [apply Z.leb_le in E; try lia |]
+      | |- context [c' =? ?v] =>
+          let E := fresh "E" in
+          destruct (c' =? v) eqn:E; [apply Z.eqb_eq in E; try lia |]
+      end
+    ); reflexivity.
+  - repeat (
+      match goal with
+      | |- context [?l <=? c'] =>
+          let E := fresh "E" in
+          destruct (l <=? c') eqn:E; [apply Z.leb_le in E; try lia |]
+      | |- context [c' <=? ?h] =>
+          let E := fresh "E" in
+          destruct (c' <=? h) eqn:E; [apply Z.leb_le in E; try lia |]
+      | |- context [c' =? ?v] =>
+          let E := fresh "E" in
+          destruct (c' =? v) eqn:E; [apply Z.eqb_eq in E; try lia |]
+      end
+    ); reflexivity.
 Qed.
 
 (** [SPEC]
