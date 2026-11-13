@@ -92,6 +92,9 @@ pub enum SlotKind {
 }
 
 impl SlotKind {
+    /// サポートされているKEKスロット種別の総数 (3)。
+    pub const COUNT: usize = 3;
+
     /// 数値スロットID (`0`, `1`, `2`) から [`SlotKind`] への変換を試みる。
     ///
     /// # Errors
@@ -676,6 +679,7 @@ mod tests {
         );
         assert_eq!(SlotKind::from_slot_id(3), Err(VaultError::SlotNotFound));
         assert_eq!(SlotKind::from_slot_id(255), Err(VaultError::SlotNotFound));
+        assert_eq!(SlotKind::COUNT, 3);
 
         assert!(SlotKind::is_valid_slot_id(0));
         assert!(SlotKind::is_valid_slot_id(1));

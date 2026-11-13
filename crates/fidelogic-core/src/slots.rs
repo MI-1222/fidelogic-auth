@@ -1160,7 +1160,7 @@ pub fn find_slot_entry(entries: &[KekSlotEntry], slot_id: u8) -> Result<&KekSlot
 #[must_use]
 pub fn inspect_kek_slots(entries: &[KekSlotEntry]) -> KekSlots {
     let mut slots = KekSlots::unset_all();
-    let mut seen = [false; 3];
+    let mut seen = [false; SlotKind::COUNT];
 
     for entry in entries {
         let Ok(kind) = SlotKind::from_slot_id(entry.slot_id()) else {
@@ -2098,7 +2098,7 @@ impl VaultEngine {
 
         let header_aad = vault.header.associated_data();
         let mut matched: Option<(SlotKind, SecretBytes<DEK_LEN>)> = None;
-        let mut seen_kinds = [false; 3];
+        let mut seen_kinds = [false; SlotKind::COUNT];
 
         // 先行スロットの成否や対象スロットの有無に関わらず、全候補に対して実演算またはダミー演算を1回実行する。
         // 同一 SlotKind の複数候補(旧・新パスワード等)も順次評価し、後続の正しい候補による解錠を保証する。
@@ -4099,7 +4099,7 @@ mod tests {
             let wrong_rec = [0x02u8; SLOT2_MIN_SECRET_LEN];
             let mut expected_argon2_ops = 0usize;
             let mut expected_hkdf_ops = 0usize;
-            let mut seen = [false; 3];
+            let mut seen = [false; SlotKind::COUNT];
             let mut creds = alloc::vec::Vec::with_capacity(cred_specs.len());
 
             for &(kind_sel, use_valid_secret) in &cred_specs {
