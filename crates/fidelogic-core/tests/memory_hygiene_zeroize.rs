@@ -413,9 +413,16 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
 #[cfg(feature = "alloc")]
 #[test]
 fn test_username_case_mapped_memory_hygiene_success_and_error() {
-    use fidelogic_core::{PrecisError, enforce_username_case_mapped_cps, username_case_mapped};
+    use fidelogic_core::{
+        PrecisError, PrecisProfile, enforce_username_case_mapped_cps, username_case_mapped,
+        username_case_mapped_secret,
+    };
 
     let user_raw = "Alice\u{0020}User#2026";
+    let valid_user_raw = "AliceUserA\u{0308}2026";
+    let valid_user_canonical = "aliceuserä2026";
+    let pattern_user_raw = b"AliceUser";
+    let pattern_user_canonical = b"aliceuser";
     let bad_cps: [u32; 4] = [b'A' as u32, 0x0020, b'B' as u32, 0x0000];
     let cps_slice = [b'A' as u32, 0x0020, b'B' as u32];
     let cps_bytes = unsafe { core::slice::from_raw_parts(cps_slice.as_ptr().cast::<u8>(), 12) };
@@ -433,6 +440,34 @@ fn test_username_case_mapped_memory_hygiene_success_and_error() {
         let err = enforce_username_case_mapped_cps(&bad_cps)
             .expect_err("enforce_username_case_mapped_cps 失敗を検証。");
         assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
+    });
+
+    // 3. username_case_mapped_secret 正常終了後:
+    // 中間 Vec<u32> および戻り値 SecretVec の Drop 後に
+    // 平文および正準化済み文字列がヒープ上に残留しないことを検証。
+    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 2, || {
+        let secret = username_case_mapped_secret(valid_user_raw)
+            .expect("username_case_mapped_secret 正常系に成功。");
+        assert_eq!(secret.as_slice(), valid_user_canonical.as_bytes());
+        drop(secret);
+    });
+
+    // 4. username_case_mapped_secret エラー返却時のメモリ衛生:
+    run_with_heap_leak_check(&[pattern_user_raw], 1, || {
+        let err = username_case_mapped_secret(user_raw)
+            .expect_err("禁止コードポイントにより失敗することを検証。");
+        assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
+    });
+
+    // 5. PrecisProfile::UsernameCaseMapped.enforce_str_secret のメモリ衛生:
+    // 平文 String を経由せずに直接 SecretVec へ書き出され、Drop 後に平文がヒープ残留しないことを検証。
+    run_with_heap_leak_check(&[pattern_user_raw, pattern_user_canonical], 2, || {
+        let prof = PrecisProfile::UsernameCaseMapped;
+        let secret = prof
+            .enforce_str_secret(valid_user_raw)
+            .expect("enforce_str_secret (UsernameCaseMapped) 正常系に成功。");
+        assert_eq!(secret.as_slice(), valid_user_canonical.as_bytes());
+        drop(secret);
     });
 }
 
