@@ -1,9 +1,17 @@
 //! # メモリロック保護モジュール(Native限定)
 //!
 //! DEK(データ暗号化鍵)やKEK(鍵暗号化鍵)などの極小暗号領域に対して、
-//! OSレベルのメモリ保護(`libc::mlock` および `libc::madvise(MADV_DONTDUMP)`)を提供する。
+//! OSレベルのメモリ保護(`libc::mlock` および `libc::madvise(MADV_DONTDUMP)` 等)を提供する。
 //! スワップ領域への書き出し防止とコアダンプ生成時の機密漏洩遮断を確立し、
-//! 非特権コンテナ環境等における警告フォールバック動作をサポートする。
+//! 非特権コンテナ環境等におけるフォールバック動作をサポートする。
+//!
+//! ## プラットフォーム別のダンプ抑止と macOS における注意
+//! Linux/Android では `libc::MADV_DONTDUMP`、FreeBSD では `libc::MADV_NOCORE` により、
+//! 個別ページ単位でコアダンプ書き出しを抑止する。
+//! 一方で macOS (Darwin) のカーネルには個別メモリ領域単位のダンプ抑止 API が存在しないため、
+//! プロセス異常終了時にコアダンプへ機密情報が残留することを防ぐには、
+//! プロセス起動時または初期化時に `libc::setrlimit(libc::RLIMIT_CORE, &rlim)` で
+//! コアダンプ上限サイズをゼロ (`rlim_cur = 0`, `rlim_max = 0`) に設定する等のプロセスレベルの防御が必要となる。
 //!
 //! ## ページ独立性に関する設計上の注意
 //! Linux等のPOSIX環境において、`libc::mlock` および `libc::munlock` はシステムページ単位で動作し、
@@ -37,9 +45,14 @@ enum BufferStorage<const N: usize> {
 /// 破棄時(`Drop`)には内部メモリを即座にゼロ消去した上で `libc::munlock` および `libc::munmap` を実行する。
 /// そのため、あるインスタンスの破棄が他の [`LockedBuffer`] のメモリロックを早期解除することはない。
 ///
-/// # リソース消費に関する注意
+/// # リソース消費およびコアダンプ抑止に関する注意
 /// 各インスタンスは独立性を保証するため、最低1システムページ(通常4 KiB〜16 KiB)の仮想メモリと
 /// `RLIMIT_MEMLOCK` クォータを消費する。DEKやKEKなど、少数の極小暗号鍵専用として使用すること。
+///
+/// Linux/Android/FreeBSD では `madvise` により対象ページがコアダンプから除外されるが、
+/// macOS では個別メモリ領域のダンプ抑止フラグが存在しないため、
+/// プロセス側で `RLIMIT_CORE = 0` を設定してコアダンプ生成自体を無効化する必要がある。
+///
 /// 非特権環境等で `mlock` に失敗してフォールバック生成された場合(`is_locked() == false`)は、
 /// 通常ヒープへ格納され、破棄時に `munlock` は実行されない。
 pub struct LockedBuffer<const N: usize> {
@@ -57,7 +70,8 @@ impl<const N: usize> LockedBuffer<N> {
     /// 新しい [`LockedBuffer`] を生成し、メモリロック保護を適用する。
     ///
     /// 非特権環境やリソース制限によりメモリロックに失敗した場合は、
-    /// 標準エラー出力へ警告を出力した上でアンロック状態のセキュアバッファとしてフォールバック生成する。
+    /// アンロック状態のセキュアバッファとしてフォールバック生成する(呼び出し側で [`Self::is_locked`] を検査可能)。
+    /// メモリロック失敗を許容しない場合は [`Self::new_strict`] を使用すること。
     ///
     /// # 注意
     /// 値渡しされた引数配列の内部バッファは生成処理完了時にゼロ消去されるが、
@@ -75,7 +89,8 @@ impl<const N: usize> LockedBuffer<N> {
     ///
     /// 呼び出し元のスタック上に平文秘密情報が残留することを構造的に防止する。
     /// 非特権環境やリソース制限によりメモリロックに失敗した場合は、
-    /// 標準エラー出力へ警告を出力した上でアンロック状態のセキュアバッファとしてフォールバック生成する。
+    /// アンロック状態のセキュアバッファとしてフォールバック生成する(呼び出し側で [`Self::is_locked`] を検査可能)。
+    /// メモリロック失敗を許容しない場合は [`Self::try_from_consumed_secret`] を使用すること。
     #[must_use]
     pub fn from_consumed_secret(secret: &mut SecretBytes<N>) -> Self {
         secret.consume_with(|bytes| {
@@ -91,14 +106,7 @@ impl<const N: usize> LockedBuffer<N> {
                     storage,
                     locked: true,
                 },
-                Err(errno) => {
-                    #[cfg(feature = "std")]
-                    std::eprintln!(
-                        "[WARN] fidelogic-core: mlock failed with errno {errno}. Falling back to unlocked secure buffer."
-                    );
-                    #[cfg(not(feature = "std"))]
-                    let _ = errno;
-
+                Err(_errno) => {
                     let inner = Box::new(SecretBytes::new(*bytes));
                     Self {
                         storage: BufferStorage::HeapFallback(inner),
@@ -330,6 +338,12 @@ impl<const N: usize> LockedBuffer<N> {
     }
 
     /// 指定されたページアライン済みメモリ領域に対して `mlock` および `madvise` を適用する。
+    ///
+    /// # コアダンプ抑止のプラットフォーム差異
+    /// - Linux/Android: `libc::MADV_DONTDUMP` を適用し、コアダンプから除外する。
+    /// - FreeBSD: `libc::MADV_NOCORE` を適用し、コアダンプから除外する。
+    /// - macOS (Darwin): メモリ領域単位でのダンプ抑止フラグが存在しないため、
+    ///   プロセス側で `RLIMIT_CORE = 0` を設定する等の併用が必要となる。
     #[allow(unused_variables)]
     fn apply_lock(ptr: *mut u8, len: usize) -> Result<(), i32> {
         if len == 0 {
