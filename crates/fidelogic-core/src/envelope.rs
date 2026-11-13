@@ -12,6 +12,8 @@
 //! - [`VaultEngine::is_safe_state`] ⇄ `EnvelopeFsm.SafeState` / `safe_stateb`
 //! - [`VaultEngine::observe_dek`] ⇄ `EnvelopeFsm.observe_dek`
 
+use core::mem::ManuallyDrop;
+
 use crate::cipher::KEY_LEN;
 use crate::error::VaultError;
 use crate::kdf::Argon2Params;
@@ -285,14 +287,17 @@ pub enum VaultEvent {
 ///
 /// ## 不変条件 (`SafeState`)
 /// - `state` が [`VaultState::Locked`], [`VaultState::Unlocking`], [`VaultState::Zeroized`] の間、
-///   内部の平文DEKバッファ (`dek`) は常に `None` に保たれる。
+///   内部の平文DEKバッファ (`dek`) は未初期化とみなされ、物理メモリ上はすべてゼロ消去状態に保たれる。
 /// - `state` が [`VaultState::Unlocked`] の間のみ、有効な [`SecretBytes<DEK_LEN>`] を保持する。
+/// - [`ManuallyDrop`] による透明なバッファ管理を採用し、`Option` の判別タグ領域に対する
+///   `unsafe` な生ゼロ書き込みを排除することで未定義動作 (UB) を回避しつつ、
+///   ゼロコストで安全なインプレース消去を実現する。
 /// - 施錠, ゼロ消去, 失敗時の破棄, インスタンス破棄 (`Drop`) の各処理では、
 ///   `volatile_zeroize` によるインプレース揮発性ゼロ書き込みとコンパイラフェンスを実行し、
 ///   Dead Store Elimination (DSE) による消去命令の除去を防止する。
 pub struct VaultEngine {
     state: VaultState,
-    dek: Option<SecretBytes<DEK_LEN>>,
+    dek: ManuallyDrop<SecretBytes<DEK_LEN>>,
     slots: KekSlots,
     dummy_argon2_params: Argon2Params,
 }
@@ -300,14 +305,14 @@ pub struct VaultEngine {
 impl VaultEngine {
     /// 指定されたKEKスロット構成で、施錠状態の新しい [`VaultEngine`] を生成する。
     ///
-    /// 初期状態は [`VaultState::Locked`] かつ平文DEKは `None` であり、
+    /// 初期状態は [`VaultState::Locked`] かつ平文DEKはゼロクリアされており、
     /// `SafeState` 不変条件を常に満たす。
     #[inline]
     #[must_use]
     pub const fn new(slots: KekSlots) -> Self {
         Self {
             state: VaultState::Locked,
-            dek: None,
+            dek: ManuallyDrop::new(SecretBytes::zero()),
             slots,
             dummy_argon2_params: Argon2Params::default_for_target(),
         }
@@ -392,14 +397,17 @@ impl VaultEngine {
     /// 現在のマシン状態が安全述語 `SafeState` を満たしているかを検証する。
     ///
     /// `EnvelopeFsm.v` の `safe_stateb` に対応し、
-    /// 非解錠状態 (`Locked`, `Unlocking`, `Zeroized`) で平文DEKが `None` であること、
-    /// 解錠状態 (`Unlocked`) で平文DEKが保持されていることを確認する。
+    /// `self.state == VaultState::Unlocked` のときのみ初期化済みとみなし、
+    /// 非解錠状態 (`Locked`, `Unlocking`, `Zeroized`) では平文DEKバッファが
+    /// 物理メモリ上で完全にゼロ消去されていることを確認する。
     #[inline]
     #[must_use]
-    pub const fn is_safe_state(&self) -> bool {
+    pub fn is_safe_state(&self) -> bool {
         match self.state {
-            VaultState::Locked | VaultState::Unlocking | VaultState::Zeroized => self.dek.is_none(),
-            VaultState::Unlocked => self.dek.is_some(),
+            VaultState::Locked | VaultState::Unlocking | VaultState::Zeroized => {
+                self.dek.as_bytes().iter().all(|&b| b == 0)
+            }
+            VaultState::Unlocked => true,
         }
     }
 
@@ -410,9 +418,9 @@ impl VaultEngine {
     /// 非解錠状態では常に `None` を返す。
     #[inline]
     #[must_use]
-    pub const fn observe_dek(&self) -> Option<&SecretBytes<DEK_LEN>> {
+    pub fn observe_dek(&self) -> Option<&SecretBytes<DEK_LEN>> {
         match self.state {
-            VaultState::Unlocked => self.dek.as_ref(),
+            VaultState::Unlocked => Some(&self.dek),
             VaultState::Locked | VaultState::Unlocking | VaultState::Zeroized => None,
         }
     }
@@ -460,24 +468,14 @@ impl VaultEngine {
         }
     }
 
-    /// 内部の平文DEKバッファをインプレースで揮発性ゼロクリアし、`None` へリセットする。
+    /// 内部の平文DEKバッファをインプレースで揮発性ゼロクリアする。
     ///
-    /// `Option::take` によるスタック上の鍵バイト複製を防ぎ、
-    /// 既存のバッファ領域そのものに対して `volatile_zeroize` を適用してから破棄する。
+    /// [`ManuallyDrop`] により `Option` の判別タグ領域やスタックコピーが存在せず、
+    /// `unsafe` なタグ破壊ゼロ書き込みを排除して、既存のバッファ領域そのものに対して
+    /// 安全に `volatile_zeroize` を適用する。
     #[inline]
     fn scrub_dek_in_place(&mut self) {
-        if let Some(ref mut dek) = self.dek {
-            volatile_zeroize(dek.as_mut_slice());
-        }
-        self.dek = None;
-        // SAFETY: `Option<SecretBytes<DEK_LEN>>` は niche 最適化を持たず、
-        // 判別タグ `0` は `None` を表す。`self.dek = None` の代入に伴うスタック残骸の
-        // ペイロード上書きコピーを防ぎ、バッキングメモリ領域全体を確実にゼロ消去する。
-        unsafe {
-            let ptr = core::ptr::addr_of_mut!(self.dek).cast::<u8>();
-            let len = core::mem::size_of::<Option<SecretBytes<DEK_LEN>>>();
-            crate::zeroize::volatile_zeroize_raw(ptr, len);
-        }
+        volatile_zeroize(self.dek.as_mut_slice());
     }
 
     /// 解錠処理を開始し、`Locked` から `Unlocking` へ遷移する (`StepStartUnlock`)。
@@ -518,7 +516,7 @@ impl VaultEngine {
         }
 
         self.scrub_dek_in_place();
-        self.dek = Some(dek);
+        self.dek = ManuallyDrop::new(dek);
         self.state = VaultState::Unlocked;
         Ok(())
     }
@@ -606,7 +604,7 @@ impl core::fmt::Debug for VaultEngine {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("VaultEngine")
             .field("state", &self.state)
-            .field("has_dek", &self.dek.is_some())
+            .field("has_dek", &(self.state == VaultState::Unlocked))
             .field("slots", &self.slots)
             .finish()
     }
