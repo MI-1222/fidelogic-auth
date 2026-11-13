@@ -1,6 +1,6 @@
 [package]
 name = "fidelogic-core"
-description = "Core cryptographic and authentication engine for fidelogic-auth"
+description = "Core cryptographic and vault engine for fidelogic-vault"
 version = "0.1.0"
 edition = "2024"
 
