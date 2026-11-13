@@ -327,14 +327,7 @@ impl<const N: usize> LockedBuffer<N> {
     /// 直近のOSエラー番号を取得する。
     #[cfg(unix)]
     fn last_os_errno() -> i32 {
-        #[cfg(feature = "std")]
-        {
-            std::io::Error::last_os_error().raw_os_error().unwrap_or(-1)
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            -1
-        }
+        std::io::Error::last_os_error().raw_os_error().unwrap_or(-1)
     }
 
     /// 指定されたページアライン済みメモリ領域に対して `mlock` および `madvise` を適用する。
