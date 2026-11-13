@@ -1517,6 +1517,7 @@ fn dummy_unwrap_slot2_code_traced(vault_aad: &[u8], trace: &mut SlotEvalTrace) {
 }
 
 /// ダミー暗号演算パイプラインの実行回数記録。
+#[cfg(any(test, feature = "test-hooks"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DummySlotEvalSummary {
     /// 実行されたダミー Argon2id 演算回数。
@@ -1532,6 +1533,7 @@ pub struct DummySlotEvalSummary {
 /// コンパイラ最適化によるダミー暗号演算呼び出しの除去 (DCE) を防ぐため、
 /// ダミー Argon2id, HKDF-SHA256, AEAD 復号演算を明示的に呼び出し、
 /// その実行回数サマリを返す。
+#[cfg(any(test, feature = "test-hooks"))]
 #[doc(hidden)]
 pub fn run_dummy_slot_eval_for_inspection(vault_aad: &[u8]) -> DummySlotEvalSummary {
     let mut trace = SlotEvalTrace::default();

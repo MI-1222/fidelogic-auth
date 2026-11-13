@@ -27,6 +27,8 @@ memlock = ["std", "dep:libc"]
 parallel = ["std"]
 # test-hooks: 統合テスト向けに内部暗号化・KDF欠陥注入フックを公開するテスト専用フィーチャー。
 test-hooks = []
+# ci-inspection: CI検査用スタブ・フックを公開するフィーチャー。
+ci-inspection = ["test-hooks"]
 
 [dependencies]
 aes = { workspace = true, features = ["zeroize"], optional = true }
