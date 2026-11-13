@@ -517,8 +517,8 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_deserialize(bytes_ptr: *const u8, 
         _ => return WasmStatusCode::InvalidPointer.as_u32(),
     };
     match fidelogic_core::tlv::deserialize(bytes) {
-        Ok((_vault, _)) => WasmStatusCode::Success.as_u32(),
-        Err(_) => WasmStatusCode::ExecutionFailed.as_u32(),
+        Ok((_vault, [])) => WasmStatusCode::Success.as_u32(),
+        _ => WasmStatusCode::ExecutionFailed.as_u32(),
     }
 }
 
@@ -1222,6 +1222,16 @@ mod tests {
         unsafe {
             let res = fidelogic_wasm_vault_deserialize(header.as_ptr(), header.len());
             assert_eq!(res, 0, "Vaultデシリアライズに成功。");
+
+            // 未消費残余バイト(trailing garbage)が存在する場合はエラーコード3を返却することを検証。
+            let mut trailing_garbage = header.to_vec();
+            trailing_garbage.push(0xFF);
+            let garbage_res =
+                fidelogic_wasm_vault_deserialize(trailing_garbage.as_ptr(), trailing_garbage.len());
+            assert_eq!(
+                garbage_res, 3,
+                "未消費残余バイトが存在する場合はエラーコード3を返却。"
+            );
 
             let null_res = fidelogic_wasm_vault_deserialize(core::ptr::null(), header.len());
             assert_eq!(null_res, 1, "NULLポインタ指定時に引数エラー1を返却。");
