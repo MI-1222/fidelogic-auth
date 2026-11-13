@@ -95,6 +95,22 @@ unsafe fn slice_from_raw_parts_mut_checked<'a>(
     }
 }
 
+/// 2つのメモリ領域 `[a_ptr, a_ptr + a_len)` と `[b_ptr, b_ptr + b_len)` が重複しているかを検証する。
+///
+/// どちらかの長さが 0 の場合はアクセスが発生しないため重複なし(`false`)と判定する。
+/// アドレス計算には [`usize::saturating_add`] を用い、オーバーフローによる未定義動作を抑止する。
+#[inline]
+fn ranges_overlap(a_ptr: *const u8, a_len: usize, b_ptr: *const u8, b_len: usize) -> bool {
+    if a_len == 0 || b_len == 0 {
+        return false;
+    }
+    let a_start = a_ptr as usize;
+    let b_start = b_ptr as usize;
+    let a_end = a_start.saturating_add(a_len);
+    let b_end = b_start.saturating_add(b_len);
+    a_start < b_end && b_start < a_end
+}
+
 /// 現在リンクされているコアエンジンのプロファイルステータスコードを取得する。
 ///
 /// 外部C ABIからも直接呼び出し可能なインターフェース骨格。
@@ -208,6 +224,11 @@ pub unsafe extern "C" fn fidelogic_wasm_x25519_dh(
     if secret_key_ptr.is_null() || public_key_ptr.is_null() || out_shared_ptr.is_null() {
         return WasmStatusCode::InvalidPointer.as_u32();
     }
+    if ranges_overlap(secret_key_ptr, 32, out_shared_ptr, 32)
+        || ranges_overlap(public_key_ptr, 32, out_shared_ptr, 32)
+    {
+        return WasmStatusCode::InvalidPointer.as_u32();
+    }
     let key_arr = unsafe { &*(secret_key_ptr as *const [u8; 32]) };
     let secret = fidelogic_core::SecretBytes::new(*key_arr);
     let public_arr = unsafe { &*(public_key_ptr as *const [u8; 32]) };
@@ -243,6 +264,12 @@ pub unsafe extern "C" fn fidelogic_wasm_kdf_derive_key(
     out_ptr: *mut u8,
     out_len: usize,
 ) -> u32 {
+    if ranges_overlap(password_ptr, password_len, out_ptr, out_len)
+        || ranges_overlap(salt_ptr, salt_len, out_ptr, out_len)
+    {
+        return WasmStatusCode::InvalidPointer.as_u32();
+    }
+
     let password = match unsafe { slice_from_raw_parts_checked(password_ptr, password_len) } {
         Ok(s) => s,
         Err(code) => return code.as_u32(),
@@ -309,6 +336,12 @@ unsafe fn parse_vault_params<'a>(
     if key_ptr.is_null() || nonce_ptr.is_null() {
         return Err(WasmStatusCode::InvalidPointer);
     }
+    if ranges_overlap(key_ptr, fidelogic_core::KEY_LEN, data_ptr, data_len)
+        || ranges_overlap(nonce_ptr, nonce_len, data_ptr, data_len)
+        || ranges_overlap(aad_ptr, aad_len, data_ptr, data_len)
+    {
+        return Err(WasmStatusCode::InvalidPointer);
+    }
     let suite = fidelogic_core::CipherSuiteId::from_u8(suite_id)
         .map_err(|_| WasmStatusCode::InvalidParameter)?;
     let key = unsafe { &*(key_ptr as *const [u8; fidelogic_core::KEY_LEN]) };
@@ -344,6 +377,17 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_encrypt(
     tag_out_ptr: *mut u8,
 ) -> u32 {
     if tag_out_ptr.is_null() {
+        return WasmStatusCode::InvalidPointer.as_u32();
+    }
+    if ranges_overlap(
+        key_ptr,
+        fidelogic_core::KEY_LEN,
+        tag_out_ptr,
+        fidelogic_core::TAG_LEN,
+    ) || ranges_overlap(nonce_ptr, nonce_len, tag_out_ptr, fidelogic_core::TAG_LEN)
+        || ranges_overlap(aad_ptr, aad_len, tag_out_ptr, fidelogic_core::TAG_LEN)
+        || ranges_overlap(data_ptr, data_len, tag_out_ptr, fidelogic_core::TAG_LEN)
+    {
         return WasmStatusCode::InvalidPointer.as_u32();
     }
     let params = match unsafe {
@@ -387,6 +431,9 @@ pub unsafe extern "C" fn fidelogic_wasm_vault_decrypt(
     tag_ptr: *const u8,
 ) -> u32 {
     if tag_ptr.is_null() {
+        return WasmStatusCode::InvalidPointer.as_u32();
+    }
+    if ranges_overlap(tag_ptr, fidelogic_core::TAG_LEN, data_ptr, data_len) {
         return WasmStatusCode::InvalidPointer.as_u32();
     }
     let params = match unsafe {
@@ -1050,6 +1097,205 @@ mod tests {
             fidelogic_wasm_zeroize_test(core::ptr::null_mut(), 16);
             fidelogic_wasm_zeroize_test(buf.as_mut_ptr(), 0);
             fidelogic_wasm_zeroize_test(buf.as_mut_ptr(), usize::MAX);
+        }
+    }
+
+    #[test]
+    fn test_ranges_overlap() {
+        let buf = [0u8; 64];
+        let p = buf.as_ptr();
+
+        // 完全に分離している区間
+        assert!(
+            !ranges_overlap(p, 10, unsafe { p.add(10) }, 10),
+            "隣接する区間は重複なし。"
+        );
+        assert!(
+            !ranges_overlap(p, 10, unsafe { p.add(20) }, 10),
+            "離れた区間は重複なし。"
+        );
+
+        // 一部重複している区間
+        assert!(
+            ranges_overlap(p, 15, unsafe { p.add(10) }, 10),
+            "前方と後方が一部重複。"
+        );
+        assert!(
+            ranges_overlap(unsafe { p.add(10) }, 10, p, 15),
+            "後方と前方が一部重複。"
+        );
+
+        // 包含関係にある区間
+        assert!(
+            ranges_overlap(p, 30, unsafe { p.add(10) }, 10),
+            "包含関係にある区間の重複検出。"
+        );
+        assert!(
+            ranges_overlap(unsafe { p.add(10) }, 10, p, 30),
+            "被包含関係にある区間の重複検出。"
+        );
+
+        // 同一区間
+        assert!(
+            ranges_overlap(p, 10, p, 10),
+            "完全に同一のアドレス・長さでの重複検出。"
+        );
+
+        // 長さ0の場合は重複しない
+        assert!(!ranges_overlap(p, 0, p, 10), "長さ0の区間は重複なし。");
+        assert!(!ranges_overlap(p, 10, p, 0), "長さ0の区間は重複なし。");
+        assert!(!ranges_overlap(p, 0, p, 0), "両方長さ0の区間は重複なし。");
+
+        // saturating_add によるオーバーフロー耐性
+        assert!(
+            !ranges_overlap(p, 10, (usize::MAX - 5) as *const u8, 10),
+            "usize::MAX境界付近の区間でもパニックせず重複なしを判定。"
+        );
+    }
+
+    #[cfg(any(feature = "profile-lite", feature = "profile-vault"))]
+    #[test]
+    fn test_x25519_dh_aliasing() {
+        let priv_a = [0x01u8; 32];
+        let pub_b =
+            fidelogic_core::x25519_basepoint_mul(&fidelogic_core::SecretBytes::new([0x02u8; 32]));
+        let mut shared = [0u8; 32];
+
+        unsafe {
+            // secret_key と out_shared が重複している場合
+            let res_secret_overlap = fidelogic_wasm_x25519_dh(
+                shared.as_ptr(),
+                pub_b.as_bytes().as_ptr(),
+                shared.as_mut_ptr(),
+            );
+            assert_eq!(
+                res_secret_overlap, 1,
+                "秘密鍵と出力領域が重複している場合はエラーコード1を返却。"
+            );
+
+            // public_key と out_shared が重複している場合
+            let res_public_overlap =
+                fidelogic_wasm_x25519_dh(priv_a.as_ptr(), shared.as_ptr(), shared.as_mut_ptr());
+            assert_eq!(
+                res_public_overlap, 1,
+                "公開鍵と出力領域が重複している場合はエラーコード1を返却。"
+            );
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_kdf_derive_key_aliasing() {
+        let mut buf = [0x42u8; 64];
+
+        unsafe {
+            // password と out が重複している場合
+            let res_pw = fidelogic_wasm_kdf_derive_key(
+                buf.as_ptr(),
+                32,
+                buf.as_ptr().add(48),
+                16,
+                buf.as_mut_ptr().add(16),
+                32,
+            );
+            assert_eq!(
+                res_pw, 1,
+                "パスワードと出力領域が重複している場合はエラーコード1を返却。"
+            );
+
+            // salt と out が重複している場合
+            let res_salt = fidelogic_wasm_kdf_derive_key(
+                buf.as_ptr(),
+                16,
+                buf.as_ptr().add(20),
+                16,
+                buf.as_mut_ptr().add(16),
+                32,
+            );
+            assert_eq!(
+                res_salt, 1,
+                "ソルトと出力領域が重複している場合はエラーコード1を返却。"
+            );
+        }
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_vault_encrypt_decrypt_aliasing() {
+        let key = [0x42u8; 32];
+        let nonce = [0x24u8; 24];
+        let aad = b"test-aad";
+        let mut buffer = b"test-data-payload-longer-chunk".to_vec();
+        let mut tag = [0u8; 16];
+
+        unsafe {
+            // encrypt: data と key の重複
+            let res_key_overlap = fidelogic_wasm_vault_encrypt(
+                1,
+                buffer.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                tag.as_mut_ptr(),
+            );
+            assert_eq!(
+                res_key_overlap, 1,
+                "データ領域と鍵領域が重複している暗号化はエラーコード1を返却。"
+            );
+
+            // encrypt: data と nonce の重複
+            let res_nonce_overlap = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                buffer.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                tag.as_mut_ptr(),
+            );
+            assert_eq!(
+                res_nonce_overlap, 1,
+                "データ領域とノンス領域が重複している暗号化はエラーコード1を返却。"
+            );
+
+            // encrypt: tag_out と data の重複
+            let res_tag_data_overlap = fidelogic_wasm_vault_encrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                buffer.as_mut_ptr(),
+            );
+            assert_eq!(
+                res_tag_data_overlap, 1,
+                "データ領域と出力タグ領域が重複している暗号化はエラーコード1を返却。"
+            );
+
+            // decrypt: data と tag の重複
+            let res_dec_tag_overlap = fidelogic_wasm_vault_decrypt(
+                1,
+                key.as_ptr(),
+                nonce.as_ptr(),
+                nonce.len(),
+                aad.as_ptr(),
+                aad.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                buffer.as_ptr(),
+            );
+            assert_eq!(
+                res_dec_tag_overlap, 1,
+                "データ領域とタグ領域が重複している復号はエラーコード1を返却。"
+            );
         }
     }
 }
