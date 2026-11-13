@@ -396,7 +396,7 @@ where
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let (lower, upper) = self.iter.size_hint();
-        let min = (self.len + lower).div_ceil(3);
+        let min = self.len.saturating_add(lower).div_ceil(3);
         let max = upper.map(|u| u.saturating_add(self.len));
         (min, max)
     }
@@ -1105,6 +1105,23 @@ mod tests {
         // 3 要素 (合成ペア + 非合成マーク: 1文字合成 + 1文字残余) の検証。
         let dia_plus: Vec<u32> = PrecisNfcIter::new([0x0041, 0x0308, 0x0301].into_iter()).collect();
         assert_eq!(dia_plus, [0x00C4, 0x0301]);
+
+        // lower/upper が極大値の場合の飽和加算・オーバーフロー耐性の検証。
+        struct MaxSizeHintIter;
+        impl Iterator for MaxSizeHintIter {
+            type Item = u32;
+            fn next(&mut self) -> Option<Self::Item> {
+                None
+            }
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                (usize::MAX, Some(usize::MAX))
+            }
+        }
+        let mut max_iter = PrecisNfcIter::new(MaxSizeHintIter);
+        max_iter.len = 2;
+        let (min, max) = max_iter.size_hint();
+        assert_eq!(min, usize::MAX.div_ceil(3));
+        assert_eq!(max, Some(usize::MAX));
     }
 
     #[test]
