@@ -898,8 +898,9 @@ mod vault_memory_hygiene_tests {
         .as_bytes();
 
         // 1. Slot 0 ラップ/アンラップの正常終了とエラー返却時メモリ衛生。
+        // AAD はゼロアロケーション化 (スタック完結) されているため、unwrapped (Box) 破棄の 1 回のみヒープ解放が発生する。
         let slot0_entry =
-            run_with_heap_leak_check(&[&DEK_SENTINEL, &kek0, password, pepper], 2, || {
+            run_with_heap_leak_check(&[&DEK_SENTINEL, &kek0, password, pepper], 1, || {
                 let entry = wrap_dek_slot0_with_secret(
                     &dek,
                     password,
@@ -932,7 +933,8 @@ mod vault_memory_hygiene_tests {
         });
 
         // 2. Slot 1 ラップ/アンラップの正常終了とエラー返却時メモリ衛生。
-        let slot1_entry = run_with_heap_leak_check(&[&DEK_SENTINEL, &kek1, prf_secret], 2, || {
+        // AAD はゼロアロケーション化されているため、unwrapped (Box) 破棄の 1 回のみヒープ解放が発生する。
+        let slot1_entry = run_with_heap_leak_check(&[&DEK_SENTINEL, &kek1, prf_secret], 1, || {
             let entry = wrap_dek_slot1(&dek, prf_secret, &slot1_salt, &slot1_nonce, vault_aad)
                 .expect("Slot 1 DEK ラップに成功。");
             let unwrapped = core::hint::black_box(Box::new(
@@ -944,7 +946,8 @@ mod vault_memory_hygiene_tests {
             entry
         });
 
-        run_with_heap_leak_check(&[&DEK_SENTINEL, &kek1, prf_secret], 1, || {
+        // AAD ゼロアロケーション化により、失敗時のヒープ確保・解放は発生しない。
+        run_with_heap_leak_check(&[&DEK_SENTINEL, &kek1, prf_secret], 0, || {
             assert_eq!(
                 unwrap_dek_slot1(&slot1_entry, &[0x99u8; 32], vault_aad).err(),
                 Some(VaultError::Crypto(CryptoError::AeadDecryptionFailed))
@@ -956,8 +959,9 @@ mod vault_memory_hygiene_tests {
         });
 
         // 3. Slot 2 (正準化付きリカバリーコード) の正常終了・エラー返却時メモリ衛生。
+        // AAD ゼロアロケーション化により、AAD 由来のヒープ確保が削減される。
         let slot2_entry =
-            run_with_heap_leak_check(&[&DEK_SENTINEL, &kek2, recovery_code_canonical], 4, || {
+            run_with_heap_leak_check(&[&DEK_SENTINEL, &kek2, recovery_code_canonical], 3, || {
                 let entry = wrap_dek_slot2_code(
                     &dek,
                     recovery_code_formatted,
@@ -992,7 +996,8 @@ mod vault_memory_hygiene_tests {
                 short_canonical,
                 wrong_canonical,
             ],
-            5,
+            // AAD ゼロアロケーション化により、AAD 関連のヒープ確保が削減される。
+            3,
             || {
                 assert_eq!(
                     normalize_recovery_code(partial_bad_code).err(),
@@ -1096,7 +1101,8 @@ mod vault_memory_hygiene_tests {
             ];
 
             // シナリオ A: 解錠 -> レコード暗号化・復号 -> lock() -> Box<VaultEngine> 破棄。
-            run_with_heap_leak_check(&watched_patterns, 4, || {
+            // AAD ゼロアロケーション化により、解錠時のヒープ確保が削減される (new_ct, decrypted, engine 破棄の計 3 回)。
+            run_with_heap_leak_check(&watched_patterns, 3, || {
                 let mut engine = Box::new(
                     VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(params),
                 );
@@ -1130,7 +1136,8 @@ mod vault_memory_hygiene_tests {
             });
 
             // シナリオ B: 多重化解錠(unlock_vault_with_any + ダミー演算含む) -> zeroize_key() -> 破棄。
-            run_with_heap_leak_check(&watched_patterns, 4, || {
+            // AAD ゼロアロケーション化により、多重解錠・ダミー評価時のヒープ確保が削減される。
+            run_with_heap_leak_check(&watched_patterns, 3, || {
                 let mut engine = Box::new(
                     VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(params),
                 );
@@ -1152,7 +1159,8 @@ mod vault_memory_hygiene_tests {
             });
 
             // シナリオ C: 解錠状態のまま lock() せず Box<VaultEngine> を Drop(RAII フェイルセーフ消去)。
-            run_with_heap_leak_check(&watched_patterns, 4, || {
+            // AAD ゼロアロケーション化により、スロット評価時のヒープ確保が削減される。
+            run_with_heap_leak_check(&watched_patterns, 3, || {
                 let mut engine = Box::new(
                     VaultEngine::from_slot_entries(&vault.slots).with_dummy_argon2_params(params),
                 );

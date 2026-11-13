@@ -31,7 +31,7 @@ use crate::envelope::{
 };
 use crate::error::{CryptoError, TlvParseError, VaultError};
 use crate::kdf::{Argon2Params, hkdf_sha256_derive_32};
-use crate::tlv::{KekSlotEntry, Vault, VaultHeader};
+use crate::tlv::{KekSlotEntry, VAULT_HEADER_LEN, Vault, VaultHeader};
 use crate::zeroize::{SecretBytes, SecretVec, volatile_zeroize};
 
 /// Slot 0 (Argon2id マスターパスワード) の KDF 種別識別子。
@@ -603,19 +603,123 @@ fn checked_aad_len(fixed_len: usize, vault_aad: &[u8]) -> Result<usize, CryptoEr
     Ok(total_len)
 }
 
+/// Slot 0 (Argon2id) のスタック AAD バッファ容量 (64バイト)。
+///
+/// 固定ヘッダー長 ([`SLOT0_AAD_FIXED_LEN`] = 48B) と通常の Vault ヘッダー AAD
+/// ([`VAULT_HEADER_LEN`] = 14B) の合計 62 バイトをスタック上で完全収容する。
+const SLOT0_AAD_STACK_CAP: usize = 64;
+
+/// Slot 1 / Slot 2 (HKDF-SHA256) のスタック AAD バッファ容量 (68バイト)。
+///
+/// 固定ヘッダー長 ([`HKDF_SLOT_AAD_FIXED_LEN`] = 52B) と通常の Vault ヘッダー AAD
+/// ([`VAULT_HEADER_LEN`] = 14B) の合計 66 バイトをスタック上で完全収容する。
+const HKDF_SLOT_AAD_STACK_CAP: usize = 68;
+
+const _: () = assert!(SLOT0_AAD_STACK_CAP >= SLOT0_AAD_FIXED_LEN + VAULT_HEADER_LEN);
+const _: () = assert!(HKDF_SLOT_AAD_STACK_CAP >= HKDF_SLOT_AAD_FIXED_LEN + VAULT_HEADER_LEN);
+
+/// Slot 0 の AAD バッファ型。
+type Slot0AadBuffer = AadBuffer<SLOT0_AAD_STACK_CAP>;
+
+/// Slot 1 / Slot 2 の AAD バッファ型。
+type HkdfSlotAadBuffer = AadBuffer<HKDF_SLOT_AAD_STACK_CAP>;
+
+/// AEAD 関連データ (AAD) 構築用のゼロアロケーション指向バッファ。
+///
+/// 通常時はスタック上の固定長配列バッファを使用し、指定された `total_len` が
+/// `STACK_CAP` を超過する場合のみヒープ ([`alloc::vec::Vec`]) にフォールバックする。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AadBuffer<const STACK_CAP: usize> {
+    Stack { buf: [u8; STACK_CAP], len: usize },
+    Heap(alloc::vec::Vec<u8>),
+}
+
+impl<const STACK_CAP: usize> AadBuffer<STACK_CAP> {
+    #[inline]
+    fn new(total_len: usize) -> Self {
+        if total_len <= STACK_CAP {
+            Self::Stack {
+                buf: [0u8; STACK_CAP],
+                len: 0,
+            }
+        } else {
+            Self::Heap(alloc::vec::Vec::with_capacity(total_len))
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, byte: u8) {
+        match self {
+            Self::Stack { buf, len } => {
+                buf[*len] = byte;
+                *len += 1;
+            }
+            Self::Heap(vec) => vec.push(byte),
+        }
+    }
+
+    #[inline]
+    fn extend_from_slice(&mut self, data: &[u8]) {
+        match self {
+            Self::Stack { buf, len } => {
+                let end = *len + data.len();
+                buf[*len..end].copy_from_slice(data);
+                *len = end;
+            }
+            Self::Heap(vec) => vec.extend_from_slice(data),
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Stack { buf, len } => &buf[..*len],
+            Self::Heap(vec) => vec.as_slice(),
+        }
+    }
+
+    #[cfg(test)]
+    #[inline]
+    #[must_use]
+    pub(crate) const fn is_stack(&self) -> bool {
+        match self {
+            Self::Stack { .. } => true,
+            Self::Heap(_) => false,
+        }
+    }
+}
+
+impl<const STACK_CAP: usize> Default for AadBuffer<STACK_CAP> {
+    #[inline]
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<const STACK_CAP: usize> core::ops::Deref for AadBuffer<STACK_CAP> {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
 /// Slot 0 の暗号化および復号に用いる AEAD 関連データ (AAD) を構築する。
 ///
 /// ドメイン分離プレフィックス, スロット識別子, KDF 種別, Argon2id パラメータ,
 /// ソルト, 呼び出し元が指定した `vault_aad` (通常は [`VaultHeader::associated_data`]) を結合し、
 /// パラメータのダウングレード攻撃やヘッダーとスロットの間のすり替えを検知する。
+/// 通常時はスタックバッファ ([`Slot0AadBuffer`]) 内でゼロアロケーションにて構築される。
 fn build_slot0_aad(
     params: &Argon2Params,
     salt: &[u8; SLOT0_SALT_LEN],
     vault_aad: &[u8],
-) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+) -> Result<Slot0AadBuffer, CryptoError> {
     let total_len = checked_aad_len(SLOT0_AAD_FIXED_LEN, vault_aad)?;
 
-    let mut aad = alloc::vec::Vec::with_capacity(total_len);
+    let mut aad = Slot0AadBuffer::new(total_len);
     aad.extend_from_slice(SLOT0_AAD_PREFIX);
     aad.push(SLOT_ID_ARGON2ID);
     aad.push(KDF_KIND_ARGON2ID);
@@ -820,14 +924,15 @@ pub fn is_valid_slot0_entry(entry: &KekSlotEntry) -> bool {
 }
 
 /// Slot 1 および Slot 2 に共通する HKDF スロット用 AEAD 関連データ (AAD) を構築する。
+/// 通常時はスタックバッファ ([`HkdfSlotAadBuffer`]) 内でゼロアロケーションにて構築される。
 fn build_hkdf_slot_aad(
     spec: &HkdfSlotSpec,
     salt: &[u8; SLOT1_SALT_LEN],
     vault_aad: &[u8],
-) -> Result<alloc::vec::Vec<u8>, CryptoError> {
+) -> Result<HkdfSlotAadBuffer, CryptoError> {
     let total_len = checked_aad_len(HKDF_SLOT_AAD_FIXED_LEN, vault_aad)?;
 
-    let mut aad = alloc::vec::Vec::with_capacity(total_len);
+    let mut aad = HkdfSlotAadBuffer::new(total_len);
     aad.extend_from_slice(spec.aad_prefix);
     aad.push(spec.slot_id);
     aad.push(spec.kdf_kind);
@@ -1354,7 +1459,7 @@ fn resolve_safe_slot0_aad(
     params: &Argon2Params,
     salt: &[u8; SLOT0_SALT_LEN],
     vault_aad: &[u8],
-) -> alloc::vec::Vec<u8> {
+) -> Slot0AadBuffer {
     match build_slot0_aad(params, salt, vault_aad) {
         Ok(aad) => aad,
         Err(_) => build_slot0_aad(params, salt, &[]).unwrap_or_default(),
@@ -1366,7 +1471,7 @@ fn resolve_safe_hkdf_aad(
     spec: &HkdfSlotSpec,
     salt: &[u8; SLOT1_SALT_LEN],
     vault_aad: &[u8],
-) -> alloc::vec::Vec<u8> {
+) -> HkdfSlotAadBuffer {
     match build_hkdf_slot_aad(spec, salt, vault_aad) {
         Ok(aad) => aad,
         Err(_) => build_hkdf_slot_aad(spec, salt, &[]).unwrap_or_default(),
@@ -4241,5 +4346,88 @@ mod tests {
             prop_assert!(engine_a.is_safe_state());
             prop_assert!(engine_b.is_safe_state());
         }
+    }
+
+    #[test]
+    fn test_aad_buffer_stack_and_heap_behavior() {
+        // スタック容量以下の場合はスタックバリアント。
+        let mut buf_stack: AadBuffer<16> = AadBuffer::new(10);
+        assert!(buf_stack.is_stack());
+        buf_stack.push(0x01);
+        buf_stack.extend_from_slice(&[0x02, 0x03, 0x04]);
+        assert_eq!(buf_stack.as_slice(), &[0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(&*buf_stack, &[0x01, 0x02, 0x03, 0x04]);
+
+        // スタック容量超過時はヒープバリアントへフォールバック。
+        let mut buf_heap: AadBuffer<16> = AadBuffer::new(20);
+        assert!(!buf_heap.is_stack());
+        buf_heap.push(0xAA);
+        buf_heap.extend_from_slice(&[0xBB, 0xCC]);
+        assert_eq!(buf_heap.as_slice(), &[0xAA, 0xBB, 0xCC]);
+
+        // デフォルト構築は空のスタックバリアント。
+        let default_buf: AadBuffer<16> = AadBuffer::default();
+        assert!(default_buf.is_stack());
+        assert!(default_buf.is_empty());
+    }
+
+    #[test]
+    fn test_slot0_aad_zero_allocation_and_fallback() {
+        let params = test_params();
+        let salt = test_salt();
+        let header = test_header();
+        let header_aad = header.associated_data();
+
+        // 通常の VaultHeader AAD (14B) バインド時はスタック完結 (ゼロアロケーション)。
+        let aad_normal = build_slot0_aad(&params, &salt, &header_aad).unwrap();
+        assert!(aad_normal.is_stack());
+        assert_eq!(aad_normal.len(), SLOT0_AAD_FIXED_LEN + VAULT_HEADER_LEN);
+        assert_eq!(aad_normal.len(), 62);
+        assert!(aad_normal.starts_with(SLOT0_AAD_PREFIX));
+        assert_eq!(aad_normal[18], SLOT_ID_ARGON2ID);
+        assert_eq!(aad_normal[19], KDF_KIND_ARGON2ID);
+        assert_eq!(&aad_normal[62 - VAULT_HEADER_LEN..], &header_aad);
+
+        // 空 AAD 時もスタック完結。
+        let aad_empty = build_slot0_aad(&params, &salt, &[]).unwrap();
+        assert!(aad_empty.is_stack());
+        assert_eq!(aad_empty.len(), SLOT0_AAD_FIXED_LEN);
+
+        // スタック上限 (64B) を超過する大規模 AAD ではヒープへフォールバック。
+        let large_aad = [0x77u8; 100];
+        let aad_large = build_slot0_aad(&params, &salt, &large_aad).unwrap();
+        assert!(!aad_large.is_stack());
+        assert_eq!(aad_large.len(), SLOT0_AAD_FIXED_LEN + 100);
+        assert_eq!(&aad_large[SLOT0_AAD_FIXED_LEN..], &large_aad);
+    }
+
+    #[test]
+    fn test_hkdf_slot_aad_zero_allocation_and_fallback() {
+        let spec = SLOT1_SPEC;
+        let salt = [0x42u8; SLOT1_SALT_LEN];
+        let header = test_header();
+        let header_aad = header.associated_data();
+
+        // 通常の VaultHeader AAD (14B) バインド時はスタック完結 (ゼロアロケーション)。
+        let aad_normal = build_hkdf_slot_aad(&spec, &salt, &header_aad).unwrap();
+        assert!(aad_normal.is_stack());
+        assert_eq!(aad_normal.len(), HKDF_SLOT_AAD_FIXED_LEN + VAULT_HEADER_LEN);
+        assert_eq!(aad_normal.len(), 66);
+        assert!(aad_normal.starts_with(spec.aad_prefix));
+        assert_eq!(aad_normal[18], spec.slot_id);
+        assert_eq!(aad_normal[19], spec.kdf_kind);
+        assert_eq!(&aad_normal[66 - VAULT_HEADER_LEN..], &header_aad);
+
+        // 空 AAD 時もスタック完結。
+        let aad_empty = build_hkdf_slot_aad(&spec, &salt, &[]).unwrap();
+        assert!(aad_empty.is_stack());
+        assert_eq!(aad_empty.len(), HKDF_SLOT_AAD_FIXED_LEN);
+
+        // スタック上限 (68B) を超過する大規模 AAD ではヒープへフォールバック。
+        let large_aad = [0x88u8; 100];
+        let aad_large = build_hkdf_slot_aad(&spec, &salt, &large_aad).unwrap();
+        assert!(!aad_large.is_stack());
+        assert_eq!(aad_large.len(), HKDF_SLOT_AAD_FIXED_LEN + 100);
+        assert_eq!(&aad_large[HKDF_SLOT_AAD_FIXED_LEN..], &large_aad);
     }
 }
