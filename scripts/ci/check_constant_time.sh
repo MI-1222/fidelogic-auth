@@ -201,38 +201,53 @@ if dec_func_id is not None:
             continue
         checked_tag_funcs.append(fid)
 
-        # loop ブロックごとに内部の分岐命令数を検査(先頭の反復継続判定 br_if 1件のみ許容).
+        # loop ブロックごとに内部の分岐命令数を検査(反復継続用の単一構造化分岐のみ許容).
+        # パターン1: 終端条件用 br_if 1件のみ
+        # パターン2: ガード条件用 if 1件のみ (内部で末尾 br によるループ先頭への反復ジャンプを伴う)
+        # 上記以外の追加の if / br_if / br_table による早期脱出を機械的に禁止する.
         loop_stack = []
         block_depth = 0
         barrier_in_loop = False
         for rel_idx, line in enumerate(f_lines):
             stripped = line.strip()
+            abs_line = start_line + rel_idx
             if re.match(r'^loop\b', stripped):
                 block_depth += 1
-                loop_stack.append((block_depth, start_line + rel_idx, [], False))
+                loop_stack.append({
+                    'depth': block_depth,
+                    'start': abs_line,
+                    'branches': [],
+                    'has_barrier': False,
+                    'has_loop_br': False,
+                })
             elif re.match(r'^(block|if)\b', stripped):
                 block_depth += 1
-                if re.match(r'^if\b', stripped) and loop_stack:
-                    loop_stack[-1][2].append((start_line + rel_idx, stripped, "if"))
+                if loop_stack:
+                    m_br = branch_pattern.match(stripped)
+                    if m_br:
+                        loop_stack[-1]['branches'].append((abs_line, stripped, m_br.group(1)))
             elif stripped == "end":
-                if loop_stack and loop_stack[-1][0] == block_depth:
-                    _, l_start, l_branches, has_barrier_call = loop_stack.pop()
-                    if has_barrier_call:
+                if loop_stack and loop_stack[-1]['depth'] == block_depth:
+                    loop_info = loop_stack.pop()
+                    if loop_info['has_barrier']:
                         barrier_in_loop = True
-                        # ループ内では終端条件用の br_if 1件のみ許容し、if / br_table や複数 br_if を禁止.
-                        non_br_if = [b for b in l_branches if b[2] != "br_if"]
-                        if non_br_if or len(l_branches) > 1:
-                            print(f"Error: [{profile}] fidelogic_wasm_vault_decrypt 配下のタグ照合関数 func {fid} (loop L{l_start}) に不正な分岐が検出されました: {l_branches}", file=sys.stderr)
+                        branches = loop_info['branches']
+                        is_single_br_if = len(branches) == 1 and branches[0][2] == "br_if"
+                        is_guard_if = len(branches) == 1 and branches[0][2] == "if" and loop_info['has_loop_br']
+                        if not (is_single_br_if or is_guard_if):
+                            print(f"Error: [{profile}] fidelogic_wasm_vault_decrypt 配下のタグ照合関数 func {fid} (loop L{loop_info['start']}) に不正な分岐が検出されました: {branches}", file=sys.stderr)
                             sys.exit(1)
                 block_depth -= 1
             else:
                 if loop_stack:
                     for m_call in call_pattern.finditer(line):
                         if m_call.group(1) in barrier_funcs:
-                            loop_stack[-1] = (loop_stack[-1][0], loop_stack[-1][1], loop_stack[-1][2], True)
+                            loop_stack[-1]['has_barrier'] = True
                     m_br = branch_pattern.search(line)
                     if m_br:
-                        loop_stack[-1][2].append((start_line + rel_idx, stripped, m_br.group(1)))
+                        loop_stack[-1]['branches'].append((abs_line, stripped, m_br.group(1)))
+                    if re.search(r'\bbr\s+\d+\b', line):
+                        loop_stack[-1]['has_loop_br'] = True
 
         # 完全アンロール展開等によりループ内にバリア呼び出しが存在しない場合の非ループ展開検証.
         if not barrier_in_loop:
