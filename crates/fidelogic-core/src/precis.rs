@@ -232,7 +232,9 @@ pub const fn precis_fold_char(ch: char) -> char {
 #[cfg(feature = "alloc")]
 #[must_use]
 pub fn precis_fold_string(cps: &[u32]) -> Vec<u32> {
-    cps.iter().copied().map(precis_fold_cp).collect()
+    let mut out = Zeroizing::new(Vec::with_capacity(cps.len()));
+    out.extend(cps.iter().copied().map(precis_fold_cp));
+    core::mem::take(&mut *out)
 }
 
 /// ハングル音節合成 (`Jamo L + V -> LV`) を検証付きで計算する。
@@ -365,7 +367,7 @@ pub const fn compose_pair(c1: u32, c2: u32) -> Option<u32> {
 #[cfg(feature = "alloc")]
 #[must_use]
 pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
-    let mut out = Vec::with_capacity(cps.len());
+    let mut out = Zeroizing::new(Vec::with_capacity(cps.len()));
     let mut idx = 0;
 
     while idx < cps.len() {
@@ -392,7 +394,7 @@ pub fn precis_nfc_normalize(cps: &[u32]) -> Vec<u32> {
         }
     }
 
-    out
+    core::mem::take(&mut *out)
 }
 
 /// コードポイント列に対して `UsernameCaseMapped` プロファイル正準化 (RFC 8265 Section 3.3 形式モデル) を適用する。
@@ -415,13 +417,13 @@ pub fn enforce_username_case_mapped_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisE
         return Err(PrecisError::EmptyInput);
     }
 
-    let folded = precis_fold_string(cps);
-    let normalized = precis_nfc_normalize(&folded);
+    let folded = Zeroizing::new(precis_fold_string(cps));
+    let mut normalized = Zeroizing::new(precis_nfc_normalize(&folded));
     if let Some(disallowed) = find_disallowed_cp(&normalized) {
         return Err(PrecisError::DisallowedCodePoint(disallowed));
     }
 
-    Ok(normalized)
+    Ok(core::mem::take(&mut *normalized))
 }
 
 /// `PrecisProfile.v` (`precis_username_case_mapped`) に対応する `Option` 返却ラッパー。
@@ -442,9 +444,8 @@ where
     }
 
     let char_count = input.chars().count();
-    let mut cps_vec = Vec::with_capacity(char_count);
-    cps_vec.extend(input.chars().map(|ch| ch as u32));
-    let cps = Zeroizing::new(cps_vec);
+    let mut cps = Zeroizing::new(Vec::with_capacity(char_count));
+    cps.extend(input.chars().map(|ch| ch as u32));
     let normalized = Zeroizing::new(enforce_cps(&cps)?);
 
     let mut out = Zeroizing::new(String::with_capacity(input.len()));
@@ -489,9 +490,8 @@ pub fn enforce_opaque_string_cps(cps: &[u32]) -> Result<Vec<u32>, PrecisError> {
     // マッピング済みバッファを生成し、通常時は不要なアロケーションを回避する。
     let has_non_ascii_zs = cps.iter().any(|&cp| cp != 0x0020 && is_zs_space(cp));
     let mut normalized = Zeroizing::new(if has_non_ascii_zs {
-        let mut mapped_vec = Vec::with_capacity(cps.len());
-        mapped_vec.extend(cps.iter().copied().map(map_zs_to_space));
-        let mapped = Zeroizing::new(mapped_vec);
+        let mut mapped = Zeroizing::new(Vec::with_capacity(cps.len()));
+        mapped.extend(cps.iter().copied().map(map_zs_to_space));
         precis_nfc_normalize(&mapped)
     } else {
         precis_nfc_normalize(cps)
@@ -540,9 +540,8 @@ pub fn opaque_string_secret(input: &str) -> Result<SecretVec, PrecisError> {
     }
 
     let char_count = input.chars().count();
-    let mut cps_vec = Vec::with_capacity(char_count);
-    cps_vec.extend(input.chars().map(|ch| ch as u32));
-    let cps = Zeroizing::new(cps_vec);
+    let mut cps = Zeroizing::new(Vec::with_capacity(char_count));
+    cps.extend(input.chars().map(|ch| ch as u32));
     let normalized = Zeroizing::new(enforce_opaque_string_cps(&cps)?);
 
     let mut secret_out = SecretVec::with_capacity(input.len());
@@ -550,6 +549,7 @@ pub fn opaque_string_secret(input: &str) -> Result<SecretVec, PrecisError> {
     for &cp in normalized.iter() {
         let ch = char::from_u32(cp).ok_or_else(|| {
             secret_out.clear();
+            volatile_zeroize(&mut utf8_buf);
             PrecisError::DisallowedCodePoint(cp)
         })?;
         let encoded = ch.encode_utf8(&mut utf8_buf);

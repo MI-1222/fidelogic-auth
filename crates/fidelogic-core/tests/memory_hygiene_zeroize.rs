@@ -410,6 +410,32 @@ fn test_opaque_string_memory_hygiene_success_and_error() {
     );
 }
 
+#[cfg(feature = "alloc")]
+#[test]
+fn test_username_case_mapped_memory_hygiene_success_and_error() {
+    use fidelogic_core::{PrecisError, enforce_username_case_mapped_cps, username_case_mapped};
+
+    let user_raw = "Alice\u{0020}User#2026";
+    let bad_cps: [u32; 4] = [b'A' as u32, 0x0020, b'B' as u32, 0x0000];
+    let cps_slice = [b'A' as u32, 0x0020, b'B' as u32];
+    let cps_bytes = unsafe { core::slice::from_raw_parts(cps_slice.as_ptr().cast::<u8>(), 12) };
+
+    // 1. username_case_mapped 禁止文字 (0x0020 空白) によるエラー時:
+    // 中間 Vec<u32> (cps, folded, normalized) が Zeroizing により確実にゼロ消去されて解放されることを検証。
+    run_with_heap_leak_check(&[cps_bytes], 1, || {
+        let err =
+            username_case_mapped(user_raw).expect_err("空白文字が含まれるため失敗することを検証。");
+        assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
+    });
+
+    // 2. enforce_username_case_mapped_cps エラー返却時のメモリ衛生:
+    run_with_heap_leak_check(&[cps_bytes], 1, || {
+        let err = enforce_username_case_mapped_cps(&bad_cps)
+            .expect_err("enforce_username_case_mapped_cps 失敗を検証。");
+        assert_eq!(err, PrecisError::DisallowedCodePoint(0x0020));
+    });
+}
+
 #[cfg(feature = "profile-lite")]
 #[test]
 fn test_x25519_dh_memory_hygiene_success_and_error() {
