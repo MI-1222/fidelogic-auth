@@ -1,6 +1,6 @@
 [package]
 name = "fidelogic-cli"
-description = "Native command-line interface for fidelogic-auth"
+description = "Native command-line interface for fidelogic-vault"
 version = "0.1.0"
 edition = "2024"
 

@@ -1,6 +1,12 @@
-//! # 最小限のゼロコピーTLVパーサー
+//! # 最小限のゼロコピーTLVパーサー。
 //!
-//! Charon / Aeneas 形式検証ターゲット用の純粋関数型パースロジック。
+//! 形式検証モデル (`TlvTotality.v` / `TlvRoundtrip.v`) と連携し、
+//! パニックフリーな全域性と未知タグ保持による前方互換性を保証する純粋関数型パーサーを提供する。
+//!
+//! ## バイナリワイヤーフォーマット
+//! - **VaultHeader** (14バイト固定): `magic(4B) | version(1B) | suite_id(1B) | epoch_id(8B, BE)`
+//! - **KEK Slots**: `slot_count(1B) | [slot_id(1B) | kdf_kind(1B) | len(2B, BE) | wrapped_dek(len B)]*`
+//! - **TLV Records**: `[tag(1B) | len(1B) | payload(len B)]*`
 
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -9,7 +15,7 @@ pub struct TlvHeader {
     pub length: u8,
 }
 
-/// TLVレコードヘッダーのバイト長(2バイト: Tag 1B + Length 1B)。
+/// TLVレコードヘッダーのバイト長 (2バイト: Tag 1B + Length 1B)。
 pub const TLV_HEADER_LEN: usize = 2;
 
 /// 2バイトのヘッダー [Tag (1B), Length (1B)] を安全に取得する。
@@ -39,35 +45,115 @@ pub fn validate_tlv_bounds(bytes: &[u8]) -> bool {
 /// Vaultヘッダーの既定マジックバイト。
 pub const VAULT_MAGIC: [u8; 4] = *b"FVAU";
 
-/// Vaultヘッダーのバイト長(6バイト)。
-pub const VAULT_HEADER_LEN: usize = 6;
+/// Vaultヘッダーのバイト長 (14バイト)。
+pub const VAULT_HEADER_LEN: usize = 14;
 
-/// Vaultバイナリフォーマットの固定長ヘッダー。
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// Vault バイナリフォーマットの固定長ヘッダー。
 ///
-/// マジックバイト, フォーマットバージョン, 暗号スイートID を保持する。
+/// マジックバイト、フォーマットバージョン、暗号スイート ID、および単調増加世代カウンター (`epoch_id`) を保持する。
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "VaultHeader （14バイト固定長）" as Header {
+///     state "magic （4B: FVAU）" as Magic
+///     state "version （1B） ＆ suite_id （1B）" as Meta
+///     state "epoch_id （8B, BE: 単調増加世代）" as Epoch
+///   }
+///   Header --> AAD: associated_data （14Bそのまま結合）
+///   AAD --> VaultCipher: AEAD認証タグ計算にバインド （巻き戻し検知）
+/// ```
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct VaultHeader {
-    /// マジックバイト(4バイト)。
+    /// マジックバイト (4バイト)。
     pub magic: [u8; 4],
     /// フォーマットバージョン。
     pub version: u8,
     /// 暗号スイート識別子。
     pub suite_id: u8,
+    /// 単調増加世代カウンター (8バイト)。
+    pub epoch_id: u64,
+}
+
+impl VaultHeader {
+    /// 新しい [`VaultHeader`] 構造体を生成する。
+    #[must_use]
+    pub const fn new(version: u8, suite_id: u8, epoch_id: u64) -> Self {
+        Self {
+            magic: VAULT_MAGIC,
+            version,
+            suite_id,
+            epoch_id,
+        }
+    }
+
+    /// AEAD暗号化・復号時にバインドする関連データ (Associated Data / AD) のバイト配列を生成する。
+    ///
+    /// フォーマット: `magic(4B) | version(1B) | suite_id(1B) | epoch_id(8B, BE)` (計14バイト)。
+    /// これをAEADのADに投入することで、暗号化コンテナとヘッダー情報 (世代カウンター含む) が
+    /// 暗号学的に強固にバインドされ、スナップショット巻き戻し攻撃やヘッダー改変を検知・防御する。
+    #[inline]
+    #[must_use]
+    pub const fn associated_data(&self) -> [u8; VAULT_HEADER_LEN] {
+        serialize_header(self)
+    }
+
+    /// 世代カウンター `epoch_id` をインクリメントした新しいヘッダーを生成する。
+    ///
+    /// # Errors
+    /// `epoch_id` が `u64::MAX` に達してオーバーフローする場合は、
+    /// カウンター巻き戻しによる脆弱性を防ぐため `None` を返す。
+    #[must_use]
+    pub const fn checked_increment_epoch(&self) -> Option<Self> {
+        if let Some(next_epoch) = self.epoch_id.checked_add(1) {
+            Some(Self {
+                magic: self.magic,
+                version: self.version,
+                suite_id: self.suite_id,
+                epoch_id: next_epoch,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// 本ヘッダーの世代カウンターが、対象ヘッダーよりも進んでいるか (真に大きいか) を判定する。
+    #[inline]
+    #[must_use]
+    pub const fn is_newer_than(&self, other: &Self) -> bool {
+        self.epoch_id > other.epoch_id
+    }
+
+    /// 現行の世代カウンター (`current_epoch`) に対して、本ヘッダーの世代カウンターが
+    /// 単調増加しているかを検証する。
+    ///
+    /// # Errors
+    /// 本ヘッダーの `epoch_id` が `current_epoch` 以下である場合、
+    /// スナップショット巻き戻し攻撃と判定して [`VaultError::RollbackDetected`] を返す。
+    pub fn verify_epoch_progression(&self, current_epoch: u64) -> Result<(), VaultError> {
+        if self.epoch_id <= current_epoch {
+            Err(VaultError::RollbackDetected)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// `VaultHeader` 単体の純粋関数型デシリアライザー。
 ///
-/// 入力バイト列からヘッダー情報 (マジックバイト, バージョン, 暗号スイートID) を安全に読み取り、
+/// 入力バイト列からヘッダー情報 (マジックバイト、バージョン、暗号スイートID、世代カウンター) を安全に読み取り、
 /// デシリアライズされた [`VaultHeader`] と残余バイトスライスを返す。
 ///
-/// # Errors
+/// 形式検証ツール (Charon / Aeneas) によるモデル抽出との互換性を維持するため、
+/// マジックバイトの照合は配列比較ではなく各バイト要素を展開して明示的に比較している。
 ///
-/// - 入力バイト列の長さがヘッダー長 ([`VAULT_HEADER_LEN`]) 未満の場合は [`VaultError::UnexpectedEof`] を返す。
-/// - マジックバイトが [`VAULT_MAGIC`] と一致しない場合は [`VaultError::InvalidMagic`] を返す。
+/// # Errors
+/// - 入力バイト列の長さがヘッダー長 ([`VAULT_HEADER_LEN`]) 未満の場合は [`TlvParseError::UnexpectedEof`]。
+/// - マジックバイトが [`VAULT_MAGIC`] と一致しない場合は [`TlvParseError::InvalidMagic`]。
 pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParseError> {
     if bytes.len() < VAULT_HEADER_LEN {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
     let magic = [bytes[0], bytes[1], bytes[2], bytes[3]];
     // NOTE: 通常のRustでは、
@@ -79,23 +165,28 @@ pub fn deserialize_header(bytes: &[u8]) -> Result<(VaultHeader, &[u8]), TlvParse
         || magic[2] != VAULT_MAGIC[2]
         || magic[3] != VAULT_MAGIC[3]
     {
-        return Err(VaultError::InvalidMagic);
+        return Err(TlvParseError::InvalidMagic);
     }
     let version = bytes[4];
     let suite_id = bytes[5];
+    let epoch_id = u64::from_be_bytes([
+        bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+    ]);
     let header = VaultHeader {
         magic,
         version,
         suite_id,
+        epoch_id,
     };
     Ok((header, &bytes[VAULT_HEADER_LEN..]))
 }
 
 /// `VaultHeader` 単体の純粋関数型シリアライザー。
 ///
-/// 指定された [`VaultHeader`] を固定長バイト配列 (6バイト) にシリアライズする。
+/// 指定された [`VaultHeader`] を固定長バイト配列 (14バイト) にシリアライズする。
 #[must_use]
 pub const fn serialize_header(header: &VaultHeader) -> [u8; VAULT_HEADER_LEN] {
+    let epoch_bytes = header.epoch_id.to_be_bytes();
     [
         header.magic[0],
         header.magic[1],
@@ -103,31 +194,18 @@ pub const fn serialize_header(header: &VaultHeader) -> [u8; VAULT_HEADER_LEN] {
         header.magic[3],
         header.version,
         header.suite_id,
+        epoch_bytes[0],
+        epoch_bytes[1],
+        epoch_bytes[2],
+        epoch_bytes[3],
+        epoch_bytes[4],
+        epoch_bytes[5],
+        epoch_bytes[6],
+        epoch_bytes[7],
     ]
 }
 
-/// VaultおよびTLVパース処理で発生するエラーを表す列挙型。
-///
-/// パニックを完全に排除し、境界外アクセスや不正なフォーマットを純粋な値として通知する。
-#[cfg_attr(test, derive(Debug))]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum VaultError {
-    /// 入力バイト列の長さが不足している。
-    UnexpectedEof,
-    /// マジックバイトが既定値と一致しない。
-    InvalidMagic,
-    /// 未知または非対応のフォーマットバージョン。
-    UnsupportedVersion,
-    /// 未知または非対応の暗号スイートID。
-    UnsupportedSuite,
-    /// 宣言されたデータ長が不正またはスライス境界を超過している。
-    InvalidLength,
-    /// レコードまたはヘッダーのフォーマットが不正。
-    InvalidFormat,
-}
-
-/// TLVパース専用のエラー型エイリアス。
-pub type TlvParseError = VaultError;
+pub use crate::error::{TlvParseError, VaultError};
 
 /// KEKスロットヘッダーのバイト長(4バイト)。
 pub const KEK_SLOT_HEADER_LEN: usize = 4;
@@ -164,13 +242,13 @@ impl KekSlotEntry {
     ///
     /// # Errors
     ///
-    /// - `wrapped_dek` のバイト長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+    /// - `wrapped_dek` のバイト長が `u16::MAX` を超過する場合は [`TlvParseError::InvalidLength`] を返す。
     pub fn new(
         slot_id: u8,
         kdf_kind: u8,
         wrapped_dek: alloc::vec::Vec<u8>,
-    ) -> Result<Self, VaultError> {
-        let _ = u16::try_from(wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
+    ) -> Result<Self, TlvParseError> {
+        let _ = u16::try_from(wrapped_dek.len()).map_err(|_| TlvParseError::InvalidLength)?;
         Ok(Self {
             slot_id,
             kdf_kind,
@@ -222,13 +300,12 @@ impl KekSlotEntry {
 ///
 /// # Errors
 ///
-/// - 入力バイト列の長さがヘッダー長 ([`KEK_SLOT_HEADER_LEN`]) 未満の場合は [`VaultError::UnexpectedEof`] を返す。
-/// - 入力バイト列の長さがヘッダー長とラップ済みDEK長の合計未満の場合は [`VaultError::UnexpectedEof`] を返す。
-/// - [`KekSlotEntry::new`] の不変条件検証で失敗した場合は [`VaultError::InvalidLength`] を返す。
+/// - 入力バイト列の長さがヘッダー長 ([`KEK_SLOT_HEADER_LEN`]) 未満の場合は [`TlvParseError::UnexpectedEof`] を返す。
+/// - 入力バイト列の長さがヘッダー長とラップ済みDEK長の合計未満の場合は [`TlvParseError::UnexpectedEof`] を返す。
 #[cfg(feature = "alloc")]
 pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), TlvParseError> {
     if bytes.len() < KEK_SLOT_HEADER_LEN {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
     let slot_id = bytes[0];
     let kdf_kind = bytes[1];
@@ -237,11 +314,17 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
 
     let payload_bytes = &bytes[KEK_SLOT_HEADER_LEN..];
     if payload_bytes.len() < dek_len {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
 
     let wrapped_dek = payload_bytes[..dek_len].to_vec();
-    let entry = KekSlotEntry::new(slot_id, kdf_kind, wrapped_dek)?;
+    // NOTE: dek_len は u16 (wrapped_dek_len) 由来であり wrapped_dek.len() <= u16::MAX が常に成立する。
+    // Aeneas による形式検証用モナド抽出時の TryFromIntError / Try トレイト展開を回避するため直接構築する。
+    let entry = KekSlotEntry {
+        slot_id,
+        kdf_kind,
+        wrapped_dek,
+    };
     Ok((entry, &payload_bytes[dek_len..]))
 }
 
@@ -253,13 +336,14 @@ pub fn deserialize_slot_entry(bytes: &[u8]) -> Result<(KekSlotEntry, &[u8]), Tlv
 ///
 /// # Errors
 ///
-/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn serialize_slot_entry_into(
     entry: &KekSlotEntry,
     out: &mut alloc::vec::Vec<u8>,
-) -> Result<(), VaultError> {
-    let dek_len = u16::try_from(entry.wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
+) -> Result<(), TlvParseError> {
+    let dek_len =
+        u16::try_from(entry.wrapped_dek.len()).map_err(|_| TlvParseError::InvalidLength)?;
     let len_bytes = dek_len.to_be_bytes();
     out.reserve(KEK_SLOT_HEADER_LEN + entry.wrapped_dek.len());
     out.push(entry.slot_id);
@@ -274,13 +358,13 @@ pub fn serialize_slot_entry_into(
 ///
 /// # Errors
 ///
-/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-pub fn slot_serialized_len(entry: &KekSlotEntry) -> Result<usize, VaultError> {
-    let _ = u16::try_from(entry.wrapped_dek.len()).map_err(|_| VaultError::InvalidLength)?;
+pub fn slot_serialized_len(entry: &KekSlotEntry) -> Result<usize, TlvParseError> {
+    let _ = u16::try_from(entry.wrapped_dek.len()).map_err(|_| TlvParseError::InvalidLength)?;
     KEK_SLOT_HEADER_LEN
         .checked_add(entry.wrapped_dek.len())
-        .ok_or(VaultError::InvalidLength)
+        .ok_or(TlvParseError::InvalidLength)
 }
 
 /// `KekSlotEntry` 単体の純粋関数型シリアライザー。
@@ -291,9 +375,9 @@ pub fn slot_serialized_len(entry: &KekSlotEntry) -> Result<usize, VaultError> {
 ///
 /// # Errors
 ///
-/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - `wrapped_dek` の実体長が `u16::MAX` を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, VaultError> {
+pub fn serialize_slot_entry(entry: &KekSlotEntry) -> Result<alloc::vec::Vec<u8>, TlvParseError> {
     let len = slot_serialized_len(entry)?;
     let mut bytes = alloc::vec::Vec::with_capacity(len);
     serialize_slot_entry_into(entry, &mut bytes)?;
@@ -339,11 +423,20 @@ impl EntryPayload {
 #[cfg(feature = "alloc")]
 pub type TlvPayload = EntryPayload;
 
-/// ペイロード部のTLVレコードを表す代数的データ型(ADT)。
+#[cfg_attr(doc, aquamarine::aquamarine)]
+/// ペイロード部の TLV レコードを表す代数的データ型 (ADT)。
 ///
-/// 暗号化エントリレコード([`TlvRecord::Entry`])または将来拡張用の未知タグレコード([`TlvRecord::Unknown`])を表現する。
+/// 暗号化エントリレコード ([`TlvRecord::Entry`]) または将来拡張用の未知タグレコード ([`TlvRecord::Unknown`]) を表現する。
 ///
-/// 既知タグ([`TAG_ENTRY`])の混入によるラウンドトリップ破壊を防止するため、
+/// ```mermaid
+/// flowchart LR
+///   Input["バイト列入力"] --> Check{"タグ判別"}
+///   Check -->|TAG_ENTRY （0x01）| EntryRec["Entry （平文暗号化 ＋ 16B認証タグ）"]
+///   Check -->|未知タグ （0x02〜0xFF）| UnknownRec["Unknown （生バイト列を無加工保持）"]
+///   UnknownRec -->|ラウンドトリップ| Output["元のバイナリを完全復元"]
+/// ```
+///
+/// 既知タグ ([`TAG_ENTRY`]) の混入によるラウンドトリップ破壊を防止するため、
 /// 未知タグレコードの生成にはスマートコンストラクタ [`TlvRecord::new_unknown`] の利用を推奨する。
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
@@ -365,14 +458,14 @@ impl TlvRecord {
     /// 未知タグレコードを安全に生成するスマートコンストラクタ。
     ///
     /// 既知のエントリタグ ([`TAG_ENTRY`]) が指定された場合は、
-    /// デシリアライズ時の型混入およびラウンドトリップ破壊を防止するため [`VaultError::InvalidFormat`] を返す。
+    /// デシリアライズ時の型混入およびラウンドトリップ破壊を防止するため [`TlvParseError::InvalidFormat`] を返す。
     ///
     /// # Errors
     ///
-    /// - `tag == TAG_ENTRY` の場合は [`VaultError::InvalidFormat`] を返す。
-    pub fn new_unknown(tag: u8, raw_bytes: alloc::vec::Vec<u8>) -> Result<Self, VaultError> {
+    /// - `tag == TAG_ENTRY` の場合は [`TlvParseError::InvalidFormat`] を返す。
+    pub fn new_unknown(tag: u8, raw_bytes: alloc::vec::Vec<u8>) -> Result<Self, TlvParseError> {
         if tag == TAG_ENTRY {
-            return Err(VaultError::InvalidFormat);
+            return Err(TlvParseError::InvalidFormat);
         }
         Ok(Self::Unknown { tag, raw_bytes })
     }
@@ -406,34 +499,39 @@ impl TlvRecord {
 ///
 /// # Errors
 ///
-/// - 入力バイト列の長さがヘッダー長 ([`TLV_HEADER_LEN`]) 未満、または宣言長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
-/// - エントリレコードのペイロード長が認証タグ長 ([`AUTH_TAG_LEN`]) 未満の場合は [`VaultError::InvalidLength`] を返す。
+/// - 入力バイト列の長さがヘッダー長 ([`TLV_HEADER_LEN`]) 未満、または宣言長に満たない場合は [`TlvParseError::UnexpectedEof`] を返す。
+/// - エントリレコードのペイロード長が認証タグ長 ([`AUTH_TAG_LEN`]) 未満の場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseError> {
     let Some(header) = parse_tlv_header(bytes) else {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     };
     let length = header.length as usize;
     let total_len = TLV_HEADER_LEN + length;
     if bytes.len() < total_len {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
     let payload_bytes = &bytes[TLV_HEADER_LEN..total_len];
     let rest = &bytes[total_len..];
 
     let record = if header.tag == TAG_ENTRY {
         if payload_bytes.len() < AUTH_TAG_LEN {
-            return Err(VaultError::InvalidLength);
+            return Err(TlvParseError::InvalidLength);
         }
         let ciphertext_len = payload_bytes.len() - AUTH_TAG_LEN;
         let ciphertext = payload_bytes[..ciphertext_len].to_vec();
-        let auth_tag: [u8; AUTH_TAG_LEN] = payload_bytes[ciphertext_len..]
-            .try_into()
-            .map_err(|_| VaultError::InvalidLength)?;
+        let mut auth_tag = [0u8; AUTH_TAG_LEN];
+        auth_tag.copy_from_slice(&payload_bytes[ciphertext_len..]);
         TlvRecord::Entry(EntryPayload::new(ciphertext, auth_tag))
     } else {
         let raw_bytes = payload_bytes.to_vec();
-        TlvRecord::new_unknown(header.tag, raw_bytes)?
+        // NOTE: header.tag != TAG_ENTRY は分岐条件により保証されており、
+        // Aeneas による形式検証用モナド抽出時の Try トレイト展開を回避するため
+        // 直接構築を行っている。
+        TlvRecord::Unknown {
+            tag: header.tag,
+            raw_bytes,
+        }
     };
 
     Ok((record, rest))
@@ -443,37 +541,37 @@ pub fn deserialize_record(bytes: &[u8]) -> Result<(TlvRecord, &[u8]), TlvParseEr
 ///
 /// # Errors
 ///
-/// - 未知レコードのタグが既知タグ ([`TAG_ENTRY`]) である場合は、ラウンドトリップ破壊防止のため [`VaultError::InvalidFormat`] を返す。
-/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - 未知レコードのタグが既知タグ ([`TAG_ENTRY`]) である場合は、ラウンドトリップ破壊防止のため [`TlvParseError::InvalidFormat`] を返す。
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-fn record_payload_len(record: &TlvRecord) -> Result<u8, VaultError> {
+fn record_payload_len(record: &TlvRecord) -> Result<u8, TlvParseError> {
     let len = match record {
         TlvRecord::Entry(payload) => payload
             .ciphertext
             .len()
             .checked_add(AUTH_TAG_LEN)
-            .ok_or(VaultError::InvalidLength)?,
+            .ok_or(TlvParseError::InvalidLength)?,
         TlvRecord::Unknown { tag, raw_bytes } => {
             if *tag == TAG_ENTRY {
-                return Err(VaultError::InvalidFormat);
+                return Err(TlvParseError::InvalidFormat);
             }
             raw_bytes.len()
         }
     };
-    u8::try_from(len).map_err(|_| VaultError::InvalidLength)
+    u8::try_from(len).map_err(|_| TlvParseError::InvalidLength)
 }
 
 /// `TlvRecord` 単体のシリアライズ結果のバイト長を計算する。
 ///
 /// # Errors
 ///
-/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-pub fn record_serialized_len(record: &TlvRecord) -> Result<usize, VaultError> {
+pub fn record_serialized_len(record: &TlvRecord) -> Result<usize, TlvParseError> {
     let payload_len = record_payload_len(record)? as usize;
     TLV_HEADER_LEN
         .checked_add(payload_len)
-        .ok_or(VaultError::InvalidLength)
+        .ok_or(TlvParseError::InvalidLength)
 }
 
 /// `TlvRecord` 単体の純粋関数型シリアライザー。
@@ -484,12 +582,12 @@ pub fn record_serialized_len(record: &TlvRecord) -> Result<usize, VaultError> {
 ///
 /// # Errors
 ///
-/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
 pub fn serialize_record_into(
     record: &TlvRecord,
     out: &mut alloc::vec::Vec<u8>,
-) -> Result<(), VaultError> {
+) -> Result<(), TlvParseError> {
     let payload_len = record_payload_len(record)?;
     out.reserve(TLV_HEADER_LEN + payload_len as usize);
     out.push(record.tag());
@@ -514,18 +612,31 @@ pub fn serialize_record_into(
 ///
 /// # Errors
 ///
-/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`VaultError::InvalidLength`] を返す。
+/// - ペイロード長が `u8::MAX` (255バイト) を超過する場合は [`TlvParseError::InvalidLength`] を返す。
 #[cfg(feature = "alloc")]
-pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, VaultError> {
+pub fn serialize_record(record: &TlvRecord) -> Result<alloc::vec::Vec<u8>, TlvParseError> {
     let len = record_serialized_len(record)?;
     let mut bytes = alloc::vec::Vec::with_capacity(len);
     serialize_record_into(record, &mut bytes)?;
     Ok(bytes)
 }
 
-/// Vault全体の集約型。
+/// Vault全体のバイナリ集約構造体。
 ///
-/// ヘッダー情報、KEKスロット定義テーブル、TLVレコード群を統括する。
+/// ヘッダー、KEKスロット定義テーブル、およびTLVレコード群を統括する。
+///
+/// ```mermaid
+/// stateDiagram-v2
+///   state "Vault （コンテナ全体）" as Vault {
+///     state "VaultHeader （14B固定長）" as Header
+///     state "KekSlotEntry[] （KEKスロット群）" as Slots
+///     state "TlvRecord[] （ペイロード群）" as Records {
+///       state "Entry （暗号文 ＋ 16Bタグ）" as Entry
+///       state "Unknown （未知タグ生バイト列）" as Unknown
+///     }
+///   }
+/// ```
+#[cfg_attr(doc, aquamarine::aquamarine)]
 #[cfg(feature = "alloc")]
 #[cfg_attr(test, derive(Debug))]
 #[derive(Clone, PartialEq, Eq)]
@@ -540,7 +651,7 @@ pub struct Vault {
 
 #[cfg(feature = "alloc")]
 impl Vault {
-    /// 新しいVault構造体を生成する。
+    /// 新しい [`Vault`] 構造体を生成する。
     #[must_use]
     pub fn new(
         header: VaultHeader,
@@ -561,23 +672,22 @@ impl Vault {
 /// 結合された [`Vault`] と残余バイトスライスを返す。
 ///
 /// # Errors
-///
-/// - 入力バイト列の長さが各フィールドの必要長に満たない場合は [`VaultError::UnexpectedEof`] を返す。
-/// - スロット数やレコード数に対して残余バイト列長が不足している場合は [`VaultError::UnexpectedEof`] を返す。
-/// - マジックバイトが不正な場合は [`VaultError::InvalidMagic`] を返す。
-/// - レコード長や認証タグ長が不正な場合は各 [`VaultError`] を返す。
+/// - 入力バイト列の長さが各フィールドの必要長に満たない場合は [`TlvParseError::UnexpectedEof`]。
+/// - スロット数やレコード数に対して残余バイト列長が不足している場合は [`TlvParseError::UnexpectedEof`]。
+/// - マジックバイトが不正な場合は [`TlvParseError::InvalidMagic`]。
+/// - レコード長や認証タグ長が不正な場合は各 [`TlvParseError`]。
 #[cfg(feature = "alloc")]
 pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
     let (header, mut rest) = deserialize_header(bytes)?;
 
     if rest.is_empty() {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
     let slot_count = rest[0] as usize;
     rest = &rest[1..];
 
     if slot_count.saturating_mul(KEK_SLOT_HEADER_LEN) > rest.len() {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
 
     let mut slots = alloc::vec::Vec::with_capacity(slot_count);
@@ -588,13 +698,13 @@ pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
     }
 
     if rest.len() < 2 {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
     let record_count = u16::from_be_bytes([rest[0], rest[1]]) as usize;
     rest = &rest[2..];
 
     if record_count.saturating_mul(TLV_HEADER_LEN) > rest.len() {
-        return Err(VaultError::UnexpectedEof);
+        return Err(TlvParseError::UnexpectedEof);
     }
 
     let mut records = alloc::vec::Vec::with_capacity(record_count);
@@ -617,35 +727,35 @@ pub fn deserialize(bytes: &[u8]) -> Result<(Vault, &[u8]), TlvParseError> {
 ///
 /// # Errors
 ///
-/// - KEKスロット数が `u8::MAX` (255個) を超過する場合は [`VaultError::InvalidLength`] を返す。
-/// - レコード数が `u16::MAX` (65535個) を超過する場合は [`VaultError::InvalidLength`] を返す。
-/// - スロットまたはレコードのシリアライズ処理でエラーが発生した場合はその [`VaultError`] を返す。
+/// - KEKスロット数が `u8::MAX` (255個) を超過する場合は [`TlvParseError::InvalidLength`] を返す。
+/// - レコード数が `u16::MAX` (65535個) を超過する場合は [`TlvParseError::InvalidLength`] を返す。
+/// - スロットまたはレコードのシリアライズ処理でエラーが発生した場合はその [`TlvParseError`] を返す。
 #[cfg(feature = "alloc")]
-pub fn serialize(vault: &Vault) -> Result<alloc::vec::Vec<u8>, VaultError> {
+pub fn serialize(vault: &Vault) -> Result<alloc::vec::Vec<u8>, TlvParseError> {
     if vault.slots.len() > u8::MAX as usize {
-        return Err(VaultError::InvalidLength);
+        return Err(TlvParseError::InvalidLength);
     }
     if vault.records.len() > u16::MAX as usize {
-        return Err(VaultError::InvalidLength);
+        return Err(TlvParseError::InvalidLength);
     }
 
     let mut total_len = VAULT_HEADER_LEN
         .checked_add(1)
         .and_then(|l| l.checked_add(2))
-        .ok_or(VaultError::InvalidLength)?;
+        .ok_or(TlvParseError::InvalidLength)?;
 
     for slot in &vault.slots {
         let slot_len = slot_serialized_len(slot)?;
         total_len = total_len
             .checked_add(slot_len)
-            .ok_or(VaultError::InvalidLength)?;
+            .ok_or(TlvParseError::InvalidLength)?;
     }
 
     for record in &vault.records {
         let rec_len = record_serialized_len(record)?;
         total_len = total_len
             .checked_add(rec_len)
-            .ok_or(VaultError::InvalidLength)?;
+            .ok_or(TlvParseError::InvalidLength)?;
     }
 
     let mut out = alloc::vec::Vec::with_capacity(total_len);
@@ -678,28 +788,180 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 42,
         };
         let header2 = VaultHeader {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 42,
         };
         assert_eq!(header1, header2, "同一パラメータのVaultHeader比較に成功。");
     }
 
     #[test]
-    fn test_vault_error_equality() {
-        let err1 = VaultError::UnexpectedEof;
-        let err2 = VaultError::UnexpectedEof;
-        let err3 = VaultError::InvalidMagic;
-        assert_eq!(err1, err2, "同一のVaultErrorバリアント比較に成功。");
-        assert_ne!(err1, err3, "異なるVaultErrorバリアント比較に成功。");
-
-        let parse_err: TlvParseError = VaultError::InvalidLength;
+    fn test_vault_header_associated_data_format() {
+        let header = VaultHeader::new(1, 2, 0x0102_0304_0506_0708);
+        let ad = header.associated_data();
+        let expected: [u8; VAULT_HEADER_LEN] = [
+            b'F', b'V', b'A', b'U', 1, 2, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        ];
         assert_eq!(
-            parse_err,
-            VaultError::InvalidLength,
-            "TlvParseError型エイリアスとの比較に成功。"
+            ad, expected,
+            "Associated Dataのフォーマットバインド検証に成功。"
+        );
+    }
+
+    #[test]
+    fn test_vault_header_epoch_progression() {
+        let h1 = VaultHeader::new(1, 1, 10);
+        let h2 = VaultHeader::new(1, 1, 11);
+        let h_same = VaultHeader::new(1, 1, 10);
+        let h_old = VaultHeader::new(1, 1, 9);
+
+        // 世代比較
+        assert!(h2.is_newer_than(&h1), "より大きなepoch_idの判定に成功。");
+        assert!(
+            !h1.is_newer_than(&h2),
+            "より小さなepoch_idでの偽判定に成功。"
+        );
+        assert!(!h1.is_newer_than(&h_same), "同一epoch_idでの偽判定に成功。");
+
+        // インクリメント
+        let h_next = h1
+            .checked_increment_epoch()
+            .expect("インクリメントに成功。");
+        assert_eq!(
+            h_next.epoch_id, 11,
+            "単調増加インクリメント後のepoch_id検証に成功。"
+        );
+        assert_eq!(
+            h_next.magic, VAULT_MAGIC,
+            "インクリメント後のマジックバイト維持検証に成功。"
+        );
+
+        // オーバーフロー防止
+        let h_max = VaultHeader::new(1, 1, u64::MAX);
+        assert!(
+            h_max.checked_increment_epoch().is_none(),
+            "u64::MAX到達時のオーバーフロー遮断検証に成功。"
+        );
+
+        // 単調増加性の検証
+        assert_eq!(
+            h2.verify_epoch_progression(10),
+            Ok(()),
+            "現行値より大きいepoch_idでの単調増加検証に成功。"
+        );
+        assert_eq!(
+            h_same.verify_epoch_progression(10),
+            Err(VaultError::RollbackDetected),
+            "現行値と等しいepoch_idでのロールバック検知に成功。"
+        );
+        assert_eq!(
+            h_old.verify_epoch_progression(10),
+            Err(VaultError::RollbackDetected),
+            "現行値より小さいepoch_idでのロールバック検知に成功。"
+        );
+    }
+
+    #[cfg(feature = "profile-vault")]
+    #[test]
+    fn test_rollback_defense_aead_associated_data() {
+        use crate::cipher::{
+            AES_256_GCM_SIV_NONCE_LEN, CipherSuiteId, KEY_LEN, VaultCipher,
+            XCHACHA20_POLY1305_NONCE_LEN,
+        };
+        use crate::error::CryptoError;
+
+        let key = [0x42u8; KEY_LEN];
+        let plaintext_original = b"Secure payload bound to epoch counter snapshot.";
+
+        // 各暗号スイート(XChaCha20-Poly1305, AES-256-GCM-SIV)で検証
+        let suites = [
+            (
+                CipherSuiteId::XChaCha20Poly1305,
+                XCHACHA20_POLY1305_NONCE_LEN,
+            ),
+            (CipherSuiteId::Aes256GcmSiv, AES_256_GCM_SIV_NONCE_LEN),
+        ];
+
+        for (suite_id, nonce_len) in suites {
+            let cipher = VaultCipher::new(suite_id, &key);
+            let nonce = alloc::vec![0x3au8; nonce_len];
+
+            // 世代2のVaultヘッダー(現行)
+            let header_current = VaultHeader::new(1, suite_id.as_u8(), 2);
+            let ad_current = header_current.associated_data();
+
+            // 世代1のVaultヘッダー(過去のスナップショット)
+            let header_past = VaultHeader::new(1, suite_id.as_u8(), 1);
+            let ad_past = header_past.associated_data();
+
+            // 世代2のヘッダーADをバインドして暗号化
+            let mut buffer = plaintext_original.to_vec();
+            let tag = cipher
+                .encrypt_in_place_detached(&nonce, &ad_current, &mut buffer)
+                .expect("最新世代ADバインド暗号化に成功。");
+            let ciphertext = buffer.clone();
+
+            // 正常系: 正しい最新ヘッダーADでの復号
+            let mut decrypt_buf = ciphertext.clone();
+            let decrypt_res =
+                cipher.decrypt_in_place_detached(&nonce, &ad_current, &mut decrypt_buf, &tag);
+            assert!(decrypt_res.is_ok(), "同一世代ADでの正常復号に成功。");
+            assert_eq!(
+                decrypt_buf.as_slice(),
+                plaintext_original,
+                "復号平文の完全一致検証に成功。"
+            );
+
+            // 攻撃防御1: 過去のスナップショット(epoch_id=1)のヘッダーADを用いた巻き戻し試行
+            let mut rollback_buf = ciphertext.clone();
+            let rollback_res =
+                cipher.decrypt_in_place_detached(&nonce, &ad_past, &mut rollback_buf, &tag);
+            assert_eq!(
+                rollback_res,
+                Err(CryptoError::AeadDecryptionFailed),
+                "スナップショット巻き戻し攻撃のAEAD認証タグ不一致による遮断に成功。"
+            );
+            assert!(
+                rollback_buf.iter().all(|&b| b == 0),
+                "復号失敗時の平文バッファ揮発性ゼロ消去に成功。"
+            );
+
+            // 攻撃防御2: 偽造された未来世代(epoch_id=3)のヘッダーADを用いた試行
+            let header_future = VaultHeader::new(1, suite_id.as_u8(), 3);
+            let ad_future = header_future.associated_data();
+            let mut future_buf = ciphertext.clone();
+            let future_res =
+                cipher.decrypt_in_place_detached(&nonce, &ad_future, &mut future_buf, &tag);
+            assert_eq!(
+                future_res,
+                Err(CryptoError::AeadDecryptionFailed),
+                "改ざん世代ADでのAEAD認証遮断に成功。"
+            );
+            assert!(
+                future_buf.iter().all(|&b| b == 0),
+                "復号失敗時の平文バッファ揮発性ゼロ消去に成功。"
+            );
+        }
+    }
+
+    #[test]
+    fn test_vault_error_equality() {
+        let err1 = TlvParseError::UnexpectedEof;
+        let err2 = TlvParseError::UnexpectedEof;
+        let err3 = TlvParseError::InvalidMagic;
+        assert_eq!(err1, err2, "同一のTlvParseErrorバリアント比較に成功。");
+        assert_ne!(err1, err3, "異なるTlvParseErrorバリアント比較に成功。");
+
+        let parse_err = TlvParseError::InvalidLength;
+        let vault_err: VaultError = parse_err.into();
+        assert_eq!(
+            vault_err,
+            VaultError::Parse(TlvParseError::InvalidLength),
+            "TlvParseErrorからVaultErrorへのFrom変換に成功。"
         );
     }
 
@@ -779,7 +1041,7 @@ mod tests {
             .expect_err("TAG_ENTRYのUnknown生成は拒絶される。");
         assert_eq!(
             err,
-            VaultError::InvalidFormat,
+            TlvParseError::InvalidFormat,
             "既知タグ混入がInvalidFormatで拒絶されることに成功。"
         );
     }
@@ -796,7 +1058,7 @@ mod tests {
             .expect_err("TAG_ENTRYを持つUnknownの長計算は拒絶される。");
         assert_eq!(
             err_len,
-            VaultError::InvalidFormat,
+            TlvParseError::InvalidFormat,
             "record_serialized_lenがInvalidFormatを返すことに成功。"
         );
 
@@ -804,7 +1066,7 @@ mod tests {
             .expect_err("TAG_ENTRYを持つUnknownのシリアライズは拒絶される。");
         assert_eq!(
             err_ser,
-            VaultError::InvalidFormat,
+            TlvParseError::InvalidFormat,
             "serialize_recordがInvalidFormatを返すことに成功。"
         );
     }
@@ -816,6 +1078,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 10,
         };
         let slot = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20, 0x30, 0x40])
             .expect("スロット生成に成功。");
@@ -832,7 +1095,9 @@ mod tests {
 
     #[test]
     fn test_deserialize_header_success() {
-        let input = [b'F', b'V', b'A', b'U', 1, 2, 0xaa, 0xbb];
+        let mut input = alloc::vec![b'F', b'V', b'A', b'U', 1, 2];
+        input.extend_from_slice(&100u64.to_be_bytes());
+        input.extend_from_slice(&[0xaa, 0xbb]);
         let result = deserialize_header(&input);
         assert!(
             result.is_ok(),
@@ -845,6 +1110,7 @@ mod tests {
                 magic: VAULT_MAGIC,
                 version: 1,
                 suite_id: 2,
+                epoch_id: 100,
             },
             "デシリアライズされたVaultHeaderの検証に成功。"
         );
@@ -853,22 +1119,26 @@ mod tests {
 
     #[test]
     fn test_deserialize_header_unexpected_eof() {
-        let input = [b'F', b'V', b'A', b'U', 1];
+        let input = [b'F', b'V', b'A', b'U', 1, 2, 0, 0];
         let result = deserialize_header(&input);
         assert_eq!(
             result,
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "データ長不足時のUnexpectedEof返却検証に成功。"
         );
     }
 
     #[test]
     fn test_deserialize_header_invalid_magic() {
-        let input = [b'W', b'R', b'N', b'G', 1, 2];
+        let mut input = [0u8; VAULT_HEADER_LEN];
+        input[..4].copy_from_slice(b"WRNG");
+        input[4] = 1;
+        input[5] = 2;
+        input[6..14].copy_from_slice(&10u64.to_be_bytes());
         let result = deserialize_header(&input);
         assert_eq!(
             result,
-            Err(VaultError::InvalidMagic),
+            Err(TlvParseError::InvalidMagic),
             "不正マジックバイト時のInvalidMagic返却検証に成功。"
         );
     }
@@ -933,14 +1203,14 @@ mod tests {
         let short_header = [TAG_ENTRY];
         assert_eq!(
             deserialize_record(&short_header),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "ヘッダー長不足時のUnexpectedEof検証に成功。"
         );
 
         let short_payload = [TAG_ENTRY, 10, 0x01, 0x02];
         assert_eq!(
             deserialize_record(&short_payload),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "宣言長不足時のUnexpectedEof検証に成功。"
         );
     }
@@ -951,7 +1221,7 @@ mod tests {
         let input = [TAG_ENTRY, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         assert_eq!(
             deserialize_record(&input),
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "既知タグで認証タグ長未満時のInvalidLength検証に成功。"
         );
     }
@@ -981,14 +1251,14 @@ mod tests {
         let short_header = [1, 2, 0x01];
         assert_eq!(
             deserialize_slot_entry(&short_header),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "ヘッダー長不足時のUnexpectedEof検証に成功。"
         );
 
         let short_payload = [1, 2, 0x00, 0x04, 0xaa, 0xbb];
         assert_eq!(
             deserialize_slot_entry(&short_payload),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "ペイロード長不足時のUnexpectedEof検証に成功。"
         );
     }
@@ -997,6 +1267,7 @@ mod tests {
     #[test]
     fn test_deserialize_vault_success() {
         let mut input = alloc::vec![b'F', b'V', b'A', b'U', 1, 2];
+        input.extend_from_slice(&777u64.to_be_bytes());
         // 1スロット
         input.push(1);
         input.extend_from_slice(&[0, 1, 0x00, 0x04, 0x11, 0x22, 0x33, 0x44]);
@@ -1020,6 +1291,7 @@ mod tests {
                 magic: VAULT_MAGIC,
                 version: 1,
                 suite_id: 2,
+                epoch_id: 777,
             },
             "デシリアライズされたVaultHeaderの検証に成功。"
         );
@@ -1055,7 +1327,9 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_vault_empty_slots_and_records() {
-        let input = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x00];
+        let input = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x00,
+        ];
         let result = deserialize(&input);
         assert!(
             result.is_ok(),
@@ -1079,55 +1353,65 @@ mod tests {
         // ヘッダー不足
         assert_eq!(
             deserialize(b"FVA"),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "Vaultヘッダー長不足時のUnexpectedEof検証に成功。"
         );
 
         // slot_count不足
-        let header_only = [b'F', b'V', b'A', b'U', 1, 1];
+        let header_only = [b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1];
         assert_eq!(
             deserialize(&header_only),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "slot_count不足時のUnexpectedEof検証に成功。"
         );
 
         // スロットデータ不足
-        let slot_missing = [b'F', b'V', b'A', b'U', 1, 1, 1, 0, 1];
+        let slot_missing = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1,
+        ];
         assert_eq!(
             deserialize(&slot_missing),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "スロットデータ不足時のUnexpectedEof検証に成功。"
         );
 
         // record_count不足
-        let record_count_missing = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00];
+        let record_count_missing = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00,
+        ];
         assert_eq!(
             deserialize(&record_count_missing),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "record_count不足時のUnexpectedEof検証に成功。"
         );
 
         // レコードデータ不足
-        let record_missing = [b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x01, TAG_ENTRY, 10];
+        let record_missing = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x01, TAG_ENTRY, 10,
+        ];
         assert_eq!(
             deserialize(&record_missing),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "レコードデータ不足時のUnexpectedEof検証に成功。"
         );
 
         // slot_count事前境界チェック(Allocation DoS防止)
-        let slot_dos_attack = [b'F', b'V', b'A', b'U', 1, 1, 255, 0, 1];
+        let slot_dos_attack = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 255, 0, 1,
+        ];
         assert_eq!(
             deserialize(&slot_dos_attack),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "過大slot_countによる事前境界チェック(Allocation DoS防止)の検証に成功。"
         );
 
         // record_count事前境界チェック(Allocation DoS防止)
-        let record_dos_attack = [b'F', b'V', b'A', b'U', 1, 1, 0, 0xff, 0xff, 1, 2];
+        let record_dos_attack = [
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0xff, 0xff, 1, 2,
+        ];
         assert_eq!(
             deserialize(&record_dos_attack),
-            Err(VaultError::UnexpectedEof),
+            Err(TlvParseError::UnexpectedEof),
             "過大record_countによる事前境界チェック(Allocation DoS防止)の検証に成功。"
         );
     }
@@ -1135,10 +1419,12 @@ mod tests {
     #[cfg(feature = "alloc")]
     #[test]
     fn test_deserialize_vault_invalid_magic() {
-        let input = [b'X', b'X', b'X', b'X', 1, 1, 0, 0x00, 0x00];
+        let input = [
+            b'X', b'X', b'X', b'X', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x00,
+        ];
         assert_eq!(
             deserialize(&input),
-            Err(VaultError::InvalidMagic),
+            Err(TlvParseError::InvalidMagic),
             "不正マジックバイト時のInvalidMagic検証に成功。"
         );
     }
@@ -1147,12 +1433,12 @@ mod tests {
     #[test]
     fn test_deserialize_vault_record_error() {
         let input = [
-            b'F', b'V', b'A', b'U', 1, 1, 0, 0x00, 0x01, TAG_ENTRY, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8,
-            9,
+            b'F', b'V', b'A', b'U', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x00, 0x01, TAG_ENTRY, 10, 0,
+            1, 2, 3, 4, 5, 6, 7, 8, 9,
         ];
         assert_eq!(
             deserialize(&input),
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "不正レコード含有時のエラー伝播検証に成功。"
         );
     }
@@ -1163,11 +1449,14 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 3,
+            epoch_id: 0x0102_0304_0506_0708,
         };
         let bytes = serialize_header(&header);
         assert_eq!(
             bytes,
-            [b'F', b'V', b'A', b'U', 1, 3],
+            [
+                b'F', b'V', b'A', b'U', 1, 3, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+            ],
             "VaultHeaderのシリアライズ結果検証に成功。"
         );
 
@@ -1210,12 +1499,12 @@ mod tests {
         };
         assert_eq!(
             serialize_slot_entry(&entry),
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "u16::MAX超過時におけるInvalidLength返却検証に成功。"
         );
         assert_eq!(
             slot_serialized_len(&entry),
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "slot_serialized_lenにおけるu16::MAX超過時のInvalidLength返却検証に成功。"
         );
     }
@@ -1271,7 +1560,7 @@ mod tests {
         let large_dek = alloc::vec![0u8; (u16::MAX as usize) + 1];
         assert_eq!(
             KekSlotEntry::new(0, 1, large_dek),
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "u16::MAX超過時のInvalidLength返却検証に成功。"
         );
     }
@@ -1326,7 +1615,7 @@ mod tests {
         let res = serialize_record(&record);
         assert_eq!(
             res,
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "既知レコード長が255超過時のInvalidLength返却検証に成功。"
         );
 
@@ -1338,7 +1627,7 @@ mod tests {
         let res_unknown = serialize_record(&record_unknown);
         assert_eq!(
             res_unknown,
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "未知レコード長が255超過時のInvalidLength返却検証に成功。"
         );
     }
@@ -1350,6 +1639,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 2,
+            epoch_id: 50,
         };
         let slot = KekSlotEntry::new(0, 1, alloc::vec![0x10, 0x20, 0x30, 0x40])
             .expect("スロット生成に成功。");
@@ -1379,6 +1669,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let vault = Vault::new(header, alloc::vec::Vec::new(), alloc::vec::Vec::new());
         let bytes = serialize(&vault).expect("空Vaultシリアライズに成功。");
@@ -1397,6 +1688,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 1,
+            epoch_id: 1,
         };
         let slot = KekSlotEntry::new(0, 1, alloc::vec::Vec::new()).expect("スロット生成に成功。");
         let slots = alloc::vec![slot; 256];
@@ -1404,7 +1696,7 @@ mod tests {
         let res = serialize(&vault);
         assert_eq!(
             res,
-            Err(VaultError::InvalidLength),
+            Err(TlvParseError::InvalidLength),
             "スロット数が255超過時のInvalidLength返却検証に成功。"
         );
     }
@@ -1446,6 +1738,7 @@ mod tests {
             magic: VAULT_MAGIC,
             version: 1,
             suite_id: 2,
+            epoch_id: 99,
         };
         let slot = KekSlotEntry::new(1, 1, alloc::vec![0xaa, 0xbb]).expect("スロット生成に成功。");
         let record1 = TlvRecord::Entry(EntryPayload::new(
@@ -1471,10 +1764,13 @@ mod tests {
         use proptest::prelude::*;
 
         fn arb_vault_header() -> impl Strategy<Value = VaultHeader> {
-            (any::<u8>(), any::<u8>()).prop_map(|(version, suite_id)| VaultHeader {
-                magic: VAULT_MAGIC,
-                version,
-                suite_id,
+            (any::<u8>(), any::<u8>(), any::<u64>()).prop_map(|(version, suite_id, epoch_id)| {
+                VaultHeader {
+                    magic: VAULT_MAGIC,
+                    version,
+                    suite_id,
+                    epoch_id,
+                }
             })
         }
 

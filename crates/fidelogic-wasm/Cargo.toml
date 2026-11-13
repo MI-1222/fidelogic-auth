@@ -1,6 +1,6 @@
 [package]
 name = "fidelogic-wasm"
-description = "WebAssembly bindings for fidelogic-auth"
+description = "WebAssembly bindings for fidelogic-vault"
 version = "0.1.0"
 edition = "2024"
 
@@ -12,6 +12,12 @@ default = ["std", "profile-lite"]
 std = ["fidelogic-core/std"]
 profile-lite = ["fidelogic-core/profile-lite"]
 profile-vault = ["fidelogic-core/profile-vault"]
+ci-inspection = ["fidelogic-core/ci-inspection"]
 
 [dependencies]
 fidelogic-core = { workspace = true }
+dlmalloc = { workspace = true }
+aquamarine = { workspace = true }
+
+[dev-dependencies]
+fidelogic-core = { workspace = true, features = ["test-hooks"] }

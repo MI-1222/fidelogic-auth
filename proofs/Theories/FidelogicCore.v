@@ -21,6 +21,32 @@ Definition core_convert_From_Blanket (T : Type) : core_convert_From T T := {|
   from_ := core_convert_From_Blanket_from;
 |}.
 
+(** [core::result::Result]
+    Source: '/rustc/library/core/src/result.rs', lines 558:0-558:21
+    Name pattern: [core::result::Result]
+    Visibility: public *)
+Inductive core_result_Result_t (T : Type) (E : Type) :=
+| Core_result_Result_Ok : T -> core_result_Result_t T E
+| Core_result_Result_Err : E -> core_result_Result_t T E
+.
+
+Arguments Core_result_Result_Ok { _ } { _ }.
+Arguments Core_result_Result_Err { _ } { _ }.
+
+(** [core::num::error::TryFromIntError]
+    Source: '/rustc/library/core/src/num/error.rs', lines 9:0-9:26
+    Name pattern: [core::num::error::TryFromIntError]
+    Visibility: public *)
+Axiom core_num_error_TryFromIntError_t : Type.
+
+(** [core::convert::num::ptr_try_from_impls::{impl core::convert::TryFrom<usize, core::num::error::TryFromIntError> for u8}::try_from]:
+    Source: '/rustc/library/core/src/convert/num.rs', lines 383:12-383:64; this code is generated from a macro invocation at: '/rustc/library/core/src/convert/num.rs', lines 561:4-561:55
+    Name pattern: [core::convert::num::ptr_try_from_impls::{core::convert::TryFrom<u8, usize, core::num::error::TryFromIntError>}::try_from]
+    Visibility: public *)
+Axiom U8_Insts_CoreConvertTryFromUsizeTryFromIntError_try_from
+  : usize -> result (core_result_Result_t u8 core_num_error_TryFromIntError_t)
+.
+
 (** [core::ops::control_flow::ControlFlow]
     Source: '/rustc/library/core/src/ops/control_flow.rs', lines 89:0-89:31
     Name pattern: [core::ops::control_flow::ControlFlow]
@@ -37,6 +63,18 @@ Inductive core_ops_control_flow_ControlFlow_t (B : Type) (C : Type) :=
 Arguments Core_ops_control_flow_ControlFlow_Continue { _ } { _ }.
 Arguments Core_ops_control_flow_ControlFlow_Break { _ } { _ }.
 
+(** Trait declaration: [core::ops::function::FnOnce]
+    Source: '/rustc/library/core/src/ops/function.rs', lines 242:0-242:35
+    Name pattern: [core::ops::function::FnOnce]
+    Visibility: public *)
+Record core_ops_function_FnOnce_t (Self : Type) (Args : Type) (Self_Output :
+  Type) := mkcore_ops_function_FnOnce_t {
+  core_ops_function_FnOnce_t_call_once : Self -> Args -> result Self_Output;
+}.
+
+Arguments mkcore_ops_function_FnOnce_t { _ } { _ } { _ }.
+Arguments core_ops_function_FnOnce_t_call_once { _ } { _ } { _ } _.
+
 (** [core::ops::range::RangeFrom]
     Source: '/rustc/library/core/src/ops/range.rs', lines 202:0-202:25
     Name pattern: [core::ops::range::RangeFrom]
@@ -50,18 +88,6 @@ mkcore_ops_range_RangeFrom_t {
 Arguments mkcore_ops_range_RangeFrom_t { _ }.
 Arguments core_ops_range_RangeFrom_start { _ }.
 
-(** [core::result::Result]
-    Source: '/rustc/library/core/src/result.rs', lines 558:0-558:21
-    Name pattern: [core::result::Result]
-    Visibility: public *)
-Inductive core_result_Result_t (T : Type) (E : Type) :=
-| Core_result_Result_Ok : T -> core_result_Result_t T E
-| Core_result_Result_Err : E -> core_result_Result_t T E
-.
-
-Arguments Core_result_Result_Ok { _ } { _ }.
-Arguments Core_result_Result_Err { _ } { _ }.
-
 (** [core::option::{core::option::Option<T>}::ok_or]:
     Source: '/rustc/library/core/src/option.rs', lines 1335:4-1335:73
     Name pattern: [core::option::{core::option::Option<@T>}::ok_or]
@@ -69,6 +95,16 @@ Arguments Core_result_Result_Err { _ } { _ }.
 Axiom core_option_Option_ok_or :
   forall{T : Type} {E : Type},
         option T -> E -> result (core_result_Result_t T E)
+.
+
+(** [core::result::{core::result::Result<T, E>}::map_err]:
+    Source: '/rustc/library/core/src/result.rs', lines 961:4-963:53
+    Name pattern: [core::result::{core::result::Result<@T, @E>}::map_err]
+    Visibility: public *)
+Axiom core_result_Result_map_err :
+  forall{T : Type} {E : Type} {F : Type} {O1 : Type}
+        (opsfunctionFnOnceOTupleEFInst : core_ops_function_FnOnce_t O1 E F),
+        core_result_Result_t T E -> O1 -> result (core_result_Result_t T F)
 .
 
 (** [core::result::{impl core::ops::try_trait::Try for core::result::Result<T, E>}::branch]:
@@ -280,13 +316,16 @@ Axiom core_slice_Slice_copy_from_slice :
         slice T -> slice T -> result (slice T)
 .
 
-(** [alloc::vec::{impl core::convert::From<&'_0 [T]> for alloc::vec::Vec<T>}::from]:
-    Source: '/rustc/library/alloc/src/vec/mod.rs', lines 4467:4-4467:30
-    Name pattern: [alloc::vec::{core::convert::From<alloc::vec::Vec<@T>, &'0 [@T]>}::from]
+(** [fidelogic_core::error::TlvParseError]
+    Source: 'crates/fidelogic-core/src/error.rs', lines 14:0-27:1
     Visibility: public *)
-Axiom alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from :
-  forall{T : Type} (corecloneCloneInst : core_clone_Clone T),
-        slice T -> result (alloc_vec_Vec T)
+Inductive error_TlvParseError_t :=
+| Error_TlvParseError_UnexpectedEof : error_TlvParseError_t
+| Error_TlvParseError_InvalidMagic : error_TlvParseError_t
+| Error_TlvParseError_UnsupportedVersion : error_TlvParseError_t
+| Error_TlvParseError_UnsupportedSuite : error_TlvParseError_t
+| Error_TlvParseError_InvalidLength : error_TlvParseError_t
+| Error_TlvParseError_InvalidFormat : error_TlvParseError_t
 .
 
 (** [fidelogic_core::tlv::TlvHeader]
@@ -340,44 +379,33 @@ Definition tlv_VAULT_MAGIC : array u8 4%usize :=
 .
 
 (** [fidelogic_core::tlv::VAULT_HEADER_LEN]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 43:0-43:38
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 43:0-43:39
     Visibility: public *)
-Definition tlv_VAULT_HEADER_LEN : usize := 6%usize.
+Definition tlv_VAULT_HEADER_LEN : usize := 14%usize.
 
 (** [fidelogic_core::tlv::VaultHeader]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 50:0-57:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 50:0-59:1
     Visibility: public *)
 Record tlv_VaultHeader_t :=
 mktlv_VaultHeader_t {
   tlv_VaultHeader_magic : array u8 4%usize;
   tlv_VaultHeader_version : u8;
   tlv_VaultHeader_suite_id : u8;
+  tlv_VaultHeader_epoch_id : u64;
 }
 .
 
-(** [fidelogic_core::tlv::VaultError]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 110:0-123:1
-    Visibility: public *)
-Inductive tlv_VaultError_t :=
-| Tlv_VaultError_UnexpectedEof : tlv_VaultError_t
-| Tlv_VaultError_InvalidMagic : tlv_VaultError_t
-| Tlv_VaultError_UnsupportedVersion : tlv_VaultError_t
-| Tlv_VaultError_UnsupportedSuite : tlv_VaultError_t
-| Tlv_VaultError_InvalidLength : tlv_VaultError_t
-| Tlv_VaultError_InvalidFormat : tlv_VaultError_t
-.
-
 (** [fidelogic_core::tlv::deserialize_header]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 68:0-88:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 136:0-164:1
     Visibility: public *)
 Definition tlv_deserialize_header
   (bytes : slice u8) :
   result (core_result_Result_t (tlv_VaultHeader_t * (slice u8))
-    tlv_VaultError_t)
+    error_TlvParseError_t)
   :=
   let i := slice_len bytes in
   if i s< tlv_VAULT_HEADER_LEN
-  then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+  then Ok (Core_result_Result_Err Error_TlvParseError_UnexpectedEof)
   else (
     i1 <- slice_index_usize bytes 0%usize;
     i2 <- slice_index_usize bytes 1%usize;
@@ -386,26 +414,38 @@ Definition tlv_deserialize_header
     i5 <- array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 0%usize;
     i6 <- array_index_usize tlv_VAULT_MAGIC 0%usize;
     if i5 s<> i6
-    then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+    then Ok (Core_result_Result_Err Error_TlvParseError_InvalidMagic)
     else (
       i7 <- array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 1%usize;
       i9 <- array_index_usize tlv_VAULT_MAGIC 1%usize;
       if i7 s<> i9
-      then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+      then Ok (Core_result_Result_Err Error_TlvParseError_InvalidMagic)
       else (
         i10 <- array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 2%usize;
         i11 <- array_index_usize tlv_VAULT_MAGIC 2%usize;
         if i10 s<> i11
-        then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+        then Ok (Core_result_Result_Err Error_TlvParseError_InvalidMagic)
         else (
           i12 <-
             array_index_usize (mk_array 4%usize [ i1; i2; i3; i4 ]) 3%usize;
           i13 <- array_index_usize tlv_VAULT_MAGIC 3%usize;
           if i12 s<> i13
-          then Ok (Core_result_Result_Err Tlv_VaultError_InvalidMagic)
+          then Ok (Core_result_Result_Err Error_TlvParseError_InvalidMagic)
           else (
             version <- slice_index_usize bytes 4%usize;
             suite_id <- slice_index_usize bytes 5%usize;
+            i14 <- slice_index_usize bytes 6%usize;
+            i15 <- slice_index_usize bytes 7%usize;
+            i17 <- slice_index_usize bytes 8%usize;
+            i18 <- slice_index_usize bytes 9%usize;
+            i19 <- slice_index_usize bytes 10%usize;
+            i20 <- slice_index_usize bytes 11%usize;
+            i21 <- slice_index_usize bytes 12%usize;
+            i22 <- slice_index_usize bytes 13%usize;
+            let epoch_id :=
+              core_num_U64_from_be_bytes
+                (mk_array 8%usize [ i14; i15; i17; i18; i19; i20; i21; i22 ])
+            in
             s <-
               core_slice_index_Slice_index
                 (core_ops_range_RangeFromUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
@@ -415,54 +455,64 @@ Definition tlv_deserialize_header
               ({|
                  tlv_VaultHeader_magic := (mk_array 4%usize [ i1; i2; i3; i4 ]);
                  tlv_VaultHeader_version := version;
-                 tlv_VaultHeader_suite_id := suite_id
+                 tlv_VaultHeader_suite_id := suite_id;
+                 tlv_VaultHeader_epoch_id := epoch_id
                |}, s)))))))
 .
 
 (** [fidelogic_core::tlv::serialize_header]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 94:0-103:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 170:0-188:1
     Visibility: public *)
 Definition tlv_serialize_header
-  (header : tlv_VaultHeader_t) : result (array u8 6%usize) :=
+  (header : tlv_VaultHeader_t) : result (array u8 14%usize) :=
+  let epoch_bytes := core_num_U64_to_be_bytes header.(tlv_VaultHeader_epoch_id)
+  in
   i <- array_index_usize header.(tlv_VaultHeader_magic) 0%usize;
   i1 <- array_index_usize header.(tlv_VaultHeader_magic) 1%usize;
   i2 <- array_index_usize header.(tlv_VaultHeader_magic) 2%usize;
   i3 <- array_index_usize header.(tlv_VaultHeader_magic) 3%usize;
+  i4 <- array_index_usize epoch_bytes 0%usize;
+  i5 <- array_index_usize epoch_bytes 1%usize;
+  i6 <- array_index_usize epoch_bytes 2%usize;
+  i7 <- array_index_usize epoch_bytes 3%usize;
+  i9 <- array_index_usize epoch_bytes 4%usize;
+  i10 <- array_index_usize epoch_bytes 5%usize;
+  i11 <- array_index_usize epoch_bytes 6%usize;
+  i12 <- array_index_usize epoch_bytes 7%usize;
   Ok
-    (mk_array 6%usize [
+    (mk_array 14%usize [
       i; i1; i2; i3; header.(tlv_VaultHeader_version);
-      header.(tlv_VaultHeader_suite_id)
+      header.(tlv_VaultHeader_suite_id); i4; i5; i6; i7; i9; i10; i11; i12
       ])
 .
 
 (** [fidelogic_core::tlv::KEK_SLOT_HEADER_LEN]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 129:0-129:41
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 193:0-193:41
     Visibility: public *)
 Definition tlv_KEK_SLOT_HEADER_LEN : usize := 4%usize.
 
 (** [fidelogic_core::tlv::KekSlotEntry]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 140:0-149:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 212:0-219:1
     Visibility: public *)
 Record tlv_KekSlotEntry_t :=
 mktlv_KekSlotEntry_t {
   tlv_KekSlotEntry_slot_id : u8;
   tlv_KekSlotEntry_kdf_kind : u8;
-  tlv_KekSlotEntry_wrapped_dek_len : u16;
   tlv_KekSlotEntry_wrapped_dek : alloc_vec_Vec u8;
 }
 .
 
 (** [fidelogic_core::tlv::deserialize_slot_entry]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 185:0-207:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 288:0-311:1
     Visibility: public *)
 Definition tlv_deserialize_slot_entry
   (bytes : slice u8) :
   result (core_result_Result_t (tlv_KekSlotEntry_t * (slice u8))
-    tlv_VaultError_t)
+    error_TlvParseError_t)
   :=
   let i := slice_len bytes in
   if i s< tlv_KEK_SLOT_HEADER_LEN
-  then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+  then Ok (Core_result_Result_Err Error_TlvParseError_UnexpectedEof)
   else (
     slot_id <- slice_index_usize bytes 0%usize;
     kdf_kind <- slice_index_usize bytes 1%usize;
@@ -479,7 +529,7 @@ Definition tlv_deserialize_slot_entry
         {| core_ops_range_RangeFrom_start := tlv_KEK_SLOT_HEADER_LEN |};
     let i3 := slice_len payload_bytes in
     if i3 s< dek_len
-    then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+    then Ok (Core_result_Result_Err Error_TlvParseError_UnexpectedEof)
     else (
       s <-
         core_slice_index_Slice_index
@@ -494,30 +544,29 @@ Definition tlv_deserialize_slot_entry
         ({|
            tlv_KekSlotEntry_slot_id := slot_id;
            tlv_KekSlotEntry_kdf_kind := kdf_kind;
-           tlv_KekSlotEntry_wrapped_dek_len := wrapped_dek_len;
            tlv_KekSlotEntry_wrapped_dek := wrapped_dek
          |}, s1))))
 .
 
 (** [fidelogic_core::tlv::AUTH_TAG_LEN]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 264:0-264:35
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 370:0-370:35
     Visibility: public *)
 Definition tlv_AUTH_TAG_LEN : usize := 16%usize.
 
 (** [fidelogic_core::tlv::TAG_ENTRY]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 267:0-267:28
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 373:0-373:28
     Visibility: public *)
 Definition tlv_TAG_ENTRY : u8 := 1%u8.
 
 (** [fidelogic_core::tlv::is_known_tag]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 271:0-273:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 377:0-379:1
     Visibility: public *)
 Definition tlv_is_known_tag (tag : u8) : result bool :=
   Ok (tag s= tlv_TAG_ENTRY)
 .
 
 (** [fidelogic_core::tlv::EntryPayload]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 279:0-284:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 385:0-390:1
     Visibility: public *)
 Record tlv_EntryPayload_t :=
 mktlv_EntryPayload_t {
@@ -527,7 +576,7 @@ mktlv_EntryPayload_t {
 .
 
 (** [fidelogic_core::tlv::{fidelogic_core::tlv::EntryPayload}::new]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 290:4-295:5
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 396:4-401:5
     Visibility: public *)
 Definition tlv_EntryPayload_new
   (ciphertext : alloc_vec_Vec u8) (auth_tag : array u8 16%usize) :
@@ -541,7 +590,7 @@ Definition tlv_EntryPayload_new
 .
 
 (** [fidelogic_core::tlv::TlvRecord]
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 308:0-318:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 417:0-427:1
     Visibility: public *)
 Inductive tlv_TlvRecord_t :=
 | Tlv_TlvRecord_Entry : tlv_EntryPayload_t -> tlv_TlvRecord_t
@@ -549,27 +598,28 @@ Inductive tlv_TlvRecord_t :=
 .
 
 (** [fidelogic_core::tlv::deserialize_record]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 345:0-375:1
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 478:0-511:1
     Visibility: public *)
 Definition tlv_deserialize_record
   (bytes : slice u8) :
-  result (core_result_Result_t (tlv_TlvRecord_t * (slice u8)) tlv_VaultError_t)
+  result (core_result_Result_t (tlv_TlvRecord_t * (slice u8))
+    error_TlvParseError_t)
   :=
   o <- tlv_parse_tlv_header bytes;
   match o with
-  | None => Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+  | None => Ok (Core_result_Result_Err Error_TlvParseError_UnexpectedEof)
   | Some header =>
     length <- scalar_cast U8 Usize header.(tlv_TlvHeader_length);
-    total_len <- usize_add 2%usize length;
+    total_len <- usize_add tlv_TLV_HEADER_LEN length;
     let i := slice_len bytes in
     if i s< total_len
-    then Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof)
+    then Ok (Core_result_Result_Err Error_TlvParseError_UnexpectedEof)
     else (
       payload_bytes <-
         core_slice_index_Slice_index
           (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
           {|
-            core_ops_range_Range_start := 2%usize;
+            core_ops_range_Range_start := tlv_TLV_HEADER_LEN;
             core_ops_range_Range_end_ := total_len
           |};
       rest <-
@@ -580,7 +630,7 @@ Definition tlv_deserialize_record
       then
         let i1 := slice_len payload_bytes in
         if i1 s< tlv_AUTH_TAG_LEN
-        then Ok (Core_result_Result_Err Tlv_VaultError_InvalidLength)
+        then Ok (Core_result_Result_Err Error_TlvParseError_InvalidLength)
         else (
           let i2 := slice_len payload_bytes in
           ciphertext_len <- usize_sub i2 tlv_AUTH_TAG_LEN;
@@ -589,9 +639,7 @@ Definition tlv_deserialize_record
               (core_ops_range_RangeToUsize_Insts_CoreSliceIndexSliceIndexSliceSlice
               u8) payload_bytes
               {| core_ops_range_RangeTo_end_ := ciphertext_len |};
-          ciphertext <-
-            alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
-              core_clone_CloneU8 s;
+          ciphertext <- alloc_slice_Slice_to_vec core_clone_CloneU8 s;
           let auth_tag := array_repeat 16%usize 0%u8 in
           let (s1, as_mut_slice_back) := array_to_slice_mut auth_tag in
           s2 <-
@@ -604,49 +652,102 @@ Definition tlv_deserialize_record
           ep <- tlv_EntryPayload_new ciphertext auth_tag1;
           Ok (Core_result_Result_Ok (Tlv_TlvRecord_Entry ep, rest)))
       else (
-        raw_bytes <-
-          alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from
-            core_clone_CloneU8 payload_bytes;
+        raw_bytes <- alloc_slice_Slice_to_vec core_clone_CloneU8 payload_bytes;
         Ok (Core_result_Result_Ok (Tlv_TlvRecord_Unknown
           header.(tlv_TlvHeader_tag) raw_bytes, rest))))
   end
 .
 
-(** [fidelogic_core::tlv::record_serialized_len]:
-    Source: 'crates/fidelogic-core/src/tlv.rs', lines 383:0-407:1
-    Visibility: public *)
-Definition tlv_record_serialized_len
+(** [fidelogic_core::tlv::record_payload_len::{closure}]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 534:30-534:62 *)
+Definition tlv_record_payload_len_closure_t : Type := unit.
+
+(** [fidelogic_core::tlv::record_payload_len::{impl core::ops::function::FnOnce<(core::num::error::TryFromIntError,), fidelogic_core::error::TlvParseError> for fidelogic_core::tlv::record_payload_len::{closure}}::call_once]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 534:30-534:62 *)
+Definition
+  tlv_record_payload_len_closure_Insts_CoreOpsFunctionFnOnceTupleTryFromIntErrorTlvParseError_call_once
+  (c : tlv_record_payload_len_closure_t)
+  (tupled_args : core_num_error_TryFromIntError_t) :
+  result error_TlvParseError_t
+  :=
+  Ok Error_TlvParseError_InvalidLength
+.
+
+(** Trait implementation: [fidelogic_core::tlv::record_payload_len::{impl core::ops::function::FnOnce<(core::num::error::TryFromIntError,), fidelogic_core::error::TlvParseError> for fidelogic_core::tlv::record_payload_len::{closure}}]
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 534:30-534:62 *)
+Definition
+  tlv_record_payload_len_closure_Insts_CoreOpsFunctionFnOnceTupleTryFromIntErrorTlvParseError
+  : core_ops_function_FnOnce_t tlv_record_payload_len_closure_t
+  core_num_error_TryFromIntError_t error_TlvParseError_t := {|
+  core_ops_function_FnOnce_t_call_once :=
+    tlv_record_payload_len_closure_Insts_CoreOpsFunctionFnOnceTupleTryFromIntErrorTlvParseError_call_once;
+|}.
+
+(** [fidelogic_core::tlv::record_payload_len]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 520:0-535:1 *)
+Definition tlv_record_payload_len
   (record : tlv_TlvRecord_t) :
-  result (core_result_Result_t usize tlv_VaultError_t)
+  result (core_result_Result_t u8 error_TlvParseError_t)
   :=
   match record with
   | Tlv_TlvRecord_Entry payload =>
     let i := alloc_vec_Vec_len payload.(tlv_EntryPayload_ciphertext) in
     let o := Usize_checked_add i tlv_AUTH_TAG_LEN in
-    r <- core_option_Option_ok_or o Tlv_VaultError_InvalidLength;
+    r <- core_option_Option_ok_or o Error_TlvParseError_InvalidLength;
     cf <- core_result_Result_Insts_CoreOpsTry_traitTry_branch r;
     match cf with
     | Core_ops_control_flow_ControlFlow_Continue val =>
-      i1 <- scalar_cast U8 Usize core_num_U8_MAX;
-      if val s> i1
-      then Ok (Core_result_Result_Err Tlv_VaultError_InvalidLength)
-      else
-        let o1 := Usize_checked_add tlv_TLV_HEADER_LEN val in
-        core_option_Option_ok_or o1 Tlv_VaultError_InvalidLength
+      r1 <- U8_Insts_CoreConvertTryFromUsizeTryFromIntError_try_from val;
+      core_result_Result_map_err
+        tlv_record_payload_len_closure_Insts_CoreOpsFunctionFnOnceTupleTryFromIntErrorTlvParseError
+        r1 tt
     | Core_ops_control_flow_ControlFlow_Break residual =>
       core_result_Result_Insts_CoreOpsTry_traitFromResidualResultNeverE_from_residual
-        usize (core_convert_From_Blanket tlv_VaultError_t) residual
+        u8 (core_convert_From_Blanket error_TlvParseError_t) residual
     end
-  | Tlv_TlvRecord_Unknown _ raw_bytes =>
-    let i := alloc_vec_Vec_len raw_bytes in
-    i1 <- scalar_cast U8 Usize core_num_U8_MAX;
-    if i s> i1
-    then Ok (Core_result_Result_Err Tlv_VaultError_InvalidLength)
-    else
-      let i2 := alloc_vec_Vec_len raw_bytes in
-      let o := Usize_checked_add tlv_TLV_HEADER_LEN i2 in
-      core_option_Option_ok_or o Tlv_VaultError_InvalidLength
+  | Tlv_TlvRecord_Unknown tag raw_bytes =>
+    if tag s= tlv_TAG_ENTRY
+    then Ok (Core_result_Result_Err Error_TlvParseError_InvalidFormat)
+    else (
+      let len := alloc_vec_Vec_len raw_bytes in
+      r <- U8_Insts_CoreConvertTryFromUsizeTryFromIntError_try_from len;
+      core_result_Result_map_err
+        tlv_record_payload_len_closure_Insts_CoreOpsFunctionFnOnceTupleTryFromIntErrorTlvParseError
+        r tt)
   end
 .
+
+(** [fidelogic_core::tlv::record_serialized_len]:
+    Source: 'crates/fidelogic-core/src/tlv.rs', lines 543:0-548:1
+    Visibility: public *)
+Definition tlv_record_serialized_len
+  (record : tlv_TlvRecord_t) :
+  result (core_result_Result_t usize error_TlvParseError_t)
+  :=
+  r <- tlv_record_payload_len record;
+  cf <- core_result_Result_Insts_CoreOpsTry_traitTry_branch r;
+  match cf with
+  | Core_ops_control_flow_ControlFlow_Continue val =>
+    payload_len <- scalar_cast U8 Usize val;
+    let o := Usize_checked_add tlv_TLV_HEADER_LEN payload_len in
+    core_option_Option_ok_or o Error_TlvParseError_InvalidLength
+  | Core_ops_control_flow_ControlFlow_Break residual =>
+    core_result_Result_Insts_CoreOpsTry_traitFromResidualResultNeverE_from_residual
+      usize (core_convert_From_Blanket error_TlvParseError_t) residual
+  end
+.
+
+
+(** 後方互換用エイリアス (形式検証証明資産との意味論的互換性を維持)。 *)
+Notation tlv_VaultError_t := error_TlvParseError_t.
+Notation Tlv_VaultError_UnexpectedEof := Error_TlvParseError_UnexpectedEof.
+Notation Tlv_VaultError_InvalidMagic := Error_TlvParseError_InvalidMagic.
+Notation Tlv_VaultError_InvalidLength := Error_TlvParseError_InvalidLength.
+Notation Tlv_VaultError_InvalidFormat := Error_TlvParseError_InvalidFormat.
+Notation Tlv_VaultError_UnsupportedVersion := Error_TlvParseError_UnsupportedVersion.
+Notation Tlv_VaultError_UnsupportedSuite := Error_TlvParseError_UnsupportedSuite.
+Notation alloc_vec_Vec_Insts_CoreConvertFromShared0Slice_from := alloc_slice_Slice_to_vec.
+Definition tlv_KekSlotEntry_wrapped_dek_len (slot : tlv_KekSlotEntry_t) : u16 :=
+  u16_of_Z (Z.of_nat (length (alloc_vec_Vec_to_list slot.(tlv_KekSlotEntry_wrapped_dek)))).
 
 End FidelogicCore.

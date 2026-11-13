@@ -16,7 +16,7 @@ Local Open Scope Z_scope.
 Local Open Scope Primitives_scope.
 
 (** [SPEC]
-    補題 1: スライス長がヘッダー長(6バイト)未満の場合、tlv_deserialize_header は必ず Ok (Err UnexpectedEof) を返す。 *)
+    補題 1: スライス長がヘッダー長(14バイト)未満の場合、tlv_deserialize_header は必ず Ok (Err UnexpectedEof) を返す。 *)
 Lemma tlv_deserialize_header_underflow :
   forall (bytes : slice u8),
     (slice_len bytes s< tlv_VAULT_HEADER_LEN) = true ->
@@ -72,7 +72,7 @@ Lemma tlv_deserialize_record_underflow :
   forall (bytes : slice u8) (header : tlv_TlvHeader_t) (length total_len : usize),
     tlv_parse_tlv_header bytes = Ok (Some header) ->
     scalar_cast U8 Usize header.(tlv_TlvHeader_length) = Ok length ->
-    usize_add 2%usize length = Ok total_len ->
+    usize_add tlv_TLV_HEADER_LEN length = Ok total_len ->
     (slice_len bytes s< total_len) = true ->
     tlv_deserialize_record bytes = Ok (Core_result_Result_Err Tlv_VaultError_UnexpectedEof).
 Proof.
@@ -103,8 +103,6 @@ Proof.
   destruct (scalar_cast U8 Usize (tlv_TlvHeader_length header)) as [length | e1] eqn:Hcast; [| discriminate Hval].
   destruct (usize_add tlv_TLV_HEADER_LEN length) as [total_len | e2] eqn:Hadd; [| discriminate Hval].
   inv Hval.
-  unfold tlv_TLV_HEADER_LEN in Hadd.
-  rewrite Hadd.
   unfold scalar_geb, scalar_ltb in *.
   destruct (Z.geb_spec (to_Z (slice_len bytes)) (to_Z total_len)).
   - discriminate H0.
@@ -177,10 +175,12 @@ Lemma scalar_cast_u8_to_usize_safe :
   forall (x : u8),
     exists (y : usize), scalar_cast U8 Usize x = Ok y.
 Proof.
-  intros [val [Hmin Hmax]].
-  cbn in Hmin, Hmax.
+  intros [val Hbounds].
   unfold scalar_cast, mk_scalar, to_Z.
   cbn.
+  rewrite scalar_bounds_iff in Hbounds.
+  destruct Hbounds as [Hmin Hmax].
+  cbn in Hmin, Hmax.
   destruct (sumbool_of_bool (scalar_in_bounds Usize val)) as [Hin | Hout].
   - exists (exist _ val (scalar_in_bounds_valid Usize val Hin)). reflexivity.
   - exfalso.
@@ -199,10 +199,12 @@ Lemma scalar_cast_u16_to_usize_safe :
   forall (x : u16),
     exists (y : usize), scalar_cast U16 Usize x = Ok y.
 Proof.
-  intros [val [Hmin Hmax]].
-  cbn in Hmin, Hmax.
+  intros [val Hbounds].
   unfold scalar_cast, mk_scalar, to_Z.
   cbn.
+  rewrite scalar_bounds_iff in Hbounds.
+  destruct Hbounds as [Hmin Hmax].
+  cbn in Hmin, Hmax.
   destruct (sumbool_of_bool (scalar_in_bounds Usize val)) as [Hin | Hout].
   - exists (exist _ val (scalar_in_bounds_valid Usize val Hin)). reflexivity.
   - exfalso.

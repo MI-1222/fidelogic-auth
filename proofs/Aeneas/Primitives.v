@@ -1,4 +1,5 @@
 From Stdlib Require Import Lia.
+From Stdlib Require Import Eqdep_dec.
 From Stdlib.Strings Require Ascii.
 From Stdlib.Strings Require String.
 From Stdlib Require Import Program.Equality.
@@ -192,10 +193,32 @@ Proof.
   - pose usize_max_bound. lia.
 Qed.
 
+Definition scalar_bounds (ty: scalar_ty) (x: Z) : bool :=
+  ((scalar_min ty <=? x) && (x <=? scalar_max ty))%bool.
+
+Lemma scalar_bounds_iff (ty: scalar_ty) (x: Z) :
+  scalar_bounds ty x = true <-> scalar_min ty <= x <= scalar_max ty.
+Proof.
+  unfold scalar_bounds.
+  rewrite Bool.andb_true_iff, !Z.leb_le.
+  tauto.
+Qed.
+
 Definition scalar (ty: scalar_ty) : Type :=
- { x: Z | scalar_min ty <= x <= scalar_max ty }.
+ { x: Z | scalar_bounds ty x = true }.
 
 Definition to_Z {ty} (x: scalar ty) : Z := proj1_sig x.
+
+Lemma scalar_eq {ty : scalar_ty} (x y : scalar ty) :
+  to_Z x = to_Z y -> x = y.
+Proof.
+  destruct x as [zx Hx], y as [zy Hy].
+  cbn [to_Z proj1_sig].
+  intro Heq.
+  subst zy.
+  f_equal.
+  apply (UIP_dec Bool.bool_dec).
+Qed.
 
 (** Bounds checks: we start by using the conservative bounds, to make sure we
     can compute in most situations, then we use the real bounds (for [isize]
@@ -226,10 +249,11 @@ Definition scalar_in_bounds (ty: scalar_ty) (x: Z) : bool :=
   scalar_ge_min ty x && scalar_le_max ty x .
 
 Lemma scalar_in_bounds_valid (ty: scalar_ty) (x: Z) :
-  scalar_in_bounds ty x = true -> scalar_min ty <= x <= scalar_max ty .
+  scalar_in_bounds ty x = true -> scalar_bounds ty x = true .
 Proof.
   unfold scalar_in_bounds.
   intros H.
+  apply scalar_bounds_iff.
   destruct (scalar_ge_min ty x) eqn:Hmin.
   - destruct (scalar_le_max ty x) eqn:Hmax.
     + pose (scalar_ge_min_valid ty x Hmin).
@@ -837,9 +861,10 @@ Definition alloc_vec_Vec_length {T: Type} (v: alloc_vec_Vec T) : Z := Z.of_nat (
 
 Definition alloc_vec_Vec_new (T: Type) : alloc_vec_Vec T := (exist _ [] le_0_usize_max).
 
-Lemma alloc_vec_Vec_len_in_usize {T} (v: alloc_vec_Vec T) : usize_min <= alloc_vec_Vec_length v <= usize_max.
+Lemma alloc_vec_Vec_len_in_usize {T} (v: alloc_vec_Vec T) : scalar_bounds Usize (alloc_vec_Vec_length v) = true.
 Proof.
-  unfold alloc_vec_Vec_length, usize_min.
+  apply scalar_bounds_iff.
+  unfold alloc_vec_Vec_length, scalar_min, scalar_max, usize_min.
   split.
   - lia.
   - apply (proj2_sig v).
@@ -1184,8 +1209,9 @@ Definition core_convert_From_slice_Vec {T : Type} : core_convert_From (alloc_vec
   from_ := alloc_vec_Vec_from_slice;
 |}.
 
-Lemma u16_clamp_in_bounds (z : Z) : scalar_min U16 <= Z.min (Z.max 0 z) 65535 <= scalar_max U16.
+Lemma u16_clamp_in_bounds (z : Z) : scalar_bounds U16 (Z.min (Z.max 0 z) 65535) = true.
 Proof.
+  apply scalar_bounds_iff.
   unfold scalar_min, scalar_max, u16_min, u16_max.
   lia.
 Qed.
@@ -1199,6 +1225,125 @@ Definition core_num_U16_from_be_bytes (a : array u8 2%usize) : u16 :=
     u16_of_Z (to_Z b0 * 256 + to_Z b1)
   | _ => u16_of_Z 0
   end.
+
+Lemma u8_clamp_in_bounds (z : Z) :
+  scalar_bounds U8 (Z.min (Z.max 0 z) 255) = true.
+Proof.
+  apply scalar_bounds_iff.
+  unfold scalar_min, scalar_max, u8_min, u8_max.
+  lia.
+Qed.
+
+Definition u8_of_Z (z : Z) : u8 :=
+  exist _ (Z.min (Z.max 0 z) 255) (u8_clamp_in_bounds z).
+
+Lemma u64_clamp_in_bounds (z : Z) :
+  scalar_bounds U64 (Z.min (Z.max 0 z) u64_max) = true.
+Proof.
+  apply scalar_bounds_iff.
+  unfold scalar_min, scalar_max, u64_min, u64_max.
+  lia.
+Qed.
+
+Definition u64_of_Z (z : Z) : u64 :=
+  exist _ (Z.min (Z.max 0 z) u64_max) (u64_clamp_in_bounds z).
+
+Definition core_num_U64_from_be_bytes (a : array u8 8%usize) : u64 :=
+  match array_index_usize a 0%usize,
+        array_index_usize a 1%usize,
+        array_index_usize a 2%usize,
+        array_index_usize a 3%usize,
+        array_index_usize a 4%usize,
+        array_index_usize a 5%usize,
+        array_index_usize a 6%usize,
+        array_index_usize a 7%usize with
+  | Ok b0, Ok b1, Ok b2, Ok b3, Ok b4, Ok b5, Ok b6, Ok b7 =>
+    u64_of_Z (((((((to_Z b0 * 256 + to_Z b1) * 256 + to_Z b2) * 256 + to_Z b3) * 256 + to_Z b4) * 256 + to_Z b5) * 256 + to_Z b6) * 256 + to_Z b7)
+  | _, _, _, _, _, _, _, _ => u64_of_Z 0
+  end.
+
+Definition core_num_U64_to_be_bytes (x : u64) : array u8 8%usize :=
+  let z := to_Z x in
+  let z6 := z / 256 in
+  let z5 := z6 / 256 in
+  let z4 := z5 / 256 in
+  let z3 := z4 / 256 in
+  let z2 := z3 / 256 in
+  let z1 := z2 / 256 in
+  let b0 := u8_of_Z (z1 / 256) in
+  let b1 := u8_of_Z (z1 mod 256) in
+  let b2 := u8_of_Z (z2 mod 256) in
+  let b3 := u8_of_Z (z3 mod 256) in
+  let b4 := u8_of_Z (z4 mod 256) in
+  let b5 := u8_of_Z (z5 mod 256) in
+  let b6 := u8_of_Z (z6 mod 256) in
+  let b7 := u8_of_Z (z mod 256) in
+  mk_array 8%usize [b0; b1; b2; b3; b4; b5; b6; b7].
+
+Lemma u8_of_Z_in_bounds (z : Z) :
+  0 <= z <= 255 -> to_Z (u8_of_Z z) = z.
+Proof.
+  intros Hz.
+  unfold u8_of_Z. cbn [to_Z proj1_sig].
+  lia.
+Qed.
+
+Lemma u64_of_Z_to_Z (x : u64) :
+  u64_of_Z (to_Z x) = x.
+Proof.
+  apply scalar_eq.
+  destruct x as [zx Hx].
+  unfold u64_of_Z. cbn [to_Z proj1_sig].
+  rewrite scalar_bounds_iff in Hx.
+  destruct Hx as [Hmin Hmax].
+  unfold scalar_min, scalar_max, u64_min, u64_max in *.
+  lia.
+Qed.
+
+Lemma core_num_U64_be_bytes_roundtrip (x : u64) :
+  core_num_U64_from_be_bytes (core_num_U64_to_be_bytes x) = x.
+Proof.
+  unfold core_num_U64_to_be_bytes, core_num_U64_from_be_bytes.
+  repeat (erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ]).
+  destruct x as [zx Hx].
+  pose proof Hx as Hx'.
+  rewrite scalar_bounds_iff in Hx'.
+  destruct Hx' as [Hmin Hmax].
+  cbn [to_Z proj1_sig] in *.
+  unfold scalar_min, scalar_max, u64_min, u64_max in *.
+  repeat (rewrite u8_of_Z_in_bounds; [| Z.div_mod_to_equations; lia ]).
+  assert (Hstep : forall a, (a / 256) * 256 + (a mod 256) = a).
+  { intro a. rewrite Z.mul_comm. symmetry. apply Z.div_mod. discriminate. }
+  remember (zx / 256) as z6.
+  remember (z6 / 256) as z5.
+  remember (z5 / 256) as z4.
+  remember (z4 / 256) as z3.
+  remember (z3 / 256) as z2.
+  remember (z2 / 256) as z1.
+  remember (z1 / 256) as z0.
+  assert (H1 : z0 * 256 + z1 mod 256 = z1).
+  { subst z0. apply (Hstep z1). }
+  rewrite H1.
+  assert (H2 : z1 * 256 + z2 mod 256 = z2).
+  { subst z1. apply (Hstep z2). }
+  rewrite H2.
+  assert (H3 : z2 * 256 + z3 mod 256 = z3).
+  { subst z2. apply (Hstep z3). }
+  rewrite H3.
+  assert (H4 : z3 * 256 + z4 mod 256 = z4).
+  { subst z3. apply (Hstep z4). }
+  rewrite H4.
+  assert (H5 : z4 * 256 + z5 mod 256 = z5).
+  { subst z4. apply (Hstep z5). }
+  rewrite H5.
+  assert (H6 : z5 * 256 + z6 mod 256 = z6).
+  { subst z5. apply (Hstep z6). }
+  rewrite H6.
+  assert (H7 : z6 * 256 + zx mod 256 = zx).
+  { subst z6. apply (Hstep zx). }
+  rewrite H7.
+  apply (u64_of_Z_to_Z (exist _ zx Hx)).
+Qed.
 
 Definition alloc_slice_Slice_to_vec {T : Type} (inst : core_clone_Clone T) (s : slice T) : result (alloc_vec_Vec T) :=
   Ok (exist _ (proj1_sig s) (proj2_sig s)).
@@ -1217,11 +1362,14 @@ Definition U64_checked_add := scalar_checked_add U64.
 
 (** usize の飽和乗算 (saturating_mul) の境界健全性補題。 *)
 Lemma usize_saturating_mul_in_bounds (x y : usize) :
-  scalar_min Usize <= Z.min (to_Z x * to_Z y) usize_max <= scalar_max Usize.
+  scalar_bounds Usize (Z.min (to_Z x * to_Z y) usize_max) = true.
 Proof.
+  apply scalar_bounds_iff.
   unfold scalar_min, scalar_max, usize_min.
-  destruct x as [zx [Hxmin Hxmax]], y as [zy [Hymin Hymax]].
+  destruct x as [zx Hx], y as [zy Hy].
   cbn in *.
+  rewrite scalar_bounds_iff in Hx, Hy.
+  destruct Hx as [Hxmin Hxmax], Hy as [Hymin Hymax].
   unfold scalar_min, scalar_max, usize_min in *.
   split.
   - apply Z.min_glb.

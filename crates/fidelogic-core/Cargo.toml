@@ -1,19 +1,48 @@
 [package]
 name = "fidelogic-core"
-description = "Core cryptographic and authentication engine for fidelogic-auth"
+description = "Core cryptographic and vault engine for fidelogic-vault"
 version = "0.1.0"
 edition = "2024"
 
 [features]
 default = ["std", "profile-vault"]
-std = ["alloc"]
-alloc = []
+std = ["alloc", "zeroize/std"]
+alloc = ["zeroize/alloc"]
 # profile-lite: エッジ・高速認証向けの極小バイナリプロファイル。
-profile-lite = ["alloc"]
+profile-lite = ["alloc", "dep:curve25519-dalek"]
 # profile-vault: 完全なVault操作と暗号スイートを備えたプロファイル。
-profile-vault = ["alloc"]
+profile-vault = [
+    "alloc",
+    "profile-lite",
+    "dep:aes",
+    "dep:aes-gcm-siv",
+    "dep:argon2",
+    "dep:chacha20poly1305",
+    "dep:hkdf",
+    "dep:sha2",
+]
+# memlock: ネイティブ環境向けにmlockおよびmadviseによるメモリ保護を提供するプロファイル。
+memlock = ["std", "dep:libc"]
+# parallel: ネイティブ環境向けにマルチコア並列化パラメータ(レーン並列度)を既定値として選択するプロファイル。
+parallel = ["std"]
+# test-hooks: 統合テスト向けに内部暗号化・KDF欠陥注入フックを公開するテスト専用フィーチャー。
+test-hooks = []
+# ci-inspection: CI検査用スタブ・フックを公開するフィーチャー。
+ci-inspection = ["test-hooks"]
 
 [dependencies]
+aes = { workspace = true, features = ["zeroize"], optional = true }
+aes-gcm-siv = { workspace = true, features = ["alloc", "aes"], optional = true }
+argon2 = { workspace = true, features = ["alloc", "zeroize"], optional = true }
+chacha20poly1305 = { workspace = true, features = ["alloc"], optional = true }
+curve25519-dalek = { workspace = true, features = ["alloc", "zeroize"], optional = true }
+hkdf = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+subtle = { workspace = true }
+zeroize = { workspace = true, features = ["derive"] }
+aquamarine = { workspace = true }
 
 [dev-dependencies]
+fidelogic-core = { path = ".", features = ["test-hooks"] }
 proptest = "1"

@@ -21,7 +21,7 @@
     "module": "Fidelogic.Theories.TlvTotality",
     "theorem": "tlv_deserialize_header_underflow",
     "allow_aeneas_axioms": true,
-    "description": "スライス長がヘッダー長(6バイト)未満の場合、tlv_deserialize_header は必ず Ok (Err UnexpectedEof) を返す"
+    "description": "スライス長がヘッダー長(14バイト)未満の場合、tlv_deserialize_header は必ず Ok (Err UnexpectedEof) を返す"
   },
   {
     "module": "Fidelogic.Theories.TlvTotality",

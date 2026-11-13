@@ -134,6 +134,7 @@ Ltac tlv_monad_step :=
       | H : array_from_slice _ _ = _ |- context [array_from_slice _ _] => rewrite H
       | H : alloc_slice_Slice_to_vec _ _ = Ok _ |- context [alloc_slice_Slice_to_vec _ _] => rewrite H
       | H : core_num_U16_from_be_bytes _ = _ |- context [core_num_U16_from_be_bytes _] => rewrite H
+      | H : core_num_U64_from_be_bytes _ = _ |- context [core_num_U64_from_be_bytes _] => rewrite H
       | H : core_num_Usize_saturating_mul _ _ = _ |- context [core_num_Usize_saturating_mul _ _] => rewrite H
       end
     )
@@ -183,7 +184,7 @@ mktlv_is_serialized_entry_chain {
   ser_chain_cast_len :
     scalar_cast U8 Usize ser_chain_payload_len_u8 = Ok ser_chain_payload_len_usize;
   ser_chain_add_total_len :
-    usize_add 2%usize ser_chain_payload_len_usize = Ok ser_chain_total_len;
+    usize_add tlv_TLV_HEADER_LEN ser_chain_payload_len_usize = Ok ser_chain_total_len;
 
   ser_chain_header_parse :
     tlv_parse_tlv_header bytes =
@@ -201,7 +202,7 @@ mktlv_is_serialized_entry_chain {
     core_slice_index_Slice_index
       (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
       {|
-        core_ops_range_Range_start := 2%usize;
+        core_ops_range_Range_start := tlv_TLV_HEADER_LEN;
         core_ops_range_Range_end_ := ser_chain_total_len
       |} = Ok ser_chain_payload_bytes;
 
@@ -272,7 +273,7 @@ mktlv_is_serialized_unknown_chain {
   ser_unk_chain_cast_len :
     scalar_cast U8 Usize ser_unk_chain_payload_len_u8 = Ok ser_unk_chain_payload_len_usize;
   ser_unk_chain_add_total_len :
-    usize_add 2%usize ser_unk_chain_payload_len_usize = Ok ser_unk_chain_total_len;
+    usize_add tlv_TLV_HEADER_LEN ser_unk_chain_payload_len_usize = Ok ser_unk_chain_total_len;
 
   ser_unk_chain_header_parse :
     tlv_parse_tlv_header bytes =
@@ -290,7 +291,7 @@ mktlv_is_serialized_unknown_chain {
     core_slice_index_Slice_index
       (core_slice_index_SliceIndexRangeUsizeSliceInst u8) bytes
       {|
-        core_ops_range_Range_start := 2%usize;
+        core_ops_range_Range_start := tlv_TLV_HEADER_LEN;
         core_ops_range_Range_end_ := ser_unk_chain_total_len
       |} = Ok ser_unk_chain_payload_bytes;
 
@@ -453,7 +454,8 @@ Qed.
 Lemma tlv_vault_header_eta : forall (h : tlv_VaultHeader_t),
   {| tlv_VaultHeader_magic := h.(tlv_VaultHeader_magic);
      tlv_VaultHeader_version := h.(tlv_VaultHeader_version);
-     tlv_VaultHeader_suite_id := h.(tlv_VaultHeader_suite_id) |} = h.
+     tlv_VaultHeader_suite_id := h.(tlv_VaultHeader_suite_id);
+     tlv_VaultHeader_epoch_id := h.(tlv_VaultHeader_epoch_id) |} = h.
 Proof.
   destruct h.
   reflexivity.
@@ -461,7 +463,7 @@ Qed.
 
 (** [MODEL]
     残余スライス rest を後続に伴う VaultHeader シリアライズ関係。
-    有効なマジックバイト ("FVAU") を保持し、6バイト固定長のヘッダー構造を満たすことを規定する。 *)
+    有効なマジックバイト ("FVAU") を保持し、14バイト固定長のヘッダー構造を満たすことを規定する。 *)
 Record tlv_is_serialized_header_chain
   (h : tlv_VaultHeader_t) (bytes rest : slice u8) : Type :=
 mktlv_is_serialized_header_chain {
@@ -475,6 +477,14 @@ mktlv_is_serialized_header_chain {
   ser_hdr_chain_b1 : u8;
   ser_hdr_chain_b2 : u8;
   ser_hdr_chain_b3 : u8;
+  ser_hdr_chain_b6 : u8;
+  ser_hdr_chain_b7 : u8;
+  ser_hdr_chain_b8 : u8;
+  ser_hdr_chain_b9 : u8;
+  ser_hdr_chain_b10 : u8;
+  ser_hdr_chain_b11 : u8;
+  ser_hdr_chain_b12 : u8;
+  ser_hdr_chain_b13 : u8;
 
   ser_hdr_chain_idx0 : slice_index_usize bytes 0%usize = Ok ser_hdr_chain_b0;
   ser_hdr_chain_idx1 : slice_index_usize bytes 1%usize = Ok ser_hdr_chain_b1;
@@ -482,6 +492,20 @@ mktlv_is_serialized_header_chain {
   ser_hdr_chain_idx3 : slice_index_usize bytes 3%usize = Ok ser_hdr_chain_b3;
   ser_hdr_chain_idx4 : slice_index_usize bytes 4%usize = Ok h.(tlv_VaultHeader_version);
   ser_hdr_chain_idx5 : slice_index_usize bytes 5%usize = Ok h.(tlv_VaultHeader_suite_id);
+  ser_hdr_chain_idx6 : slice_index_usize bytes 6%usize = Ok ser_hdr_chain_b6;
+  ser_hdr_chain_idx7 : slice_index_usize bytes 7%usize = Ok ser_hdr_chain_b7;
+  ser_hdr_chain_idx8 : slice_index_usize bytes 8%usize = Ok ser_hdr_chain_b8;
+  ser_hdr_chain_idx9 : slice_index_usize bytes 9%usize = Ok ser_hdr_chain_b9;
+  ser_hdr_chain_idx10 : slice_index_usize bytes 10%usize = Ok ser_hdr_chain_b10;
+  ser_hdr_chain_idx11 : slice_index_usize bytes 11%usize = Ok ser_hdr_chain_b11;
+  ser_hdr_chain_idx12 : slice_index_usize bytes 12%usize = Ok ser_hdr_chain_b12;
+  ser_hdr_chain_idx13 : slice_index_usize bytes 13%usize = Ok ser_hdr_chain_b13;
+
+  ser_hdr_chain_reconstruct_epoch :
+    core_num_U64_from_be_bytes
+      (mk_array 8%usize [ser_hdr_chain_b6; ser_hdr_chain_b7; ser_hdr_chain_b8; ser_hdr_chain_b9;
+                         ser_hdr_chain_b10; ser_hdr_chain_b11; ser_hdr_chain_b12; ser_hdr_chain_b13]) =
+      h.(tlv_VaultHeader_epoch_id);
 
   ser_hdr_chain_reconstruct_magic :
     mk_array 4%usize [ser_hdr_chain_b0; ser_hdr_chain_b1; ser_hdr_chain_b2; ser_hdr_chain_b3] = tlv_VAULT_MAGIC;
@@ -540,33 +564,49 @@ Qed.
 (** [SPEC]
     VaultHeader シリアライザーの評価計算補題。
     有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header は必ず成功し、
-    マジック 4 バイト、バージョン、暗号スイートIDから成る 6 バイト配列を返す。 *)
+    マジック 4 バイト、バージョン、暗号スイートID、および単調増加世代カウンター(8バイト)から成る 14 バイト配列を返す。 *)
 Lemma tlv_serialize_header_eval :
   forall (h : tlv_VaultHeader_t),
     h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
     tlv_serialize_header h =
-      Ok (mk_array 6%usize [
+      let z := to_Z h.(tlv_VaultHeader_epoch_id) in
+      let z6 := z / 256 in
+      let z5 := z6 / 256 in
+      let z4 := z5 / 256 in
+      let z3 := z4 / 256 in
+      let z2 := z3 / 256 in
+      let z1 := z2 / 256 in
+      let b0 := u8_of_Z (z1 / 256) in
+      let b1 := u8_of_Z (z1 mod 256) in
+      let b2 := u8_of_Z (z2 mod 256) in
+      let b3 := u8_of_Z (z3 mod 256) in
+      let b4 := u8_of_Z (z4 mod 256) in
+      let b5 := u8_of_Z (z5 mod 256) in
+      let b6 := u8_of_Z (z6 mod 256) in
+      let b7 := u8_of_Z (z mod 256) in
+      Ok (mk_array 14%usize [
             70%u8; 86%u8; 65%u8; 85%u8;
             h.(tlv_VaultHeader_version);
-            h.(tlv_VaultHeader_suite_id)
+            h.(tlv_VaultHeader_suite_id);
+            b0; b1; b2; b3; b4; b5; b6; b7
          ]).
 Proof.
   intros h Hmagic.
   unfold tlv_serialize_header.
   rewrite Hmagic.
-  unfold tlv_VAULT_MAGIC.
+  unfold tlv_VAULT_MAGIC, core_num_U64_to_be_bytes.
   repeat (erewrite (mk_array_index_nth _ _ _ _); [| reflexivity ]; monad_cbn).
   reflexivity.
 Qed.
 
 (** [SPEC]
     VaultHeader シリアライザーのシリアライズ関係充足補題 (構成的実在性 / Realizability)。
-    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header が出力する 6 バイト配列を
+    有効なマジックバイトを持つ VaultHeader h に対し、tlv_serialize_header が出力する 14 バイト配列を
     スライス化したバイト列は、前提 Record (tlv_is_serialized_header) の全契約を満たす。
     これにより、tlv_is_serialized_header が空虚な仮定ではなく、Rust シリアライザーによって
     構成的に充足されることが保証される。 *)
 Lemma tlv_serialize_header_is_serialized :
-  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
+  forall (h : tlv_VaultHeader_t) (serialized : array u8 14%usize),
     h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
     tlv_serialize_header h = Ok serialized ->
     tlv_is_serialized_header h (array_to_slice serialized).
@@ -582,12 +622,29 @@ Proof.
     ser_hdr_chain_b1 := 86%u8;
     ser_hdr_chain_b2 := 65%u8;
     ser_hdr_chain_b3 := 85%u8;
+    ser_hdr_chain_b6 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 / 256 / 256 / 256 / 256 / 256 / 256);
+    ser_hdr_chain_b7 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 / 256 / 256 / 256 / 256 / 256 mod 256);
+    ser_hdr_chain_b8 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 / 256 / 256 / 256 / 256 mod 256);
+    ser_hdr_chain_b9 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 / 256 / 256 / 256 mod 256);
+    ser_hdr_chain_b10 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 / 256 / 256 mod 256);
+    ser_hdr_chain_b11 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 / 256 mod 256);
+    ser_hdr_chain_b12 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) / 256 mod 256);
+    ser_hdr_chain_b13 := u8_of_Z (to_Z (tlv_VaultHeader_epoch_id h) mod 256);
     ser_hdr_chain_idx0 := _;
     ser_hdr_chain_idx1 := _;
     ser_hdr_chain_idx2 := _;
     ser_hdr_chain_idx3 := _;
     ser_hdr_chain_idx4 := _;
     ser_hdr_chain_idx5 := _;
+    ser_hdr_chain_idx6 := _;
+    ser_hdr_chain_idx7 := _;
+    ser_hdr_chain_idx8 := _;
+    ser_hdr_chain_idx9 := _;
+    ser_hdr_chain_idx10 := _;
+    ser_hdr_chain_idx11 := _;
+    ser_hdr_chain_idx12 := _;
+    ser_hdr_chain_idx13 := _;
+    ser_hdr_chain_reconstruct_epoch := _;
     ser_hdr_chain_reconstruct_magic := _;
     ser_hdr_chain_magic_idx0 := _;
     ser_hdr_chain_magic_idx1 := _;
@@ -598,17 +655,34 @@ Proof.
   - rewrite array_to_slice_len.
     apply scalar_ltb_irrefl.
   - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 0%usize 70%u8); reflexivity.
+    apply (mk_array_index_nth 14%usize _ 0%usize 70%u8); reflexivity.
   - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 1%usize 86%u8); reflexivity.
+    apply (mk_array_index_nth 14%usize _ 1%usize 86%u8); reflexivity.
   - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 2%usize 65%u8); reflexivity.
+    apply (mk_array_index_nth 14%usize _ 2%usize 65%u8); reflexivity.
   - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 3%usize 85%u8); reflexivity.
+    apply (mk_array_index_nth 14%usize _ 3%usize 85%u8); reflexivity.
   - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 4%usize (tlv_VaultHeader_version h)); reflexivity.
+    apply (mk_array_index_nth 14%usize _ 4%usize (tlv_VaultHeader_version h)); reflexivity.
   - rewrite array_to_slice_index.
-    apply (mk_array_index_nth 6%usize _ 5%usize (tlv_VaultHeader_suite_id h)); reflexivity.
+    apply (mk_array_index_nth 14%usize _ 5%usize (tlv_VaultHeader_suite_id h)); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 6%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 7%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 8%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 9%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 10%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 11%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 12%usize); reflexivity.
+  - rewrite array_to_slice_index.
+    apply (mk_array_index_nth 14%usize _ 13%usize); reflexivity.
+  - apply (core_num_U64_be_bytes_roundtrip (tlv_VaultHeader_epoch_id h)).
   - unfold tlv_VAULT_MAGIC. reflexivity.
   - unfold tlv_VAULT_MAGIC.
     apply (mk_array_index_nth 4%usize _ 0%usize 70%u8); reflexivity.
@@ -629,7 +703,7 @@ Qed.
     元の VaultHeader h と空の残余スライスが完全に復元される。
     (Rust シリアライズ関数とデシリアライズ関数の真の関数合成を直接検証する)。 *)
 Theorem tlv_header_roundtrip_sound :
-  forall (h : tlv_VaultHeader_t) (serialized : array u8 6%usize),
+  forall (h : tlv_VaultHeader_t) (serialized : array u8 14%usize),
     h.(tlv_VaultHeader_magic) = tlv_VAULT_MAGIC ->
     tlv_serialize_header h = Ok serialized ->
     tlv_deserialize_header (array_to_slice serialized) =
@@ -647,7 +721,6 @@ Qed.
 Lemma tlv_kek_slot_entry_eta : forall (slot : tlv_KekSlotEntry_t),
   {| tlv_KekSlotEntry_slot_id := slot.(tlv_KekSlotEntry_slot_id);
      tlv_KekSlotEntry_kdf_kind := slot.(tlv_KekSlotEntry_kdf_kind);
-     tlv_KekSlotEntry_wrapped_dek_len := slot.(tlv_KekSlotEntry_wrapped_dek_len);
      tlv_KekSlotEntry_wrapped_dek := slot.(tlv_KekSlotEntry_wrapped_dek) |} = slot.
 Proof.
   destruct slot.
@@ -677,11 +750,11 @@ mktlv_is_serialized_slot {
 
   ser_slot_reconstruct_len :
     core_num_U16_from_be_bytes (mk_array 2%usize [ser_slot_b2; ser_slot_b3]) =
-      slot.(tlv_KekSlotEntry_wrapped_dek_len);
+      tlv_KekSlotEntry_wrapped_dek_len slot;
 
   ser_slot_dek_len_usize : usize;
   ser_slot_cast_dek_len :
-    scalar_cast U16 Usize slot.(tlv_KekSlotEntry_wrapped_dek_len) =
+    scalar_cast U16 Usize (tlv_KekSlotEntry_wrapped_dek_len slot) =
       Ok ser_slot_dek_len_usize;
 
   ser_slot_payload_bytes : slice u8;
@@ -1252,9 +1325,10 @@ Qed.
 
 (** Z 整数から u8 へのモジュロ 256 全域変換関数。 *)
 Lemma Z_mod_256_in_u8_bounds : forall (x : Z),
-  scalar_min U8 <= x mod 256 <= scalar_max U8.
+  scalar_bounds U8 (x mod 256) = true.
 Proof.
   intros x.
+  apply scalar_bounds_iff.
   change (scalar_min U8) with 0.
   change (scalar_max U8) with 255.
   pose proof (Z.mod_pos_bound x 256).
@@ -1268,8 +1342,8 @@ Definition u8_of_Z (x : Z) : u8 :=
     スロット単体の純粋関数型直列化バイト列生成仕様。
     Rust 実装 serialize_slot_entry_into に厳密に対応する純粋関数モデル。 *)
 Definition tlv_serialize_slot_bytes (slot : tlv_KekSlotEntry_t) : list u8 :=
-  let b2 := u8_of_Z (Z.shiftr (to_Z slot.(tlv_KekSlotEntry_wrapped_dek_len)) 8) in
-  let b3 := u8_of_Z (to_Z slot.(tlv_KekSlotEntry_wrapped_dek_len)) in
+  let b2 := u8_of_Z (Z.shiftr (to_Z (tlv_KekSlotEntry_wrapped_dek_len slot)) 8) in
+  let b3 := u8_of_Z (to_Z (tlv_KekSlotEntry_wrapped_dek_len slot)) in
   [ slot.(tlv_KekSlotEntry_slot_id);
     slot.(tlv_KekSlotEntry_kdf_kind);
     b2;
@@ -1305,9 +1379,25 @@ Definition tlv_serialize_record_bytes (r : tlv_TlvRecord_t) : list u8 :=
     VaultHeader の純粋関数型直列化バイト列生成仕様。
     tlv_serialize_header の配列出力をリスト化したものと同一。 *)
 Definition tlv_serialize_header_bytes (h : tlv_VaultHeader_t) : list u8 :=
+  let z := to_Z h.(tlv_VaultHeader_epoch_id) in
+  let z6 := z / 256 in
+  let z5 := z6 / 256 in
+  let z4 := z5 / 256 in
+  let z3 := z4 / 256 in
+  let z2 := z3 / 256 in
+  let z1 := z2 / 256 in
+  let b0 := u8_of_Z (z1 / 256) in
+  let b1 := u8_of_Z (z1 mod 256) in
+  let b2 := u8_of_Z (z2 mod 256) in
+  let b3 := u8_of_Z (z3 mod 256) in
+  let b4 := u8_of_Z (z4 mod 256) in
+  let b5 := u8_of_Z (z5 mod 256) in
+  let b6 := u8_of_Z (z6 mod 256) in
+  let b7 := u8_of_Z (z mod 256) in
   [ 70%u8; 86%u8; 65%u8; 85%u8;
     h.(tlv_VaultHeader_version);
-    h.(tlv_VaultHeader_suite_id) ].
+    h.(tlv_VaultHeader_suite_id);
+    b0; b1; b2; b3; b4; b5; b6; b7 ].
 
 (** [MODEL]
     Vault 全体の純粋関数型直列化バイト列生成仕様。
@@ -1389,10 +1479,10 @@ Qed.
 
 (** [SPEC]
     補題 19: Vault 全体シリアライズ仕様モデルのヘッダー先頭一致補題。
-    シリアライズ結果バイト列の先頭 6 バイトは、VaultHeader のシリアライズバイト列と厳密に一致する。 *)
+    シリアライズ結果バイト列の先頭 14 バイトは、VaultHeader のシリアライズバイト列と厳密に一致する。 *)
 Lemma tlv_serialize_vault_bytes_header :
   forall (v : tlv_Vault_t),
-    firstn 6 (tlv_serialize_vault_bytes v) =
+    firstn 14 (tlv_serialize_vault_bytes v) =
       tlv_serialize_header_bytes v.(tlv_Vault_header).
 Proof.
   intros v.
